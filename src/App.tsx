@@ -1,3 +1,4 @@
+
 import { useState } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
@@ -12,7 +13,7 @@ import InstallBanner from "@/components/InstallBanner";
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import ResetPassword from "./pages/ResetPassword";
-import Machine from "./pages/Machine";
+import Boutique from "./pages/Boutique";
 import WalletPage from "./pages/WalletPage";
 import Historique from "./pages/Historique";
 import Compte from "./pages/Compte";
@@ -57,12 +58,12 @@ const AuthRoute = ({ children }: { children: React.ReactNode }) => {
 
 const AppContent = () => {
   const [showSplash, setShowSplash] = useState(() => {
-    const seen = sessionStorage.getItem("pi-splash-seen");
+    const seen = sessionStorage.getItem("betesim-splash-seen");
     return !seen;
   });
 
   const handleSplashComplete = () => {
-    sessionStorage.setItem("pi-splash-seen", "1");
+    sessionStorage.setItem("betesim-splash-seen", "1");
     setShowSplash(false);
   };
 
@@ -81,7 +82,7 @@ const AppContent = () => {
           <Route path="/auth/callback" element={<AuthCallback />} />
           <Route path="/reset-password" element={<ResetPassword />} />
           <Route path="/" element={<ProtectedRoute><Index /></ProtectedRoute>} />
-          <Route path="/machine" element={<ProtectedRoute><Machine /></ProtectedRoute>} />
+          <Route path="/boutique" element={<ProtectedRoute><Boutique /></ProtectedRoute>} />
           <Route path="/wallet" element={<ProtectedRoute><WalletPage /></ProtectedRoute>} />
           <Route path="/historique" element={<ProtectedRoute><Historique /></ProtectedRoute>} />
           <Route path="/compte" element={<ProtectedRoute><Compte /></ProtectedRoute>} />

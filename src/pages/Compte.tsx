@@ -1,5 +1,6 @@
+
 import { useState } from "react";
-import { User, Shield, HelpCircle, LogOut, ChevronRight, Users, Bell, Settings, Star, Pencil, Check, X, Trophy, Moon, Sun, Lock, Eye, EyeOff } from "lucide-react";
+import { User, Shield, HelpCircle, LogOut, ChevronRight, Users, Bell, Settings, Star, Pencil, Check, X, Trophy, Moon, Sun, Lock, Eye, EyeOff, Phone } from "lucide-react";
 import { toast } from "sonner";
 import { motion } from "framer-motion";
 import { Input } from "@/components/ui/input";
@@ -8,7 +9,6 @@ import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import BottomNav from "@/components/BottomNav";
-import LevelBadge from "@/components/LevelBadge";
 import ShareButtons from "@/components/ShareButtons";
 import { useProfile } from "@/hooks/useProfile";
 import { useAuth } from "@/hooks/useAuth";
@@ -33,6 +33,7 @@ const Compte = () => {
 
   const displayName = profile?.username ?? user?.email?.split("@")[0] ?? "Utilisateur";
   const displayInitial = displayName[0].toUpperCase();
+  const isPartner = !!(profile as any)?.is_partner;
 
   const { data: referralCount } = useQuery({
     queryKey: ["referral-count", user?.id],
@@ -50,6 +51,21 @@ const Compte = () => {
       if (!user) return [];
       const { data } = await supabase.from("referrals").select("id, created_at, activated, referred_id").eq("referrer_id", user.id).order("created_at", { ascending: false }).limit(10);
       return data ?? [];
+    },
+    enabled: !!user && isPartner,
+  });
+
+  const { data: purchasedCount } = useQuery({
+    queryKey: ["purchased-numbers-count", user?.id],
+    queryFn: async () => {
+      if (!user) return 0;
+      const { count } = await supabase
+        .from("transactions")
+        .select("*", { count: "exact", head: true })
+        .eq("user_id", user.id)
+        .eq("type", "number_purchase")
+        .eq("status", "validated");
+      return count ?? 0;
     },
     enabled: !!user,
   });
@@ -94,7 +110,7 @@ const Compte = () => {
     toast.success(newDark ? "Mode sombre activé" : "Mode clair activé");
   };
 
-  const productionUrl = "https://pi-reel.vercel.app";
+  const productionUrl = "https://betesim.vercel.app";
   const referralLink = `${productionUrl}/auth?ref=${profile?.referral_code ?? ""}`;
 
   const startEditing = () => {
@@ -113,7 +129,7 @@ const Compte = () => {
   };
 
   const menuSections = [
-    { title: "Général", items: [{ icon: Bell, label: "Notifications", desc: "Gérer vos alertes", path: "" }, { icon: Trophy, label: "Classement", desc: "Top mineurs & parrains", path: "/leaderboard" }] },
+    { title: "Général", items: [{ icon: Bell, label: "Notifications", desc: "Gérer vos alertes", path: "" }, { icon: Trophy, label: "Classement", desc: "Top partenaires & parrains", path: "/leaderboard" }] },
     { title: "Sécurité", items: [{ icon: Shield, label: "Sécurité", desc: "Mot de passe", path: "" }, { icon: Settings, label: "Préférences", desc: "Thème et paramètres", path: "" }] },
     { title: "Support", items: [{ icon: HelpCircle, label: "Centre d'aide", desc: "FAQ et assistance", path: "/faq" }, { icon: Star, label: "Évaluer l'app", desc: "Donnez-nous 5 étoiles", path: "" }] },
   ];
@@ -136,33 +152,70 @@ const Compte = () => {
             </button>
           )}
           <p className="text-sm text-muted-foreground">{profile?.email ?? user?.email}</p>
-          <div className="mt-2"><LevelBadge piBalance={profile?.pi_balance ?? 0} showProgress /></div>
+          {isPartner && (
+            <span className="mt-1 rounded-full bg-amber-500/20 px-3 py-0.5 text-xs font-bold text-amber-600">
+              Partenaire
+            </span>
+          )}
           <div className="mt-5 grid w-full grid-cols-3 gap-3 border-t border-border pt-5">
-            <div className="text-center"><p className="text-2xl font-bold text-foreground">{referralCount ?? 0}</p><p className="text-xs text-muted-foreground">Filleuls</p></div>
-            <div className="text-center border-x border-border"><p className="text-2xl font-bold text-foreground">{(profile?.pi_balance ?? 0).toLocaleString("fr-FR")}</p><p className="text-xs text-muted-foreground">π total</p></div>
-            <div className="text-center"><p className="text-2xl font-bold text-foreground">{(profile?.fcfa_balance ?? 0).toLocaleString("fr-FR")}</p><p className="text-xs text-muted-foreground">FCFA</p></div>
+            <div className="text-center">
+              <p className="text-2xl font-bold text-foreground">{purchasedCount ?? 0}</p>
+              <p className="text-xs text-muted-foreground">Numéros achetés</p>
+            </div>
+            <div className="text-center border-x border-border">
+              <p className="text-2xl font-bold text-foreground">{referralCount ?? 0}</p>
+              <p className="text-xs text-muted-foreground">Filleuls</p>
+            </div>
+            <div className="text-center">
+              <p className="text-2xl font-bold text-foreground">{(profile?.fcfa_balance ?? 0).toLocaleString("fr-FR")}</p>
+              <p className="text-xs text-muted-foreground">FCFA</p>
+            </div>
           </div>
         </motion.div>
 
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="rounded-2xl bg-card p-4 shadow-card space-y-3">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl gradient-gold"><Users className="h-5 w-5 text-primary-foreground" /></div>
-            <div><h3 className="font-semibold text-foreground">Mon lien de parrainage</h3><p className="text-xs text-muted-foreground">Parrainez et augmentez la vitesse de votre minage</p></div>
-          </div>
-          <ShareButtons referralLink={referralLink} />
-          {referrals && referrals.length > 0 && (
-            <div className="mt-3 space-y-2 border-t border-border pt-3">
-              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Mes filleuls</p>
-              {referrals.map((ref) => (
-                <div key={ref.id} className="flex items-center gap-3 rounded-xl bg-muted/50 p-3">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-lg gradient-accent"><User className="h-4 w-4 text-accent-foreground" /></div>
-                  <div className="flex-1"><p className="text-sm font-medium text-foreground">Filleul</p><p className="text-xs text-muted-foreground">{new Date(ref.created_at).toLocaleDateString("fr-FR")}</p></div>
-                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${ref.activated ? "bg-accent/10 text-accent" : "bg-warning/10 text-warning"}`}>{ref.activated ? "Actif" : "En attente"}</span>
-                </div>
-              ))}
+        {isPartner ? (
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="rounded-2xl bg-card p-4 shadow-card space-y-3">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl gradient-gold"><Users className="h-5 w-5 text-primary-foreground" /></div>
+              <div>
+                <h3 className="font-semibold text-foreground">Mon lien de parrainage</h3>
+                <p className="text-xs text-muted-foreground">Gagnez des commissions sur chaque achat de vos filleuls</p>
+              </div>
             </div>
-          )}
-        </motion.div>
+            <ShareButtons referralLink={referralLink} />
+            {referrals && referrals.length > 0 && (
+              <div className="mt-3 space-y-2 border-t border-border pt-3">
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Mes filleuls</p>
+                {referrals.map((ref) => (
+                  <div key={ref.id} className="flex items-center gap-3 rounded-xl bg-muted/50 p-3">
+                    <div className="flex h-8 w-8 items-center justify-center rounded-lg gradient-accent"><User className="h-4 w-4 text-accent-foreground" /></div>
+                    <div className="flex-1">
+                      <p className="text-sm font-medium text-foreground">Filleul</p>
+                      <p className="text-xs text-muted-foreground">{new Date(ref.created_at).toLocaleDateString("fr-FR")}</p>
+                    </div>
+                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${ref.activated ? "bg-accent/10 text-accent" : "bg-warning/10 text-warning"}`}>{ref.activated ? "Actif" : "En attente"}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </motion.div>
+        ) : (
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
+            <button
+              onClick={() => navigate("/boutique")}
+              className="flex w-full items-center gap-4 rounded-2xl border border-amber-400/30 bg-amber-500/10 p-4 transition-colors hover:bg-amber-500/15"
+            >
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-500">
+                <Users className="h-5 w-5 text-white" />
+              </div>
+              <div className="text-left flex-1">
+                <p className="font-semibold text-foreground">Débloquer le parrainage</p>
+                <p className="text-xs text-amber-600">Passez au Pack Partenaire (2 500 FCFA) pour activer votre lien</p>
+              </div>
+              <ChevronRight className="h-4 w-4 text-amber-500" />
+            </button>
+          </motion.div>
+        )}
 
         {menuSections.map((section, sIdx) => (
           <motion.div key={section.title} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 + sIdx * 0.05 }}>
@@ -182,7 +235,7 @@ const Compte = () => {
         <motion.button whileTap={{ scale: 0.98 }} onClick={signOut} className="flex w-full items-center justify-center gap-2 rounded-2xl border border-destructive/20 bg-destructive/5 p-4 text-destructive font-semibold transition-colors hover:bg-destructive/10">
           <LogOut className="h-5 w-5" />Déconnexion
         </motion.button>
-        <p className="text-center text-xs text-muted-foreground pb-4">PI REAL v2.0.0 · Made with ❤️</p>
+        <p className="text-center text-xs text-muted-foreground pb-4">Betesim v1.0.0 · Numéros virtuels SIM</p>
       </div>
       <BottomNav />
 
@@ -223,20 +276,20 @@ const Compte = () => {
               <Switch checked={darkMode} onCheckedChange={toggleTheme} />
             </div>
             <div className="rounded-xl bg-muted/50 p-4"><p className="font-medium text-foreground">Langue</p><p className="text-xs text-muted-foreground">Français (par défaut)</p></div>
-            <div className="rounded-xl bg-muted/50 p-4"><p className="font-medium text-foreground">Version</p><p className="text-xs text-muted-foreground">PI REAL v2.0.0</p></div>
+            <div className="rounded-xl bg-muted/50 p-4"><p className="font-medium text-foreground">Version</p><p className="text-xs text-muted-foreground">Betesim v1.0.0</p></div>
           </div>
         </DialogContent>
       </Dialog>
 
       <Dialog open={showRate} onOpenChange={setShowRate}>
         <DialogContent className="max-w-md rounded-2xl">
-          <DialogHeader><DialogTitle className="flex items-center gap-2"><Star className="h-5 w-5 text-primary" />Évaluer PI REAL</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle className="flex items-center gap-2"><Star className="h-5 w-5 text-primary" />Évaluer Betesim</DialogTitle></DialogHeader>
           <div className="space-y-4 text-center">
-            <p className="text-sm text-muted-foreground">Aimez-vous PI REAL ? Partagez votre expérience !</p>
+            <p className="text-sm text-muted-foreground">Aimez-vous Betesim ? Partagez votre expérience !</p>
             <div className="flex justify-center gap-2">
               {[1,2,3,4,5].map((star) => (<button key={star} onClick={() => { toast.success("Merci ! ⭐"); setShowRate(false); }} className="text-3xl transition-transform hover:scale-125">⭐</button>))}
             </div>
-            <ShareButtons referralLink={referralLink} />
+            {isPartner && <ShareButtons referralLink={referralLink} />}
           </div>
         </DialogContent>
       </Dialog>

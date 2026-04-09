@@ -1,5 +1,6 @@
+
 import { useState } from "react";
-import { Download, ArrowUpRight, Users, RefreshCw, Zap, FileText } from "lucide-react";
+import { Download, ArrowUpRight, Users, RefreshCw, Phone, FileText } from "lucide-react";
 import BottomNav from "@/components/BottomNav";
 import { useAuth } from "@/hooks/useAuth";
 import { useQuery } from "@tanstack/react-query";
@@ -8,14 +9,15 @@ import { format } from "date-fns";
 import { fr } from "date-fns/locale";
 import { motion, AnimatePresence } from "framer-motion";
 
-const filters = ["Tout", "Minage", "Parrainage", "Conversion", "Retrait"] as const;
+const filters = ["Tout", "Achat numéro", "Parrainage", "Retrait"] as const;
 
 const typeConfig: Record<string, { icon: typeof Download; color: string; label: string }> = {
   deposit: { icon: Download, color: "gradient-primary", label: "Dépôt" },
   withdrawal: { icon: ArrowUpRight, color: "gradient-accent", label: "Retrait" },
   conversion: { icon: RefreshCw, color: "gradient-primary", label: "Conversion" },
-  referral_bonus: { icon: Users, color: "gradient-gold", label: "Bonus parrainage" },
-  mining: { icon: Zap, color: "gradient-primary", label: "Minage" },
+  referral_bonus: { icon: Users, color: "gradient-gold", label: "Commission parrainage" },
+  number_purchase: { icon: Phone, color: "gradient-primary", label: "Achat numéro" },
+  partner_activation: { icon: Users, color: "gradient-gold", label: "Pack Partenaire" },
 };
 
 const statusConfig: Record<string, { bg: string; label: string }> = {
@@ -38,9 +40,8 @@ const Historique = () => {
         .eq("user_id", user.id)
         .order("created_at", { ascending: false });
 
-      if (filter === "Minage") query = query.eq("type", "mining");
+      if (filter === "Achat numéro") query = query.in("type", ["number_purchase", "partner_activation"]);
       else if (filter === "Parrainage") query = query.eq("type", "referral_bonus");
-      else if (filter === "Conversion") query = query.eq("type", "conversion");
       else if (filter === "Retrait") query = query.eq("type", "withdrawal");
 
       const { data } = await query;
@@ -57,7 +58,6 @@ const Historique = () => {
           <p className="text-sm text-muted-foreground">Toutes vos transactions</p>
         </motion.div>
 
-        {/* Filters */}
         <div className="mt-4 flex gap-2 overflow-x-auto pb-4 scrollbar-hide">
           {filters.map((f) => (
             <button
@@ -74,7 +74,6 @@ const Historique = () => {
           ))}
         </div>
 
-        {/* Transactions */}
         <div className="space-y-2.5">
           {isLoading && (
             <div className="space-y-2.5">
@@ -104,6 +103,7 @@ const Historique = () => {
               const status = statusConfig[tx.status] ?? statusConfig.pending;
               const Icon = config.icon;
               const isPositive = tx.type !== "withdrawal";
+              const numberInfo = (tx as any).virtual_number;
 
               return (
                 <motion.div
@@ -118,7 +118,11 @@ const Historique = () => {
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="font-semibold text-foreground">{config.label}</p>
-                    <p className="text-xs text-muted-foreground truncate">{tx.description}</p>
+                    {numberInfo ? (
+                      <p className="text-xs font-mono text-accent truncate">{numberInfo}</p>
+                    ) : (
+                      <p className="text-xs text-muted-foreground truncate">{tx.description}</p>
+                    )}
                     <p className="text-xs text-muted-foreground">
                       {format(new Date(tx.created_at), "d MMM yyyy, HH:mm", { locale: fr })}
                     </p>

@@ -1,10 +1,11 @@
-import { Home, Cpu, Wallet, Clock, User } from "lucide-react";
+
+import { Home, ShoppingBag, Wallet, Clock, User } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 
 const tabs = [
   { path: "/", label: "Accueil", icon: Home },
-  { path: "/machine", label: "Machine", icon: Cpu },
+  { path: "/boutique", label: "Boutique", icon: ShoppingBag },
   { path: "/wallet", label: "Wallet", icon: Wallet },
   { path: "/historique", label: "Historique", icon: Clock },
   { path: "/compte", label: "Compte", icon: User },
