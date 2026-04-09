@@ -1,3 +1,4 @@
+
 import { useState, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
@@ -14,43 +15,17 @@ export default function LoginPage() {
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
   const [loading, setLoading] = useState(false);
-  const [googleLoading, setGoogleLoading] = useState(false);
 
-  // Sauvegarder le code de parrainage puis nettoyer l'URL immédiatement
-  // pour qu'il ne soit jamais visible par le nouvel utilisateur
   useEffect(() => {
     const refCode = new URLSearchParams(location.search).get("ref");
     if (refCode) {
       localStorage.setItem("pending_referral", refCode);
-      // Remplacer l'URL sans le paramètre ?ref= dans l'historique du navigateur
       window.history.replaceState({}, "", location.pathname);
     }
   }, [location.search, location.pathname]);
 
   function reset() {
     setName(""); setEmail(""); setPassword(""); setError(""); setInfo("");
-  }
-
-  async function handleGoogleLogin() {
-    setGoogleLoading(true);
-    setError("");
-
-    // S'assurer que le code de parrainage est bien sauvegardé avant la redirection Google
-    const refCode = localStorage.getItem("pending_referral");
-    if (refCode) {
-      localStorage.setItem("pending_referral", refCode);
-    }
-
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
-      },
-    });
-    if (error) {
-      setError(error.message);
-      setGoogleLoading(false);
-    }
   }
 
   async function handleRegister(e: React.FormEvent) {
@@ -130,36 +105,8 @@ export default function LoginPage() {
             {screen === "login" ? "Connexion" : "Créer un compte"}
           </h1>
           <p className="text-gray-500 text-sm mt-1">
-            {screen === "login" ? "Accédez à votre compte" : "Rejoignez l'application"}
+            {screen === "login" ? "Accédez à votre compte" : "Rejoignez Betesim"}
           </p>
-        </div>
-
-        {/* Bouton Google */}
-        <button
-          onClick={handleGoogleLogin}
-          disabled={googleLoading || loading}
-          className="w-full flex items-center justify-center gap-3 border border-gray-200 rounded-xl py-3 px-4 text-gray-700 font-medium hover:bg-gray-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed mb-5"
-        >
-          {googleLoading ? (
-            <div className="h-5 w-5 animate-spin rounded-full border-2 border-gray-400 border-t-transparent" />
-          ) : (
-            <svg className="w-5 h-5" viewBox="0 0 48 48">
-              <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
-              <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
-              <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
-              <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
-            </svg>
-          )}
-          {googleLoading ? "Redirection..." : "Continuer avec Google"}
-        </button>
-
-        <div className="relative mb-5">
-          <div className="absolute inset-0 flex items-center">
-            <div className="w-full border-t border-gray-200"></div>
-          </div>
-          <div className="relative flex justify-center text-xs">
-            <span className="bg-white px-3 text-gray-400">ou avec votre email</span>
-          </div>
         </div>
 
         <form onSubmit={screen === "login" ? handleLogin : handleRegister} className="space-y-4">
@@ -211,7 +158,7 @@ export default function LoginPage() {
 
           <button
             type="submit"
-            disabled={loading || googleLoading}
+            disabled={loading}
             className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-xl py-3 text-sm transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
           >
             {loading ? "Chargement..." : screen === "login" ? "Se connecter" : "Créer mon compte"}
