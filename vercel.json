@@ -10,10 +10,10 @@
   ],
   "build": {
     "env": {
-      "VITE_SUPABASE_URL": "https://ombtvoxwmwarzbflxpqh.supabase.co",
-      "VITE_SUPABASE_PUBLISHABLE_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9tYnR2b3h3bXdhcnpiZmx4cHFoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE3ODMxNDAsImV4cCI6MjA4NzM1OTE0MH0.0wldBK6iJkh-vXIuJNZDTFubSpa9noKoTDngIj3jZt8",
-      "VITE_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9tYnR2b3h3bXdhcnpiZmx4cHFoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE3ODMxNDAsImV4cCI6MjA4NzM1OTE0MH0.0wldBK6iJkh-vXIuJNZDTFubSpa9noKoTDngIj3jZt8",
-      "VITE_SUPABASE_PROJECT_ID": "ombtvoxwmwarzbflxpqh"
+      "VITE_SUPABASE_URL": "https://mqwrhiffrtbkizyuiytt.supabase.co",
+      "VITE_SUPABASE_PUBLISHABLE_KEY": "sb_publishable_-ZeINwd33LtlsZSEEy-ubQ_YyVoT9fj",
+      "VITE_SUPABASE_ANON_KEY": "sb_publishable_-ZeINwd33LtlsZSEEy-ubQ_YyVoT9fj",
+      "VITE_SUPABASE_PROJECT_ID": "mqwrhiffrtbkizyuiytt"
     }
   }
 }
