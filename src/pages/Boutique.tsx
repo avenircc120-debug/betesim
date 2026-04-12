@@ -72,8 +72,14 @@ const PRODUCTS = {
     id: "partner" as Product,
     name: "Pack Partenaire",
     price: 2500,
-    description: "1 numéro virtuel + système de parrainage activé",
-    features: ["1 numéro virtuel inclus", "Livraison instantanée", "Lien de parrainage débloqué", "Commissions sur vos filleuls", "Statut Partenaire officiel"],
+    description: "1 numéro virtuel (n'importe quel service) + parrainage activé",
+    features: [
+      "1 numéro virtuel pour n'importe quel service",
+      "Livraison instantanée après paiement",
+      "Lien de parrainage personnel débloqué",
+      "10% de commission sur chaque achat de vos filleuls",
+      "Statut Partenaire officiel betesim",
+    ],
     gradientClass: "from-amber-500 to-orange-600",
     includesPartner: true,
   },
@@ -214,6 +220,26 @@ const Boutique = () => {
                   </motion.button>
                 ))}
               </div>
+
+              {/* PARTNER BENEFITS BANNER */}
+              {selectedProduct === "partner" && (
+                <motion.div
+                  initial={{ opacity: 0, y: -8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="grid grid-cols-2 gap-3"
+                >
+                  <div className="rounded-2xl bg-gradient-to-br from-amber-500/10 to-orange-500/10 border border-amber-400/30 p-3 flex flex-col items-center gap-1.5 text-center">
+                    <span className="text-2xl">📱</span>
+                    <p className="text-xs font-bold text-amber-700">Numéro virtuel</p>
+                    <p className="text-[10px] text-amber-600">Pour n'importe quel service</p>
+                  </div>
+                  <div className="rounded-2xl bg-gradient-to-br from-amber-500/10 to-orange-500/10 border border-amber-400/30 p-3 flex flex-col items-center gap-1.5 text-center">
+                    <span className="text-2xl">🔗</span>
+                    <p className="text-xs font-bold text-amber-700">Parrainage activé</p>
+                    <p className="text-[10px] text-amber-600">10% de commission filleuls</p>
+                  </div>
+                </motion.div>
+              )}
 
               {/* SERVICE SELECTOR */}
               <div className="space-y-3">

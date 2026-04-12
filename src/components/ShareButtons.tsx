@@ -8,7 +8,7 @@ interface ShareButtonsProps {
 
 const ShareButtons = ({ referralLink }: ShareButtonsProps) => {
   const message = encodeURIComponent(
-    `🚀 Rejoins PI REAL et gagne des π gratuitement !\n\nInscris-toi avec mon lien et reçois un bonus :\n${referralLink}`
+    `🔐 Rejoins betesim et obtiens des numéros virtuels pour WhatsApp, TikTok, Instagram et plus !\n\nInscris-toi avec mon lien partenaire :\n${referralLink}`
   );
 
   const copyLink = () => {
@@ -30,7 +30,7 @@ const ShareButtons = ({ referralLink }: ShareButtonsProps) => {
       </motion.a>
       <motion.a
         whileTap={{ scale: 0.9 }}
-        href={`https://t.me/share/url?url=${encodeURIComponent(referralLink)}&text=${encodeURIComponent("🚀 Rejoins PI REAL et gagne des π gratuitement !")}`}
+        href={`https://t.me/share/url?url=${encodeURIComponent(referralLink)}&text=${encodeURIComponent("🔐 Rejoins betesim — numéros virtuels pour tous vos services !")}`}
         target="_blank"
         rel="noopener noreferrer"
         className="flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-primary text-primary-foreground font-semibold text-sm"
