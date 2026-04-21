@@ -5,6 +5,7 @@ export type FedaPayMode = "sandbox" | "live";
 export interface FedaPayConfig {
   mode: FedaPayMode;
   secretKey: string;
+  publicKey: string;
   webhookSecret: string;
   apiBase: string;
 }
@@ -17,6 +18,11 @@ export function getFedaPayConfig(): FedaPayConfig {
     mode === "live"
       ? (process.env.FEDAPAY_SECRET_KEY_LIVE ?? process.env.FEDAPAY_SECRET_KEY ?? "")
       : (process.env.FEDAPAY_SECRET_KEY_SANDBOX ?? process.env.FEDAPAY_SECRET_KEY ?? "");
+
+  const publicKey =
+    mode === "live"
+      ? (process.env.FEDAPAY_PUBLIC_KEY_LIVE ?? "")
+      : (process.env.FEDAPAY_PUBLIC_KEY_SANDBOX ?? "");
 
   const webhookSecret =
     mode === "live"
@@ -31,9 +37,12 @@ export function getFedaPayConfig(): FedaPayConfig {
   if (!secretKey) {
     logger.warn({ mode }, "FedaPay secret key not set for mode");
   }
+  if (!publicKey) {
+    logger.warn({ mode }, "FedaPay public key not set for mode");
+  }
   if (!webhookSecret) {
     logger.warn({ mode }, "FedaPay webhook secret not set for mode");
   }
 
-  return { mode, secretKey, webhookSecret, apiBase };
+  return { mode, secretKey, publicKey, webhookSecret, apiBase };
 }
