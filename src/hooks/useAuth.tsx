@@ -1,8 +1,28 @@
 import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from "react";
 import { auth, onAuthStateChanged, signOutUser, type User } from "@/lib/firebase";
 
+export type NormalizedUser = {
+  uid: string;
+  id: string;
+  email: string | null;
+  displayName: string | null;
+  photoURL: string | null;
+  phoneNumber: string | null;
+};
+
+function normalizeUser(firebaseUser: User): NormalizedUser {
+  return {
+    uid: firebaseUser.uid,
+    id: firebaseUser.uid,
+    email: firebaseUser.email,
+    displayName: firebaseUser.displayName,
+    photoURL: firebaseUser.photoURL,
+    phoneNumber: firebaseUser.phoneNumber,
+  };
+}
+
 interface AuthContextType {
-  user: User | null;
+  user: NormalizedUser | null;
   loading: boolean;
   signOut: () => Promise<void>;
   showAuthModal: (message?: string) => void;
@@ -23,12 +43,12 @@ interface AuthProviderProps {
 }
 
 export const AuthProvider = ({ children, onShowModal }: AuthProviderProps) => {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<NormalizedUser | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (firebaseUser) => {
-      setUser(firebaseUser);
+      setUser(firebaseUser ? normalizeUser(firebaseUser) : null);
       setLoading(false);
     });
     return () => unsub();

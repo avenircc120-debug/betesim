@@ -16,7 +16,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 
 const Compte = () => {
-  const { user, signOut } = useAuth();
+  const { user, signOut, showAuthModal } = useAuth();
   const { data: profile } = useProfile();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -88,18 +88,11 @@ const Compte = () => {
 
   const changePasswordMutation = useMutation({
     mutationFn: async () => {
-      if (newPassword.length < 6) throw new Error("Le mot de passe doit contenir au moins 6 caractères");
-      if (newPassword !== confirmPassword) throw new Error("Les mots de passe ne correspondent pas");
-      const { error } = await supabase.auth.updateUser({ password: newPassword });
-      if (error) throw error;
+      toast.info("Votre sécurité est gérée par Google ou SMS. Aucun mot de passe requis.");
     },
     onSuccess: () => {
-      toast.success("Mot de passe mis à jour !");
       setShowSecurity(false);
-      setNewPassword("");
-      setConfirmPassword("");
     },
-    onError: (e) => toast.error(e.message),
   });
 
   const toggleTheme = () => {
@@ -111,7 +104,33 @@ const Compte = () => {
   };
 
   const productionUrl = "https://betesim.vercel.app";
-  const referralLink = `${productionUrl}/auth?ref=${profile?.referral_code ?? ""}`;
+  const referralLink = `${productionUrl}?ref=${profile?.referral_code ?? ""}`;
+
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-background pb-24">
+        <div className="mx-auto max-w-lg flex flex-col items-center justify-center min-h-[80vh] px-6 space-y-6">
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col items-center space-y-5 text-center">
+            <div className="flex h-24 w-24 items-center justify-center rounded-3xl gradient-hero shadow-glow">
+              <User className="h-12 w-12 text-primary-foreground" />
+            </div>
+            <div>
+              <h2 className="text-2xl font-bold text-foreground">Mon compte</h2>
+              <p className="mt-2 text-sm text-muted-foreground">Connectez-vous pour accéder à votre profil, vos filleuls et vos statistiques.</p>
+            </div>
+            <Button
+              onClick={() => showAuthModal("Connectez-vous pour accéder à votre compte")}
+              className="h-14 w-full max-w-xs rounded-2xl gradient-primary text-primary-foreground font-semibold shadow-glow text-base"
+            >
+              Se connecter
+            </Button>
+            <p className="text-xs text-muted-foreground">Google ou SMS · Rapide et sécurisé</p>
+          </motion.div>
+        </div>
+        <BottomNav />
+      </div>
+    );
+  }
 
   const startEditing = () => {
     setNewUsername(profile?.username ?? "");
