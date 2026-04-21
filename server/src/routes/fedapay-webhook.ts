@@ -1,9 +1,8 @@
 import { Router, type Request, type Response } from "express";
 import crypto from "crypto";
 import { supabase } from "../lib/supabase.js";
-import { getFedaPayConfig } from "../lib/fedapay-config.js";
-import { deliverValidNumber } from "../lib/number-delivery-engine.js";
 import { logger } from "../lib/logger.js";
+import { deliverValidNumber } from "../lib/number-delivery-engine.js";
 
 const router = Router();
 
@@ -14,15 +13,60 @@ const SECURITY_TIPS = [
   "Le numéro est valide 30 jours — renouvelez avant expiration pour le conserver.",
 ];
 
-function verifyFedaPaySignature(rawBody: Buffer, signature: string, secret: string): boolean {
-  if (!secret || !signature) return false;
-  const expected = crypto.createHmac("sha256", secret).update(rawBody).digest("hex");
-  try {
-    return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature));
-  } catch {
-    return false;
-  }
+// ─── Dual-mode config ────────────────────────────────────────────────────────
+// Les deux modes (sandbox ET live) fonctionnent en même temps.
+// Le webhook vérifie la signature avec les deux secrets et détecte le mode automatiquement.
+
+function getSandboxSecret(): string {
+  return (
+    process.env.FEDAPAY_WEBHOOK_SECRET_SANDBOX ??
+    process.env.FEDAPAY_WEBHOOK_SECRET ??
+    ""
+  );
 }
+
+function getLiveSecret(): string {
+  return process.env.FEDAPAY_WEBHOOK_SECRET_LIVE ?? "";
+}
+
+function hmac(rawBody: Buffer, secret: string): string {
+  return crypto.createHmac("sha256", secret).update(rawBody).digest("hex");
+}
+
+/**
+ * Vérifie la signature et retourne le mode détecté ("sandbox" | "live" | null).
+ * Teste d'abord sandbox, puis live — les deux modes coexistent.
+ */
+function detectModeFromSignature(
+  rawBody: Buffer,
+  signature: string
+): "sandbox" | "live" | null {
+  if (!signature) return null;
+
+  const sandboxSecret = getSandboxSecret();
+  if (sandboxSecret) {
+    try {
+      const expected = hmac(rawBody, sandboxSecret);
+      if (crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature))) {
+        return "sandbox";
+      }
+    } catch {}
+  }
+
+  const liveSecret = getLiveSecret();
+  if (liveSecret) {
+    try {
+      const expected = hmac(rawBody, liveSecret);
+      if (crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature))) {
+        return "live";
+      }
+    } catch {}
+  }
+
+  return null;
+}
+
+// ─── Handlers ────────────────────────────────────────────────────────────────
 
 async function handleNumberPurchase(
   fedapayTransactionId: string,
@@ -30,9 +74,9 @@ async function handleNumberPurchase(
   service: string,
   country: string,
   productType: "simple" | "partner",
-  amount: number
+  amount: number,
+  mode: "sandbox" | "live"
 ) {
-  // Idempotency check
   const { data: existing } = await supabase
     .from("subscriptions")
     .select("id")
@@ -40,17 +84,15 @@ async function handleNumberPurchase(
     .maybeSingle();
 
   if (existing) {
-    logger.info({ fedapayTransactionId }, "Transaction already processed — skipping");
+    logger.info({ fedapayTransactionId, mode }, "Transaction already processed — skipping");
     return { skipped: true };
   }
 
-  // Deliver via auto-replacement engine (SMSPool Non-VoIP)
-  const delivery = await deliverValidNumber(country || "any", service);
+  const delivery = await deliverValidNumber(country || "0", service);
 
   const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
   const isPartner = productType === "partner";
 
-  // Save subscription (Pilier 4)
   await supabase.from("subscriptions").insert({
     user_id: userId,
     number: delivery.number,
@@ -63,13 +105,12 @@ async function handleNumberPurchase(
     attempts: delivery.attempts,
   });
 
-  // Record purchase transaction
   await supabase.from("transactions").insert({
     user_id: userId,
     type: "number_purchase",
     status: "validated",
     amount_fcfa: amount,
-    description: `Numéro ${service} (${delivery.country}) — ${delivery.number}`,
+    description: `[${mode.toUpperCase()}] Numéro ${service} (${delivery.country}) — ${delivery.number}`,
     virtual_number: delivery.number,
     fedapay_transaction_id: fedapayTransactionId,
   });
@@ -85,7 +126,6 @@ async function handleNumberPurchase(
     });
   }
 
-  // Referral commission
   const { data: referral } = await supabase
     .from("referrals")
     .select("referrer_id, activated")
@@ -120,7 +160,6 @@ async function handleNumberPurchase(
     }
   }
 
-  // Notification avec consignes de sécurité (Pilier 5)
   await supabase.from("notifications").insert({
     user_id: userId,
     title: "Numéro livré avec succès !",
@@ -128,11 +167,18 @@ async function handleNumberPurchase(
     type: "payment_success",
   });
 
-  logger.info({ userId, service, number: delivery.number, attempts: delivery.attempts }, "Number delivered via SMSPool");
+  logger.info(
+    { userId, service, number: delivery.number, attempts: delivery.attempts, mode },
+    "Number delivered via SMSPool"
+  );
   return { delivered: delivery.number, attempts: delivery.attempts, expiresAt };
 }
 
-async function handleWithdrawalApproved(fedapayTransactionId: string, userId: string) {
+async function handleWithdrawalApproved(
+  fedapayTransactionId: string,
+  userId: string,
+  mode: "sandbox" | "live"
+) {
   await supabase
     .from("withdrawal_requests")
     .update({ status: "completed" })
@@ -145,10 +191,14 @@ async function handleWithdrawalApproved(fedapayTransactionId: string, userId: st
     type: "withdrawal_success",
   });
 
-  logger.info({ userId, fedapayTransactionId }, "Withdrawal completed");
+  logger.info({ userId, fedapayTransactionId, mode }, "Withdrawal completed");
 }
 
-async function handleTransactionDeclined(fedapayTransactionId: string, userId: string | undefined) {
+async function handleTransactionDeclined(
+  fedapayTransactionId: string,
+  userId: string | undefined,
+  mode: "sandbox" | "live"
+) {
   if (!userId) return;
   await supabase.from("notifications").insert({
     user_id: userId,
@@ -156,16 +206,23 @@ async function handleTransactionDeclined(fedapayTransactionId: string, userId: s
     message: "Votre paiement FedaPay a été refusé. Veuillez réessayer.",
     type: "payment_failed",
   });
-  logger.warn({ userId, fedapayTransactionId }, "Transaction declined");
+  logger.warn({ userId, fedapayTransactionId, mode }, "Transaction declined");
 }
+
+// ─── Route ───────────────────────────────────────────────────────────────────
 
 router.post("/webhook/fedapay", async (req: Request, res: Response) => {
   const rawBody: Buffer = (req as any).rawBody;
   const signature = (req.headers["x-fedapay-signature"] as string) ?? "";
-  const config = getFedaPayConfig();
 
-  if (!verifyFedaPaySignature(rawBody, signature, config.webhookSecret)) {
-    logger.warn({ mode: config.mode }, "Invalid FedaPay webhook signature");
+  // Détection automatique du mode (sandbox ou live) via la signature
+  const mode = detectModeFromSignature(rawBody, signature);
+
+  if (!mode) {
+    logger.warn(
+      { hasSandboxSecret: !!getSandboxSecret(), hasLiveSecret: !!getLiveSecret() },
+      "Invalid FedaPay webhook signature — rejected"
+    );
     res.status(401).json({ error: "Invalid signature" });
     return;
   }
@@ -185,29 +242,45 @@ router.post("/webhook/fedapay", async (req: Request, res: Response) => {
   const userId: string | undefined = metadata?.user_id;
   const paymentType: string = metadata?.payment_type ?? "";
   const service: string = metadata?.service ?? "whatsapp";
-  const country: string = metadata?.country ?? "any";
-  const productType: "simple" | "partner" = metadata?.product_type === "partner" ? "partner" : "simple";
+  const country: string = metadata?.country ?? "0";
+  const productType: "simple" | "partner" =
+    metadata?.product_type === "partner" ? "partner" : "simple";
   const amount: number = Number(transaction?.amount ?? 0);
 
-  req.log.info({ event, fedapayTransactionId, paymentType, mode: config.mode }, "FedaPay webhook received");
+  logger.info(
+    { event, fedapayTransactionId, paymentType, mode, userId },
+    `FedaPay webhook [${mode.toUpperCase()}] received`
+  );
 
-  // Acknowledge immediately — processing in background
-  res.status(200).json({ received: true });
+  // Réponse immédiate pour éviter le timeout FedaPay
+  res.status(200).json({ received: true, mode });
 
-  // Process asynchronously to avoid FedaPay timeout
+  // Traitement asynchrone
   (async () => {
     try {
       if (event === "transaction.approved") {
         if (paymentType === "number_purchase" && userId) {
-          await handleNumberPurchase(fedapayTransactionId, userId, service, country, productType, amount);
+          await handleNumberPurchase(
+            fedapayTransactionId, userId, service, country, productType, amount, mode
+          );
         } else if (paymentType === "withdrawal" && userId) {
-          await handleWithdrawalApproved(fedapayTransactionId, userId);
+          await handleWithdrawalApproved(fedapayTransactionId, userId, mode);
+        } else {
+          logger.warn({ paymentType, userId, mode }, "Unhandled payment type or missing userId");
         }
-      } else if (event === "transaction.declined" || event === "transaction.canceled") {
-        await handleTransactionDeclined(fedapayTransactionId, userId);
+      } else if (
+        event === "transaction.declined" ||
+        event === "transaction.canceled"
+      ) {
+        await handleTransactionDeclined(fedapayTransactionId, userId, mode);
+      } else {
+        logger.info({ event, mode }, "Unhandled webhook event — ignored");
       }
     } catch (err: any) {
-      logger.error({ err: err?.message, event, fedapayTransactionId }, "Webhook async processing error");
+      logger.error(
+        { err: err?.message, event, fedapayTransactionId, mode },
+        "Webhook async processing error"
+      );
     }
   })();
 });
