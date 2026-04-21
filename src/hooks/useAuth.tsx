@@ -1,63 +1,57 @@
-import { createContext, useContext, useEffect, useState, ReactNode } from "react";
-import { Session, User } from "@supabase/supabase-js";
-import { supabase } from "@/integrations/supabase/client";
+import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from "react";
+import { auth, onAuthStateChanged, signOutUser, type User } from "@/lib/firebase";
 
 interface AuthContextType {
-  session: Session | null;
   user: User | null;
   loading: boolean;
   signOut: () => Promise<void>;
+  showAuthModal: (message?: string) => void;
+  requireAuth: (action: () => void) => void;
 }
 
 const AuthContext = createContext<AuthContextType>({
-  session: null,
   user: null,
   loading: true,
   signOut: async () => {},
+  showAuthModal: () => {},
+  requireAuth: () => {},
 });
 
-export const AuthProvider = ({ children }: { children: ReactNode }) => {
-  const [session, setSession] = useState<Session | null>(null);
+interface AuthProviderProps {
+  children: ReactNode;
+  onShowModal: (message?: string) => void;
+}
+
+export const AuthProvider = ({ children, onShowModal }: AuthProviderProps) => {
+  const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // onAuthStateChange fires INITIAL_SESSION on mount (handles PKCE exchange too)
-    // Do NOT call getSession() separately — it can race against the PKCE code exchange
-    // and return null before the token is ready, causing a false redirect to /auth.
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      setSession(session);
+    const unsub = onAuthStateChanged(auth, (firebaseUser) => {
+      setUser(firebaseUser);
       setLoading(false);
-
-      // Handle referral code for OAuth sign-ups (from URL or localStorage)
-      if (_event === "SIGNED_IN" && session?.user) {
-        const refCode = new URLSearchParams(window.location.search).get("ref")
-          || localStorage.getItem("pending_referral");
-        if (refCode) {
-          localStorage.removeItem("pending_referral");
-          const existingRef = session.user.user_metadata?.referral_code;
-          if (!existingRef) {
-            await supabase.auth.updateUser({
-              data: { referral_code: refCode },
-            });
-            // Process referral for OAuth signups (trigger missed the code)
-            await supabase.rpc("process_late_referral", {
-              p_user_id: session.user.id,
-              p_referral_code: refCode,
-            });
-          }
-        }
-      }
     });
-
-    return () => subscription.unsubscribe();
+    return () => unsub();
   }, []);
 
   const signOut = async () => {
-    await supabase.auth.signOut();
+    await signOutUser();
   };
 
+  const showAuthModal = useCallback((message?: string) => {
+    onShowModal(message);
+  }, [onShowModal]);
+
+  const requireAuth = useCallback((action: () => void) => {
+    if (user) {
+      action();
+    } else {
+      onShowModal();
+    }
+  }, [user, onShowModal]);
+
   return (
-    <AuthContext.Provider value={{ session, user: session?.user ?? null, loading, signOut }}>
+    <AuthContext.Provider value={{ user, loading, signOut, showAuthModal, requireAuth }}>
       {children}
     </AuthContext.Provider>
   );

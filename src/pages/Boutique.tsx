@@ -1,5 +1,4 @@
 
-import { useNavigate } from "react-router-dom";
 import { ShoppingBag, Phone, Users, ArrowLeft, CreditCard, Check, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import BottomNav from "@/components/BottomNav";
@@ -87,8 +86,7 @@ const PRODUCTS = {
 };
 
 const Boutique = () => {
-  const { user, loading } = useAuth();
-  const navigate = useNavigate();
+  const { user, requireAuth } = useAuth();
   const queryClient = useQueryClient();
   const [step, setStep] = useState<Step>("select");
   const [selectedProduct, setSelectedProduct] = useState<Product>("simple");
@@ -98,34 +96,6 @@ const Boutique = () => {
   const [isPaying, setIsPaying] = useState(false);
 
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
-      </div>
-    );
-  }
-
-  if (!user) {
-    return (
-      <div className="min-h-screen flex flex-col items-center justify-center gap-6 bg-background px-6 pb-28">
-        <div className="rounded-3xl bg-card p-8 shadow-card text-center max-w-sm w-full space-y-4">
-          <ShoppingBag className="h-12 w-12 text-primary mx-auto" />
-          <h2 className="text-xl font-bold text-foreground">Connexion requise</h2>
-          <p className="text-sm text-muted-foreground">
-            Connectez-vous pour accéder à la boutique et acheter des numéros virtuels.
-          </p>
-          <button
-            onClick={() => navigate('/')}
-            className="w-full h-12 rounded-2xl bg-primary text-primary-foreground font-semibold"
-          >
-            Se connecter
-          </button>
-        </div>
-        <BottomNav />
-      </div>
-    );
-  }
 
   const filteredServices = useMemo(() => {
     let list = ALL_SERVICES;
@@ -135,7 +105,6 @@ const Boutique = () => {
   }, [activeCategory, search]);
 
   useEffect(() => {
-    if (!user) return;
     const params = new URLSearchParams(window.location.search);
     const transactionId = params.get("id");
     const status = params.get("status");
@@ -183,7 +152,6 @@ const Boutique = () => {
   const handlePay = useCallback(async () => {
     setIsPaying(true);
     try {
-      if (!user) throw new Error("Non connecté");
       const product = PRODUCTS[selectedProduct];
       sessionStorage.setItem("pending_product", selectedProduct);
       sessionStorage.setItem("pending_service", selectedService.id);
@@ -337,7 +305,7 @@ const Boutique = () => {
               </div>
 
               <Button
-                onClick={() => setStep("confirm")}
+                onClick={() => requireAuth(() => setStep("confirm"))}
                 className="h-12 w-full rounded-xl gradient-primary text-primary-foreground font-semibold text-base shadow-glow"
               >
                 Continuer — {PRODUCTS[selectedProduct].price.toLocaleString("fr-FR")} FCFA
@@ -412,7 +380,7 @@ const Boutique = () => {
               </div>
 
               <Button
-                onClick={handlePay}
+                onClick={() => requireAuth(handlePay}
                 disabled={isPaying}
                 className="h-14 w-full rounded-xl gradient-primary text-primary-foreground font-bold text-base shadow-glow disabled:opacity-40"
               >

@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
 import {
   ArrowLeftRight, Banknote, Users, RefreshCw,
   Phone, CheckCircle, XCircle, Loader2, ChevronRight,
@@ -24,42 +23,12 @@ const PROVIDERS = [
 type WithdrawStep = "form" | "confirm" | "processing" | "success" | "error";
 
 const WalletPage = () => {
-  const { user, loading } = useAuth();
-  const navigate = useNavigate();
+  const { user, requireAuth } = useAuth();
   const { data: profile } = useProfile();
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<"convert" | "withdraw">("convert");
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-      </div>
-    );
-  }
 
-  if (!user) {
-    return (
-      <div className="min-h-screen flex flex-col items-center justify-center gap-6 bg-background px-6 pb-28">
-        <div className="rounded-3xl bg-card p-8 shadow-card text-center max-w-sm w-full space-y-4">
-          <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/10 mx-auto">
-            <Wallet className="h-8 w-8 text-primary" />
-          </div>
-          <h2 className="text-xl font-bold text-foreground">Connexion requise</h2>
-          <p className="text-sm text-muted-foreground">
-            Vous devez être connecté pour accéder à votre portefeuille et effectuer des paiements.
-          </p>
-          <Button
-            onClick={() => navigate('/')}
-            className="w-full h-12 rounded-2xl gradient-primary text-primary-foreground font-semibold shadow-glow"
-          >
-            Se connecter
-          </Button>
-        </div>
-        <BottomNav />
-      </div>
-    );
-  }
 
   // Convert state
   const [convertAmount, setConvertAmount] = useState("");
@@ -116,7 +85,6 @@ const WalletPage = () => {
 
   const convertMutation = useMutation({
     mutationFn: async () => {
-      if (!user) throw new Error("Non connecté");
       const piAmount = Number(convertAmount);
       if (piAmount <= 0 || piAmount > (profile?.pi_balance ?? 0))
         throw new Error("Montant invalide ou solde insuffisant");
@@ -147,7 +115,6 @@ const WalletPage = () => {
 
   const withdrawMutation = useMutation({
     mutationFn: async () => {
-      if (!user) throw new Error("Non connecté");
       const fcfaAmount = Number(withdrawAmount);
       if (fcfaAmount <= 0) throw new Error("Montant invalide");
       if ((profile?.fcfa_balance ?? 0) < fcfaAmount) throw new Error("Solde FCFA insuffisant");
@@ -326,7 +293,7 @@ const WalletPage = () => {
               </div>
 
               <Button
-                onClick={() => convertMutation.mutate()}
+                onClick={() => requireAuth(() => convertMutation.mutate())}
                 disabled={
                   convertMutation.isPending || !convertAmount ||
                   Number(convertAmount) <= 0 ||
@@ -427,7 +394,7 @@ const WalletPage = () => {
                     </div>
 
                     <Button
-                      onClick={handleWithdrawSubmit}
+                      onClick={() => requireAuth(handleWithdrawSubmit)}
                       disabled={
                         !withdrawAmount || Number(withdrawAmount) <= 0 ||
                         !phone.trim() || phone.length < 8 ||
