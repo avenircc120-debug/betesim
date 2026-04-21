@@ -180,7 +180,7 @@ const Boutique = () => {
       <div className="mx-auto max-w-lg space-y-5 px-4 pt-6">
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
           <h1 className="text-2xl font-bold text-foreground">Boutique</h1>
-          <p className="text-sm text-muted-foreground">+1 000 services disponibles via 5sim.net</p>
+          <p className="text-sm text-muted-foreground">+1 000 services disponibles via SMSPool</p>
         </motion.div>
 
         <AnimatePresence mode="wait">
