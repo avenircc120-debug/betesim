@@ -120,23 +120,14 @@ const Boutique = () => {
     if (status === "approved") {
       (async () => {
         try {
-          const { data: sessionData } = await supabase.auth.getSession();
-          const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-          const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/deliver-number`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              apikey: anonKey,
-              Authorization: `Bearer ${sessionData.session?.access_token}`,
-            },
-            body: JSON.stringify({
+          const { error } = await supabase.functions.invoke("deliver-number", {
+            body: {
               service: savedServiceId,
               product_type: savedProduct,
               fedapay_transaction_id: transactionId,
-            }),
+            },
           });
-          const result = await res.json();
-          if (!res.ok) throw new Error(result.error || "Erreur livraison numéro");
+          if (error) throw new Error(error.message || "Erreur livraison numéro");
           toast.success(`Votre numéro ${savedServiceName} a été livré ! Consultez votre historique.`);
           queryClient.invalidateQueries({ queryKey: ["profile"] });
           queryClient.invalidateQueries({ queryKey: ["transactions"] });
