@@ -99,11 +99,25 @@ const LoginPage = () => {
       .catch(() => {});
   }, []);
 
-  const setupRecaptcha = useCallback(() => {
-    if (recaptchaVerifierRef.current) return;
-    if (!recaptchaRef.current) return;
-    recaptchaVerifierRef.current = new RecaptchaVerifier(auth, recaptchaRef.current, { size: "invisible" });
+  const clearRecaptcha = useCallback(() => {
+    if (recaptchaVerifierRef.current) {
+      try { recaptchaVerifierRef.current.clear(); } catch { /* ignore */ }
+      recaptchaVerifierRef.current = null;
+    }
+    if (recaptchaRef.current) {
+      recaptchaRef.current.innerHTML = "";
+    }
   }, []);
+
+  const setupRecaptcha = useCallback(() => {
+    if (!recaptchaRef.current) return;
+    clearRecaptcha();
+    recaptchaVerifierRef.current = new RecaptchaVerifier(auth, recaptchaRef.current, { size: "invisible" });
+  }, [clearRecaptcha]);
+
+  useEffect(() => {
+    return () => { clearRecaptcha(); };
+  }, [clearRecaptcha]);
 
   const handleGoogle = async () => {
     setLoadingGoogle(true);
@@ -136,7 +150,7 @@ const LoginPage = () => {
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Erreur d'envoi";
       toast.error(msg);
-      recaptchaVerifierRef.current = null;
+      clearRecaptcha();
     } finally {
       setLoadingPhone(false);
     }
