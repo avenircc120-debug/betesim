@@ -109,6 +109,8 @@ const Boutique = () => {
     const transactionId = params.get("id");
     const status = params.get("status");
     if (!transactionId || !status) return;
+    // Attendre que Firebase ait restauré la session avant de traiter le retour FedaPay
+    if (!user) return;
     window.history.replaceState({}, "", window.location.pathname);
     const savedProduct = (sessionStorage.getItem("pending_product") as Product) || "simple";
     const savedServiceId = sessionStorage.getItem("pending_service") || "whatsapp";
@@ -120,7 +122,7 @@ const Boutique = () => {
     if (status === "approved") {
       (async () => {
         try {
-          const { error } = await supabase.functions.invoke("deliver-number", {
+          const { data, error } = await supabase.functions.invoke("deliver-number", {
             body: {
               service: savedServiceId,
               product_type: savedProduct,
@@ -128,7 +130,18 @@ const Boutique = () => {
               user_id: user.uid ?? user.id,
             },
           });
-          if (error) throw new Error(error.message || "Erreur livraison numéro");
+          if (error) {
+            let detail: string | undefined;
+            try {
+              const ctx: any = (error as any).context;
+              if (ctx?.response) {
+                const body = await ctx.response.clone().json();
+                detail = body?.error || body?.message;
+              }
+            } catch {}
+            throw new Error(detail || error.message || "Erreur livraison numéro");
+          }
+          if (data?.success === false) throw new Error(data?.error || "Erreur livraison numéro");
           toast.success(`Votre numéro ${savedServiceName} a été livré ! Consultez votre historique.`);
           queryClient.invalidateQueries({ queryKey: ["profile"] });
           queryClient.invalidateQueries({ queryKey: ["transactions"] });
