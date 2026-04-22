@@ -1,16 +1,18 @@
 /**
  * Edge Function: fedapay-create-transaction
  *
+ * NOTE: Cette appli utilise Firebase Auth (pas Supabase Auth).
+ * On accepte donc user_id et customer_email envoyés par le frontend.
+ *
  * Secrets Supabase requis :
- *   FEDAPAY_SECRET_KEY       — clé secrète sandbox
- *   FEDAPAY_PUBLIC_KEY_SANDBOX — clé publique sandbox
- *   FEDAPAY_SECRET_KEY_LIVE  — clé secrète live (optionnel)
- *   FEDAPAY_PUBLIC_KEY_LIVE  — clé publique live (optionnel)
- *   FEDAPAY_MODE             — "sandbox" (défaut) ou "live"
+ *   FEDAPAY_SECRET_KEY            — clé secrète sandbox
+ *   FEDAPAY_PUBLIC_KEY_SANDBOX    — clé publique sandbox
+ *   FEDAPAY_SECRET_KEY_LIVE       — clé secrète live (optionnel)
+ *   FEDAPAY_PUBLIC_KEY_LIVE       — clé publique live (optionnel)
+ *   FEDAPAY_MODE                  — "sandbox" (défaut) ou "live"
  */
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -21,9 +23,6 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   try {
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-
     const mode = Deno.env.get("FEDAPAY_MODE") === "live" ? "live" : "sandbox";
 
     const secretKey = mode === "live"
@@ -44,23 +43,23 @@ serve(async (req) => {
 
     if (!secretKey) throw new Error("FEDAPAY_SECRET_KEY non configurée dans les secrets Supabase");
 
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
-
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader) throw new Error("Non authentifié");
-    const token = authHeader.replace("Bearer ", "");
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-    if (authError || !user) throw new Error("Utilisateur non trouvé");
-
-    const { amount, description, user_id, payment_type, callback_url } = await req.json();
+    const body = await req.json().catch(() => ({}));
+    const {
+      amount,
+      description,
+      user_id,
+      payment_type,
+      callback_url,
+      customer_email,
+    } = body ?? {};
 
     if (!amount || !description || !callback_url) {
       throw new Error("Paramètres manquants: amount, description, callback_url");
     }
+    if (!user_id) throw new Error("Paramètre user_id requis (UID Firebase)");
 
-    const customerEmail = user.email ?? `${user.id}@betesim.app`;
+    const email = customer_email || `${user_id}@betesim.app`;
 
-    // Créer la transaction FedaPay
     const txRes = await fetch(`${apiBase}/transactions`, {
       method: "POST",
       headers: {
@@ -72,9 +71,9 @@ serve(async (req) => {
         amount,
         currency: { iso: "XOF" },
         callback_url,
-        customer: { email: customerEmail },
+        customer: { email },
         metadata: {
-          user_id: user_id ?? user.id,
+          user_id,
           payment_type: payment_type ?? "number_purchase",
         },
       }),
@@ -86,7 +85,6 @@ serve(async (req) => {
       throw new Error(txData?.message ?? "Erreur création transaction FedaPay");
     }
 
-    // FedaPay renvoie l'objet sous la clé "v1/transaction" (avec barre oblique)
     const txObject =
       txData?.["v1/transaction"] ??
       txData?.v1?.transaction ??
@@ -99,7 +97,6 @@ serve(async (req) => {
       throw new Error("ID transaction FedaPay non reçu");
     }
 
-    // Génération du token de paiement (POST, pas GET)
     const tokenRes = await fetch(`${apiBase}/transactions/${transactionId}/token`, {
       method: "POST",
       headers: {
@@ -137,22 +134,17 @@ serve(async (req) => {
         payment_url: paymentUrl,
         transaction_id: String(transactionId),
         environment: mode,
-        customer_email: customerEmail,
+        customer_email: email,
         public_key: publicKey,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
-  } catch (err: any) {
-    const errorMessage = err?.message ?? String(err) ?? "Erreur interne";
-    const errorStack = err?.stack ?? null;
+  } catch (err) {
+    const errorMessage = (err as any)?.message ?? String(err) ?? "Erreur interne";
+    const errorStack = (err as any)?.stack ?? null;
     console.error("fedapay-create-transaction error:", errorMessage, errorStack);
-    // Renvoie 200 pour que le client puisse lire le message d'erreur exact
     return new Response(
-      JSON.stringify({
-        success: false,
-        error: errorMessage,
-        stack: errorStack,
-      }),
+      JSON.stringify({ success: false, error: errorMessage, stack: errorStack }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
