@@ -380,7 +380,7 @@ const Boutique = () => {
               </div>
 
               <Button
-                onClick={() => requireAuth(handlePay}
+                onClick={() => requireAuth(handlePay)}
                 disabled={isPaying}
                 className="h-14 w-full rounded-xl gradient-primary text-primary-foreground font-bold text-base shadow-glow disabled:opacity-40"
               >
