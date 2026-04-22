@@ -2,16 +2,6 @@
 //  UTILITAIRE FEDAPAY — PI REAL
 //  Toute la logique de paiement passe par les Edge Functions
 //  Supabase. Aucune clé n'est stockée dans le frontend.
-//
-//  Pour activer le mode live :
-//    → Dans Supabase Dashboard > Edge Functions > Secrets :
-//      FP_MODE=live
-//      FP_SECRET_LIVE=sk_live_xxxx
-//      FP_PUBLIC_LIVE=pk_live_xxxx
-//  Pour rester en sandbox (par défaut) :
-//      FP_MODE=sandbox (ou ne pas définir FP_MODE)
-//      FP_SECRET_SANDBOX=sk_sandbox_xxxx
-//      FP_PUBLIC_SANDBOX=pk_sandbox_xxxx (optionnel)
 // ============================================================
 
 import { supabase } from "@/integrations/supabase/client";
@@ -34,9 +24,6 @@ export interface CreatePaymentResult {
 /**
  * Crée une transaction FedaPay via la Edge Function Supabase
  * et retourne l'URL de paiement pour la redirection.
- *
- * Utilise supabase.functions.invoke() pour éviter tout problème
- * d'URL manquante ou de token incorrect.
  */
 export async function createFedaPayTransaction(
   options: CreatePaymentOptions
@@ -54,8 +41,25 @@ export async function createFedaPayTransaction(
     }
   );
 
+  // Cas où supabase-js renvoie une erreur HTTP (ex. 5xx, network)
   if (error) {
-    throw new Error(error.message ?? "Erreur lors de la création du paiement FedaPay.");
+    // Tente de lire le corps réel pour avoir le vrai message
+    let detail: string | undefined;
+    try {
+      const ctx: any = (error as any).context;
+      if (ctx?.response) {
+        const body = await ctx.response.clone().json();
+        detail = body?.error || body?.message;
+      }
+    } catch {
+      // ignore parse errors
+    }
+    throw new Error(detail || error.message || "Erreur lors de la création du paiement FedaPay.");
+  }
+
+  // Cas où la fonction renvoie 200 mais avec success:false
+  if (data?.success === false) {
+    throw new Error(data?.error || "Erreur lors de la création du paiement FedaPay.");
   }
 
   if (!data?.payment_url) {
