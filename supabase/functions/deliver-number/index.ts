@@ -154,17 +154,13 @@ serve(async (req) => {
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader) throw new Error("Non authentifié");
-    const token = authHeader.replace("Bearer ", "");
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-    if (authError || !user) throw new Error("Utilisateur non trouvé");
-
-    const { service, product_type, fedapay_transaction_id } = await req.json();
+    const { service, product_type, fedapay_transaction_id, user_id } = await req.json();
 
     if (!service || !product_type || !fedapay_transaction_id) {
       throw new Error("Paramètres manquants: service, product_type, fedapay_transaction_id");
     }
+    if (!user_id) throw new Error("Paramètre user_id requis (UID Firebase)");
+    const userId = user_id;
 
     // Map app service ID to SMSPool service name
     const smspoolService = SERVICE_MAP[service.toLowerCase()] ?? service;
@@ -192,7 +188,7 @@ serve(async (req) => {
 
     // Save to subscriptions (Pilier 4)
     const { error: subError } = await supabase.from("subscriptions").insert({
-      user_id: user.id,
+      user_id: userId,
       number: delivery.number,
       country: delivery.country,
       service,
@@ -206,7 +202,7 @@ serve(async (req) => {
 
     // Record transaction
     await supabase.from("transactions").insert({
-      user_id: user.id,
+      user_id: userId,
       type: "number_purchase",
       status: "validated",
       amount_fcfa: amount,
@@ -217,9 +213,9 @@ serve(async (req) => {
 
     // Partner activation
     if (isPartner) {
-      await supabase.from("profiles").update({ is_partner: true }).eq("id", user.id);
+      await supabase.from("profiles").update({ is_partner: true }).eq("id", userId);
       await supabase.from("transactions").insert({
-        user_id: user.id,
+        user_id: userId,
         type: "partner_activation",
         status: "validated",
         amount_fcfa: 0,
@@ -231,7 +227,7 @@ serve(async (req) => {
     const { data: referral } = await supabase
       .from("referrals")
       .select("referrer_id, activated")
-      .eq("referred_id", user.id)
+      .eq("referred_id", userId)
       .maybeSingle();
 
     if (referral?.referrer_id) {
@@ -258,19 +254,19 @@ serve(async (req) => {
       }
 
       if (!referral.activated) {
-        await supabase.from("referrals").update({ activated: true }).eq("referred_id", user.id);
+        await supabase.from("referrals").update({ activated: true }).eq("referred_id", userId);
       }
     }
 
     // Notification avec consignes de sécurité (Pilier 5)
     await supabase.from("notifications").insert({
-      user_id: user.id,
+      user_id: userId,
       title: "Numéro livré avec succès !",
       message: `Votre numéro ${service} est prêt : ${delivery.number}\n\n${SECURITY_TIPS.join("\n")}`,
       type: "payment_success",
     });
 
-    console.log(`Delivered ${delivery.number} for ${service} (${delivery.attempts} attempts) to user ${user.id}`);
+    console.log(`Delivered ${delivery.number} for ${service} (${delivery.attempts} attempts) to user ${userId}`);
 
     return new Response(
       JSON.stringify({
@@ -287,10 +283,11 @@ serve(async (req) => {
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (err: any) {
-    console.error("deliver-number error:", err);
+    const msg = err?.message ?? String(err) ?? "Erreur interne";
+    console.error("deliver-number error:", msg, err?.stack);
     return new Response(
-      JSON.stringify({ error: err.message ?? "Erreur interne" }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      JSON.stringify({ success: false, error: msg, stack: err?.stack ?? null }),
+      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
 });
