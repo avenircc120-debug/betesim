@@ -11,14 +11,15 @@ import {
   type ConfirmationResult,
 } from "firebase/auth";
 
+// Firebase config — clés publiques par nature (sécurisées par les règles Firebase + domaines autorisés)
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID,
-  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID,
+  apiKey: "AIzaSyCjUOf5xmNlAB4vqbKmSy9wZxR24PqoKmE",
+  authDomain: "pireel-91ff2.firebaseapp.com",
+  projectId: "pireel-91ff2",
+  storageBucket: "pireel-91ff2.firebasestorage.app",
+  messagingSenderId: "348625671997",
+  appId: "1:348625671997:web:2ad544f6f8bc20fbdf1754",
+  measurementId: "G-RMZ7P98J7G",
 };
 
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
