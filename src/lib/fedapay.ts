@@ -35,41 +35,30 @@ export interface CreatePaymentResult {
  * Crée une transaction FedaPay via la Edge Function Supabase
  * et retourne l'URL de paiement pour la redirection.
  *
- * Le mode sandbox / live est piloté entièrement par les secrets
- * Supabase (FP_MODE). Aucune clé n'est nécessaire côté frontend.
+ * Utilise supabase.functions.invoke() pour éviter tout problème
+ * d'URL manquante ou de token incorrect.
  */
 export async function createFedaPayTransaction(
   options: CreatePaymentOptions
 ): Promise<CreatePaymentResult> {
-  const { data: { session } } = await supabase.auth.getSession();
+  const { data, error } = await supabase.functions.invoke(
+    "fedapay-create-transaction",
+    {
+      body: {
+        amount: options.amount,
+        description: options.description,
+        user_id: options.userId,
+        payment_type: options.paymentType,
+        callback_url: options.callbackUrl,
+      },
+    }
+  );
 
-  const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string;
-  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
-  const token = session?.access_token ?? anonKey;
-
-  const res = await fetch(`${supabaseUrl}/functions/v1/fedapay-create-transaction`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "apikey": anonKey,
-      "Authorization": `Bearer ${token}`,
-    },
-    body: JSON.stringify({
-      amount: options.amount,
-      description: options.description,
-      user_id: options.userId,
-      payment_type: options.paymentType,
-      callback_url: options.callbackUrl,
-    }),
-  });
-
-  const data = await res.json();
-
-  if (!res.ok || data.error) {
-    throw new Error(data.error ?? "Erreur lors de la création du paiement FedaPay.");
+  if (error) {
+    throw new Error(error.message ?? "Erreur lors de la création du paiement FedaPay.");
   }
 
-  if (!data.payment_url) {
+  if (!data?.payment_url) {
     throw new Error("URL de paiement non reçue depuis FedaPay.");
   }
 
