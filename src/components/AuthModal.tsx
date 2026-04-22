@@ -112,13 +112,20 @@ export function AuthModal({ open, message, onClose, onSuccess }: AuthModalProps)
         setSearch("");
         setShowPicker(false);
         setConfirmation(null);
+        if (recaptchaVerifierRef.current) {
+          recaptchaVerifierRef.current.clear();
+          recaptchaVerifierRef.current = null;
+        }
       }, 300);
     }
   }, [open]);
 
   const setupRecaptcha = useCallback(() => {
-    if (recaptchaVerifierRef.current) return;
     if (!recaptchaRef.current) return;
+    if (recaptchaVerifierRef.current) {
+      recaptchaVerifierRef.current.clear();
+      recaptchaVerifierRef.current = null;
+    }
     recaptchaVerifierRef.current = new RecaptchaVerifier(auth, recaptchaRef.current, {
       size: "invisible",
     });
