@@ -125,6 +125,7 @@ const Boutique = () => {
               service: savedServiceId,
               product_type: savedProduct,
               fedapay_transaction_id: transactionId,
+              user_id: user.uid ?? user.id,
             },
           });
           if (error) throw new Error(error.message || "Erreur livraison numéro");
