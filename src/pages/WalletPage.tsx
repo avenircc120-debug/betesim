@@ -120,25 +120,24 @@ const WalletPage = () => {
       if ((profile?.fcfa_balance ?? 0) < fcfaAmount) throw new Error("Solde FCFA insuffisant");
       if (!phone.trim() || phone.length < 8) throw new Error("Numéro invalide");
 
-      const { data: session } = await supabase.auth.getSession();
-      const res = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/request-withdrawal`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${session.session?.access_token}`,
-          },
-          body: JSON.stringify({
-            amount_fcfa: fcfaAmount,
-            phone_number: phone.trim(),
-            provider,
-            timestamp: Date.now(),
-          }),
-        }
-      );
-      const result = await res.json();
-      if (!res.ok) throw new Error(result.error || "Erreur de retrait");
+      if (!user) throw new Error("Non connecté");
+      const { data: result, error } = await supabase.functions.invoke("request-withdrawal", {
+        body: {
+          user_id: user.uid ?? user.id,
+          amount_fcfa: fcfaAmount,
+          phone_number: phone.trim(),
+          provider,
+        },
+      });
+      if (error) {
+        let detail: string | undefined;
+        try {
+          const ctx: any = (error as any).context;
+          if (ctx?.response) { const b = await ctx.response.clone().json(); detail = b?.error || b?.message; }
+        } catch {}
+        throw new Error(detail || error.message || "Erreur de retrait");
+      }
+      if (result?.success === false) throw new Error(result?.error || "Erreur de retrait");
       return result;
     },
     onSuccess: (data) => {
