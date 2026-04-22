@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { auth, onAuthStateChanged, signOutUser, type User } from "@/lib/firebase";
+import { supabase } from "@/integrations/supabase/client";
 
 export type NormalizedUser = {
   uid: string;
@@ -46,8 +47,20 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (firebaseUser) => {
-      setUser(firebaseUser ? normalizeUser(firebaseUser) : null);
+      const normalized = firebaseUser ? normalizeUser(firebaseUser) : null;
+      setUser(normalized);
       setLoading(false);
+      if (normalized) {
+        supabase.functions.invoke("ensure-profile", {
+          body: {
+            user_id: normalized.uid,
+            email: normalized.email,
+            display_name: normalized.displayName,
+            photo_url: normalized.photoURL,
+            phone_number: normalized.phoneNumber,
+          },
+        }).catch((e) => console.warn("ensure-profile failed:", e));
+      }
     });
     return () => unsub();
   }, []);
