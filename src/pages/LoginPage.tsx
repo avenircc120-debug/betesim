@@ -178,7 +178,11 @@ const LoginPage = () => {
       {/* Header */}
       <div className="px-4 pt-6 pb-2">
         <button
-          onClick={() => step === "menu" ? navigate(-1) : setStep(step === "otp" ? "phone" : "menu")}
+          onClick={() => {
+            if (step === "menu") navigate(-1);
+            else if (step === "otp") { clearRecaptcha(); setStep("phone"); }
+            else setStep("menu");
+          }}
           className="flex h-10 w-10 items-center justify-center rounded-full bg-card shadow-sm hover:bg-muted transition-colors"
         >
           <ArrowLeft className="h-5 w-5 text-foreground" />
@@ -376,7 +380,7 @@ const LoginPage = () => {
 
                 <button
                   type="button"
-                  onClick={() => { setStep("phone"); setOtp(""); }}
+                  onClick={() => { clearRecaptcha(); setStep("phone"); setOtp(""); }}
                   className="w-full text-center text-sm text-primary hover:underline"
                 >
                   Renvoyer le code
