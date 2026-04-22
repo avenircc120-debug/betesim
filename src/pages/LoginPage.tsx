@@ -67,7 +67,8 @@ const LoginPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { user } = useAuth();
-  const redirectTo = (location.state as { from?: string })?.from || "/";
+  const params = new URLSearchParams(location.search);
+  const redirectTo = params.get("redirect") || (location.state as { from?: string })?.from || "/";
 
   const [step, setStep] = useState<Step>("menu");
   const [country, setCountry] = useState<Country>(COUNTRIES[0]);

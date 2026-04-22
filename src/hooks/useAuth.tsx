@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
 import { auth, onAuthStateChanged, signOutUser, type User } from "@/lib/firebase";
 
 export type NormalizedUser = {
@@ -37,14 +38,11 @@ const AuthContext = createContext<AuthContextType>({
   requireAuth: () => {},
 });
 
-interface AuthProviderProps {
-  children: ReactNode;
-  onShowModal: (message?: string) => void;
-}
-
-export const AuthProvider = ({ children, onShowModal }: AuthProviderProps) => {
+export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<NormalizedUser | null>(null);
   const [loading, setLoading] = useState(true);
+  const navigate = useNavigate();
+  const location = useLocation();
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (firebaseUser) => {
@@ -58,17 +56,22 @@ export const AuthProvider = ({ children, onShowModal }: AuthProviderProps) => {
     await signOutUser();
   };
 
-  const showAuthModal = useCallback((message?: string) => {
-    onShowModal(message);
-  }, [onShowModal]);
+  const goToLogin = useCallback(() => {
+    const from = location.pathname + location.search;
+    navigate(`/login?redirect=${encodeURIComponent(from)}`);
+  }, [navigate, location]);
+
+  const showAuthModal = useCallback(() => {
+    goToLogin();
+  }, [goToLogin]);
 
   const requireAuth = useCallback((action: () => void) => {
     if (user) {
       action();
     } else {
-      onShowModal();
+      goToLogin();
     }
-  }, [user, onShowModal]);
+  }, [user, goToLogin]);
 
   return (
     <AuthContext.Provider value={{ user, loading, signOut, showAuthModal, requireAuth }}>
