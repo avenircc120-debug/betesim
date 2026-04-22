@@ -102,6 +102,22 @@ export function AuthModal({ open, message, onClose, onSuccess }: AuthModalProps)
       .catch(() => {});
   }, [open]);
 
+  // Nettoie complètement le reCAPTCHA (verifier + DOM)
+  const clearRecaptcha = useCallback(() => {
+    if (recaptchaVerifierRef.current) {
+      try { recaptchaVerifierRef.current.clear(); } catch { /* ignore */ }
+      recaptchaVerifierRef.current = null;
+    }
+    if (recaptchaRef.current) {
+      recaptchaRef.current.innerHTML = "";
+    }
+  }, []);
+
+  // Nettoyage à la destruction du composant
+  useEffect(() => {
+    return () => { clearRecaptcha(); };
+  }, [clearRecaptcha]);
+
   // Reset state when modal closes
   useEffect(() => {
     if (!open) {
@@ -112,24 +128,18 @@ export function AuthModal({ open, message, onClose, onSuccess }: AuthModalProps)
         setSearch("");
         setShowPicker(false);
         setConfirmation(null);
-        if (recaptchaVerifierRef.current) {
-          recaptchaVerifierRef.current.clear();
-          recaptchaVerifierRef.current = null;
-        }
+        clearRecaptcha();
       }, 300);
     }
-  }, [open]);
+  }, [open, clearRecaptcha]);
 
   const setupRecaptcha = useCallback(() => {
     if (!recaptchaRef.current) return;
-    if (recaptchaVerifierRef.current) {
-      recaptchaVerifierRef.current.clear();
-      recaptchaVerifierRef.current = null;
-    }
+    clearRecaptcha();
     recaptchaVerifierRef.current = new RecaptchaVerifier(auth, recaptchaRef.current, {
       size: "invisible",
     });
-  }, []);
+  }, [clearRecaptcha]);
 
   const handleGoogle = async () => {
     setLoadingGoogle(true);
@@ -162,7 +172,7 @@ export function AuthModal({ open, message, onClose, onSuccess }: AuthModalProps)
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Erreur d'envoi";
       toast.error(msg);
-      recaptchaVerifierRef.current = null;
+      clearRecaptcha();
     } finally {
       setLoadingPhone(false);
     }
@@ -221,7 +231,10 @@ export function AuthModal({ open, message, onClose, onSuccess }: AuthModalProps)
                 <div className="flex items-center gap-2">
                   {step !== "menu" && (
                     <button
-                      onClick={() => setStep(step === "otp" ? "phone" : "menu")}
+                      onClick={() => {
+                        if (step === "otp") { clearRecaptcha(); setStep("phone"); }
+                        else setStep("menu");
+                      }}
                       className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-muted-foreground hover:bg-muted/80"
                     >
                       <ArrowLeft className="h-4 w-4" />
@@ -451,7 +464,7 @@ export function AuthModal({ open, message, onClose, onSuccess }: AuthModalProps)
 
                     <button
                       type="button"
-                      onClick={() => { setStep("phone"); setOtp(""); }}
+                      onClick={() => { clearRecaptcha(); setStep("phone"); setOtp(""); }}
                       className="w-full text-center text-sm text-primary hover:underline"
                     >
                       Renvoyer le code
