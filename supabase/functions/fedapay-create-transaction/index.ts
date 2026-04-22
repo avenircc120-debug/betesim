@@ -1,10 +1,11 @@
 /**
  * Edge Function: fedapay-create-transaction
  *
- * Secrets Supabase requis (mêmes clés que dans Replit) :
+ * Secrets Supabase requis :
  *   FEDAPAY_SECRET_KEY       — clé secrète sandbox
  *   FEDAPAY_PUBLIC_KEY_SANDBOX — clé publique sandbox
- *   FEDAPAY_SECRET_KEY_LIVE  — clé secrète live (optionnel, pour plus tard)
+ *   FEDAPAY_SECRET_KEY_LIVE  — clé secrète live (optionnel)
+ *   FEDAPAY_PUBLIC_KEY_LIVE  — clé publique live (optionnel)
  *   FEDAPAY_MODE             — "sandbox" (défaut) ou "live"
  */
 
@@ -36,6 +37,10 @@ serve(async (req) => {
     const apiBase = mode === "live"
       ? "https://api.fedapay.com/v1"
       : "https://sandbox-api.fedapay.com/v1";
+
+    const checkoutBase = mode === "live"
+      ? "https://process.fedapay.com"
+      : "https://sandbox-process.fedapay.com";
 
     if (!secretKey) throw new Error("FEDAPAY_SECRET_KEY non configurée dans les secrets Supabase");
 
@@ -81,25 +86,55 @@ serve(async (req) => {
       throw new Error(txData?.message ?? "Erreur création transaction FedaPay");
     }
 
-    const transactionId = txData?.v1?.transaction?.id ?? txData?.transaction?.id;
-    if (!transactionId) throw new Error("ID transaction FedaPay non reçu");
+    // FedaPay renvoie l'objet sous la clé "v1/transaction" (avec barre oblique)
+    const txObject =
+      txData?.["v1/transaction"] ??
+      txData?.v1?.transaction ??
+      txData?.transaction ??
+      txData;
 
-    // Obtenir le token de paiement
+    const transactionId = txObject?.id;
+    if (!transactionId) {
+      console.error("FedaPay tx response:", JSON.stringify(txData));
+      throw new Error("ID transaction FedaPay non reçu");
+    }
+
+    // Génération du token de paiement (POST, pas GET)
     const tokenRes = await fetch(`${apiBase}/transactions/${transactionId}/token`, {
-      method: "GET",
-      headers: { Authorization: `Bearer ${secretKey}` },
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${secretKey}`,
+        "Content-Type": "application/json",
+      },
+      body: "{}",
     });
 
     const tokenData = await tokenRes.json();
-    if (!tokenRes.ok) throw new Error(tokenData?.message ?? "Impossible d'obtenir le token de paiement");
+    if (!tokenRes.ok) {
+      console.error("FedaPay token error:", JSON.stringify(tokenData));
+      throw new Error(tokenData?.message ?? "Impossible d'obtenir le token de paiement");
+    }
 
-    const paymentToken = tokenData?.v1?.token?.token ?? tokenData?.token?.token ?? tokenData?.token;
-    if (!paymentToken) throw new Error("Token de paiement FedaPay non reçu");
+    const paymentToken =
+      tokenData?.token?.token ??
+      tokenData?.v1?.token?.token ??
+      tokenData?.token ??
+      null;
+
+    const paymentUrl =
+      tokenData?.url ??
+      tokenData?.token?.url ??
+      (paymentToken ? `${checkoutBase}/${paymentToken}` : null);
+
+    if (!paymentUrl) {
+      console.error("FedaPay token response:", JSON.stringify(tokenData));
+      throw new Error("URL de paiement FedaPay non reçue");
+    }
 
     return new Response(
       JSON.stringify({
         success: true,
-        payment_url: `https://checkout.fedapay.com/pay/${paymentToken}`,
+        payment_url: paymentUrl,
         transaction_id: String(transactionId),
         environment: mode,
         customer_email: customerEmail,
