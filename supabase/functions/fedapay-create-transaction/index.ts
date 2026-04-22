@@ -143,10 +143,17 @@ serve(async (req) => {
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (err: any) {
-    console.error("fedapay-create-transaction error:", err);
+    const errorMessage = err?.message ?? String(err) ?? "Erreur interne";
+    const errorStack = err?.stack ?? null;
+    console.error("fedapay-create-transaction error:", errorMessage, errorStack);
+    // Renvoie 200 pour que le client puisse lire le message d'erreur exact
     return new Response(
-      JSON.stringify({ error: err.message ?? "Erreur interne" }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      JSON.stringify({
+        success: false,
+        error: errorMessage,
+        stack: errorStack,
+      }),
+      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
 });
