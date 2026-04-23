@@ -11,7 +11,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { createFedaPayTransaction } from "@/lib/fedapay";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
-type Step = "select" | "payment";
+type Step = "offer" | "select" | "payment";
 type Product = "simple" | "partner";
 
 interface Service {
@@ -63,7 +63,7 @@ const CATEGORIES = ["Tous", "Messagerie", "Réseaux sociaux", "Gaming / Divertis
 const PRODUCTS = {
   simple: {
     id: "simple" as Product,
-    name: "Numéro Simple",
+    name: "Achat Direct",
     price: 2000,
     description: "1 numéro virtuel pour n'importe quel service",
     features: [
@@ -96,13 +96,13 @@ const Boutique = () => {
   const { data: profile } = useProfile();
   const queryClient = useQueryClient();
 
-  // Navigation entre les deux écrans
-  const [step, setStep] = useState<Step>("select");
+  // Navigation entre les écrans
+  const [step, setStep] = useState<Step>("offer");
 
   // Sélections
   const [selectedCountry, setSelectedCountry] = useState<string>("0");
   const [selectedCountryName, setSelectedCountryName] = useState<string>("N'importe quel pays");
-  const [selectedService, setSelectedService] = useState<Service>(ALL_SERVICES[0]);
+  const [selectedService, setSelectedService] = useState<Service | null>(null);
   const [selectedProduct, setSelectedProduct] = useState<Product>("simple");
 
   // UI
@@ -209,9 +209,15 @@ const Boutique = () => {
     return list;
   }, [activeCategory, search]);
 
+  // ── Sélection du service → redirection auto vers paiement ─────────────────
+  const handleSelectService = useCallback((s: Service) => {
+    setSelectedService(s);
+    requireAuth(() => setStep("payment"));
+  }, [requireAuth]);
+
   // ── Paiement FedaPay ──────────────────────────────────────────────────────
   const handlePay = useCallback(async () => {
-    if (!user) return;
+    if (!user || !selectedService) return;
     setIsPaying(true);
     try {
       const product = PRODUCTS[selectedProduct];
@@ -240,7 +246,7 @@ const Boutique = () => {
 
   // ── Paiement depuis Wallet ────────────────────────────────────────────────
   const handlePayFromWallet = useCallback(async () => {
-    if (!user) return;
+    if (!user || !selectedService) return;
     setIsPaying(true);
     try {
       const { data, error } = await supabase.functions.invoke("purchase-from-wallet", {
@@ -261,7 +267,8 @@ const Boutique = () => {
         return;
       }
       toast.success(`Numéro livré : ${data.number}`);
-      setStep("select");
+      setStep("offer");
+      setSelectedService(null);
       queryClient.invalidateQueries({ queryKey: ["profile"] });
       queryClient.invalidateQueries({ queryKey: ["subscriptions"] });
     } catch (e: any) {
@@ -282,6 +289,13 @@ const Boutique = () => {
       ? `[${smspoolCountries.find(c => c.id === selectedCountry)?.short_name}] ${smspoolCountries.find(c => c.id === selectedCountry)?.name}`
       : selectedCountryName;
 
+  // Si Partenaire est déjà activé, on force "simple"
+  useEffect(() => {
+    if (profile?.is_partner && selectedProduct === "partner") {
+      setSelectedProduct("simple");
+    }
+  }, [profile?.is_partner, selectedProduct]);
+
   // ── Rendu ─────────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-background pb-24">
@@ -296,141 +310,94 @@ const Boutique = () => {
         <AnimatePresence mode="wait">
 
           {/* ═══════════════════════════════════════════════════════════
-              ÉCRAN 1 — SÉLECTION (Pays → Service)
+              ÉCRAN 1 — CHOIX DE L'OFFRE (Achat Direct ou Pack Partenaire)
           ═══════════════════════════════════════════════════════════ */}
-          {step === "select" && (
+          {step === "offer" && (
             <motion.div
-              key="select"
+              key="offer"
               initial={{ opacity: 0, x: -20 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -20 }}
-              className="space-y-6"
+              className="space-y-5"
             >
-
-              {/* ── 1. PAYS ── */}
               <div className="space-y-2">
                 <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
                   <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground">1</span>
-                  Choisissez le pays
+                  Choisissez votre offre
                 </h2>
-
-                {!user ? (
-                  <div className="rounded-xl border border-border bg-muted/30 px-4 py-4 text-center text-sm text-muted-foreground">
-                    Connectez-vous pour voir les pays disponibles
-                  </div>
-                ) : (
-                  <div className="relative">
-                    <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none z-10" />
-                    <select
-                      value={selectedCountry}
-                      onChange={(e) => {
-                        setSelectedCountry(e.target.value);
-                        const opt = e.target.options[e.target.selectedIndex];
-                        setSelectedCountryName(opt.text);
-                      }}
-                      className="w-full rounded-xl border border-border bg-card pl-9 pr-4 py-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 appearance-none"
-                    >
-                      <option value="0">🌍 N'importe quel pays (recommandé)</option>
-                      {loadingCountries && <option disabled>Chargement des pays…</option>}
-                      {(smspoolCountries ?? []).map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.short_name ? `[${c.short_name}] ` : ""}{c.name}
-                        </option>
-                      ))}
-                    </select>
-                    <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">▾</div>
-                  </div>
-                )}
+                <p className="text-sm text-muted-foreground">
+                  Sélectionnez d'abord la formule qui vous convient.
+                </p>
               </div>
 
-              {/* ── 2. SERVICE ── */}
               <div className="space-y-3">
-                <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
-                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground">2</span>
-                  Choisissez le service
-                  <span className="ml-auto normal-case font-normal text-primary text-xs">{selectedService.emoji} {selectedService.name} sélectionné</span>
-                </h2>
-
-                {!user ? (
-                  <div className="rounded-xl border border-border bg-muted/30 px-4 py-4 text-center text-sm text-muted-foreground">
-                    Connectez-vous pour choisir votre service
-                  </div>
-                ) : (
-                  <>
-                    {/* Recherche */}
-                    <div className="relative">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                      <input
-                        type="text"
-                        value={search}
-                        onChange={(e) => setSearch(e.target.value)}
-                        placeholder="Rechercher un service…"
-                        className="w-full rounded-xl border border-border bg-card pl-9 pr-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
-                      />
-                    </div>
-
-                    {/* Catégories */}
-                    <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
-                      {CATEGORIES.map((cat) => (
-                        <button
-                          key={cat}
-                          onClick={() => { setActiveCategory(cat); setSearch(""); }}
-                          className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-medium transition-all ${
-                            activeCategory === cat
-                              ? "gradient-primary text-primary-foreground shadow-sm"
-                              : "bg-card text-muted-foreground shadow-sm"
-                          }`}
-                        >
-                          {cat}
-                        </button>
-                      ))}
-                    </div>
-
-                    {/* Grille services */}
-                    <div className="grid grid-cols-4 gap-2 max-h-64 overflow-y-auto pr-1">
-                      {filteredServices.map((s) => (
-                        <motion.button
-                          key={s.id}
-                          whileTap={{ scale: 0.95 }}
-                          onClick={() => setSelectedService(s)}
-                          className={`flex flex-col items-center gap-1.5 rounded-xl border-2 p-2.5 transition-all ${
-                            selectedService.id === s.id
-                              ? "border-primary bg-primary/5"
-                              : "border-transparent bg-card shadow-sm"
-                          }`}
-                        >
-                          <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${s.color}`}>
-                            <span className="text-lg">{s.emoji}</span>
-                          </div>
-                          <p className="text-[10px] font-medium text-foreground text-center leading-tight">{s.name}</p>
-                        </motion.button>
-                      ))}
-                      {filteredServices.length === 0 && (
-                        <div className="col-span-4 py-6 text-center text-sm text-muted-foreground">
-                          Aucun service trouvé
+                {Object.values(PRODUCTS)
+                  .filter((p) => !(p.includesPartner && profile?.is_partner))
+                  .map((p) => (
+                    <motion.button
+                      key={p.id}
+                      whileTap={{ scale: 0.98 }}
+                      onClick={() => setSelectedProduct(p.id)}
+                      className={`w-full text-left rounded-2xl border-2 p-4 transition-all shadow-card ${
+                        selectedProduct === p.id
+                          ? "border-primary bg-primary/5"
+                          : "border-transparent bg-card"
+                      }`}
+                    >
+                      <div className="flex items-center gap-4">
+                        <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br ${p.gradientClass}`}>
+                          <ShoppingBag className="h-6 w-6 text-white" />
                         </div>
-                      )}
-                    </div>
-                  </>
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <p className="font-bold text-foreground">{p.name}</p>
+                            {p.includesPartner && (
+                              <span className="rounded-full bg-amber-500/20 px-2 py-0.5 text-[10px] font-bold text-amber-600">RECOMMANDÉ</span>
+                            )}
+                          </div>
+                          <p className="text-xs text-muted-foreground mt-0.5">{p.description}</p>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <p className="text-xl font-bold text-foreground">{p.price.toLocaleString("fr-FR")}</p>
+                          <p className="text-xs text-muted-foreground">FCFA</p>
+                        </div>
+                      </div>
+
+                      {/* Détail des avantages — toujours visible sur l'écran offre */}
+                      <div className="mt-3 space-y-1.5 border-t border-border/50 pt-3">
+                        {p.features.map((f) => (
+                          <div key={f} className="flex items-start gap-1.5">
+                            <Check className={`h-3.5 w-3.5 shrink-0 mt-0.5 ${p.includesPartner ? "text-amber-600" : "text-primary"}`} />
+                            <p className="text-xs text-muted-foreground">{f}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </motion.button>
+                  ))}
+
+                {profile?.is_partner && (
+                  <div className="flex items-center gap-2 rounded-xl border border-green-200 bg-green-50 px-4 py-2.5">
+                    <Check className="h-4 w-4 text-green-600 shrink-0" />
+                    <p className="text-xs text-green-700 font-medium">Vous êtes déjà Partenaire — Numéro à 2 000 FCFA.</p>
+                  </div>
                 )}
               </div>
 
-              {/* ── Bouton Continuer ── */}
               <Button
-                onClick={() => requireAuth(() => setStep("payment"))}
+                onClick={() => requireAuth(() => setStep("select"))}
                 className="h-13 w-full rounded-xl gradient-primary text-primary-foreground font-bold text-base shadow-glow py-4"
               >
-                Continuer — Choisir mon offre
+                Continuer — Choisir pays & service
               </Button>
 
-              {/* ── Comment ça marche ── */}
+              {/* Comment ça marche */}
               <div className="space-y-2 pt-1">
                 <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Comment ça marche</h3>
                 {[
-                  { icon: MapPin,      title: "1. Pays → Service",            desc: "Choisissez où et pour quel réseau social vous voulez un numéro" },
-                  { icon: ShoppingBag, title: "2. Simple (2 000F) ou Partenaire (2 500F)", desc: "Le pack Partenaire active votre lien de parrainage immédiatement" },
-                  { icon: CreditCard,  title: "3. Paiement sécurisé",          desc: "FedaPay — Mobile Money, carte bancaire…" },
-                  { icon: Phone,       title: "4. Numéro livré",               desc: "Votre numéro virtuel apparaît dans votre historique instantanément" },
+                  { icon: ShoppingBag, title: "1. Choisissez votre offre",         desc: "Achat Direct (2 000F) ou Pack Partenaire (2 500F)" },
+                  { icon: MapPin,      title: "2. Pays → Service",                 desc: "Choisissez où et pour quel réseau social vous voulez un numéro" },
+                  { icon: CreditCard,  title: "3. Paiement sécurisé",              desc: "FedaPay — Mobile Money, carte bancaire…" },
+                  { icon: Phone,       title: "4. Numéro livré",                   desc: "Votre numéro virtuel apparaît dans votre historique instantanément" },
                 ].map((item) => (
                   <div key={item.title} className="flex items-center gap-3 rounded-2xl bg-card p-4 shadow-card">
                     <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl gradient-primary">
@@ -447,9 +414,133 @@ const Boutique = () => {
           )}
 
           {/* ═══════════════════════════════════════════════════════════
-              ÉCRAN 2 — INTERFACE DE PAIEMENT
+              ÉCRAN 2 — SÉLECTION (Pays → Service) — sans prix affiché
           ═══════════════════════════════════════════════════════════ */}
-          {step === "payment" && (
+          {step === "select" && (
+            <motion.div
+              key="select"
+              initial={{ opacity: 0, x: 30 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              className="space-y-6"
+            >
+              {/* Retour */}
+              <button
+                type="button"
+                onClick={() => setStep("offer")}
+                className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <ArrowLeft className="h-4 w-4" />
+                Changer d'offre
+              </button>
+
+              {/* Bandeau offre choisie (sans prix) */}
+              <div className="rounded-2xl bg-card border border-border p-3 shadow-card flex items-center gap-3">
+                <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br ${product.gradientClass}`}>
+                  <ShoppingBag className="h-5 w-5 text-white" />
+                </div>
+                <div className="flex-1">
+                  <p className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">Offre sélectionnée</p>
+                  <p className="font-bold text-foreground text-sm">{product.name}</p>
+                </div>
+              </div>
+
+              {/* ── 1. PAYS ── */}
+              <div className="space-y-2">
+                <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground">2</span>
+                  Choisissez le pays
+                </h2>
+
+                <div className="relative">
+                  <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none z-10" />
+                  <select
+                    value={selectedCountry}
+                    onChange={(e) => {
+                      setSelectedCountry(e.target.value);
+                      const opt = e.target.options[e.target.selectedIndex];
+                      setSelectedCountryName(opt.text);
+                    }}
+                    className="w-full rounded-xl border border-border bg-card pl-9 pr-4 py-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 appearance-none"
+                  >
+                    <option value="0">🌍 N'importe quel pays (recommandé)</option>
+                    {loadingCountries && <option disabled>Chargement des pays…</option>}
+                    {(smspoolCountries ?? []).map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.short_name ? `[${c.short_name}] ` : ""}{c.name}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">▾</div>
+                </div>
+              </div>
+
+              {/* ── 2. SERVICE — clic = redirection paiement ── */}
+              <div className="space-y-3">
+                <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground">3</span>
+                  Choisissez le service
+                  <span className="ml-auto normal-case font-normal text-primary text-xs">Cliquez pour continuer →</span>
+                </h2>
+
+                {/* Recherche */}
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <input
+                    type="text"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder="Rechercher un service…"
+                    className="w-full rounded-xl border border-border bg-card pl-9 pr-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+                  />
+                </div>
+
+                {/* Catégories */}
+                <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+                  {CATEGORIES.map((cat) => (
+                    <button
+                      key={cat}
+                      onClick={() => { setActiveCategory(cat); setSearch(""); }}
+                      className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-medium transition-all ${
+                        activeCategory === cat
+                          ? "gradient-primary text-primary-foreground shadow-sm"
+                          : "bg-card text-muted-foreground shadow-sm"
+                      }`}
+                    >
+                      {cat}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Grille services — clic = paiement direct */}
+                <div className="grid grid-cols-4 gap-2 max-h-80 overflow-y-auto pr-1">
+                  {filteredServices.map((s) => (
+                    <motion.button
+                      key={s.id}
+                      whileTap={{ scale: 0.95 }}
+                      onClick={() => handleSelectService(s)}
+                      className="flex flex-col items-center gap-1.5 rounded-xl border-2 border-transparent bg-card p-2.5 shadow-sm transition-all hover:border-primary hover:bg-primary/5"
+                    >
+                      <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${s.color}`}>
+                        <span className="text-lg">{s.emoji}</span>
+                      </div>
+                      <p className="text-[10px] font-medium text-foreground text-center leading-tight">{s.name}</p>
+                    </motion.button>
+                  ))}
+                  {filteredServices.length === 0 && (
+                    <div className="col-span-4 py-6 text-center text-sm text-muted-foreground">
+                      Aucun service trouvé
+                    </div>
+                  )}
+                </div>
+              </div>
+            </motion.div>
+          )}
+
+          {/* ═══════════════════════════════════════════════════════════
+              ÉCRAN 3 — INTERFACE DE PAIEMENT (sans choix d'offre)
+          ═══════════════════════════════════════════════════════════ */}
+          {step === "payment" && selectedService && (
             <motion.div
               key="payment"
               initial={{ opacity: 0, x: 30 }}
@@ -467,84 +558,40 @@ const Boutique = () => {
                 Modifier ma sélection
               </button>
 
-              {/* Récapitulatif sélection */}
-              <div className="rounded-2xl bg-card border border-border p-4 shadow-card space-y-2">
-                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Votre sélection</p>
+              {/* Récapitulatif complet */}
+              <div className="rounded-2xl bg-card border border-border p-4 shadow-card space-y-4">
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Récapitulatif</p>
+
+                {/* Service + pays */}
                 <div className="flex items-center gap-3">
                   <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl ${selectedService.color}`}>
                     <span className="text-2xl">{selectedService.emoji}</span>
                   </div>
-                  <div>
+                  <div className="flex-1">
                     <p className="font-bold text-foreground">{selectedService.name}</p>
                     <p className="text-xs text-muted-foreground">{selectedCountryDisplay}</p>
                   </div>
                 </div>
-              </div>
 
-              {/* ── Choix de l'offre ── */}
-              <div className="space-y-3">
-                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
-                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground">3</span>
-                  Choisissez votre offre
-                </p>
+                <div className="border-t border-border" />
 
-                {Object.values(PRODUCTS)
-                  .filter((p) => !(p.includesPartner && profile?.is_partner))
-                  .map((p) => (
-                    <motion.button
-                      key={p.id}
-                      whileTap={{ scale: 0.98 }}
-                      onClick={() => setSelectedProduct(p.id)}
-                      className={`w-full text-left rounded-2xl border-2 p-4 transition-all shadow-card ${
-                        selectedProduct === p.id
-                          ? "border-primary bg-primary/5"
-                          : "border-transparent bg-card"
-                      }`}
-                    >
-                      <div className="flex items-center gap-4">
-                        <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br ${p.gradientClass}`}>
-                          <ShoppingBag className="h-5 w-5 text-white" />
-                        </div>
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <p className="font-bold text-foreground">{p.name}</p>
-                            {p.includesPartner && (
-                              <span className="rounded-full bg-amber-500/20 px-2 py-0.5 text-[10px] font-bold text-amber-600">RECOMMANDÉ</span>
-                            )}
-                          </div>
-                          <p className="text-xs text-muted-foreground mt-0.5">{p.description}</p>
-                        </div>
-                        <div className="text-right shrink-0">
-                          <p className="text-xl font-bold text-foreground">{p.price.toLocaleString("fr-FR")}</p>
-                          <p className="text-xs text-muted-foreground">FCFA</p>
-                        </div>
-                      </div>
-                    </motion.button>
-                  ))}
-
-                {profile?.is_partner && (
-                  <div className="flex items-center gap-2 rounded-xl border border-green-200 bg-green-50 px-4 py-2.5">
-                    <Check className="h-4 w-4 text-green-600 shrink-0" />
-                    <p className="text-xs text-green-700 font-medium">Vous êtes déjà Partenaire — Numéro Simple à 2 000 FCFA.</p>
+                {/* Offre + total */}
+                <div className="flex items-center gap-3">
+                  <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br ${product.gradientClass}`}>
+                    <ShoppingBag className="h-5 w-5 text-white" />
                   </div>
-                )}
-
-                {/* Avantages pack partenaire */}
-                {selectedProduct === "partner" && (
-                  <motion.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }}
-                    className="rounded-xl border border-amber-300/40 bg-amber-50/60 p-3 space-y-1.5">
-                    <p className="text-xs font-bold text-amber-700">Ce qui est inclus :</p>
-                    {PRODUCTS.partner.features.map((f) => (
-                      <div key={f} className="flex items-start gap-1.5">
-                        <Check className="h-3.5 w-3.5 text-amber-600 shrink-0 mt-0.5" />
-                        <p className="text-xs text-amber-700">{f}</p>
-                      </div>
-                    ))}
-                  </motion.div>
-                )}
+                  <div className="flex-1">
+                    <p className="font-semibold text-foreground text-sm">{product.name}</p>
+                    <p className="text-[11px] text-muted-foreground">{product.description}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-lg font-bold text-foreground">{product.price.toLocaleString("fr-FR")}</p>
+                    <p className="text-[10px] text-muted-foreground">FCFA</p>
+                  </div>
+                </div>
               </div>
 
-              {/* ── BOUTON DE PAIEMENT (uniquement ici) ── */}
+              {/* ── BOUTON DE PAIEMENT ── */}
               <div className="space-y-3 pt-1">
                 <Button
                   onClick={handlePay}
@@ -564,7 +611,7 @@ const Boutique = () => {
                   )}
                 </Button>
 
-                {/* Payer depuis le Wallet (si solde suffisant + pack simple) */}
+                {/* Payer depuis le Wallet (si solde suffisant + achat direct) */}
                 {canPayFromWallet && (
                   <>
                     <div className="flex items-center gap-3 text-xs text-muted-foreground">
