@@ -104,7 +104,7 @@ const Boutique = () => {
     queryFn: async () => {
       const resp = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/smspool-lookup?action=countries`,
-        { headers: { apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY } }
+        { headers: { apikey: import.meta.env.VITE_SUPABASE_ANON_KEY } }
       );
       const json = await resp.json();
       return json.success ? json.data as { id: string; name: string; short_name: string }[] : [];
