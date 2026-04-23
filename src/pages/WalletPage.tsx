@@ -117,7 +117,9 @@ const WalletPage = () => {
     mutationFn: async () => {
       const fcfaAmount = Number(withdrawAmount);
       if (fcfaAmount <= 0) throw new Error("Montant invalide");
-      if ((profile?.fcfa_balance ?? 0) < fcfaAmount) throw new Error("Solde FCFA insuffisant");
+      const _locked1 = (profile as any)?.fcfa_locked_balance ?? 0;
+      const _withdrawable1 = (profile?.fcfa_balance ?? 0) - _locked1;
+      if (_withdrawable1 < fcfaAmount) throw new Error(`Solde retraitable insuffisant. Disponible : ${_withdrawable1.toLocaleString("fr-FR")} FCFA (${_locked1.toLocaleString("fr-FR")} FCFA bloqués — réachat SIM uniquement).`);
       if (!phone.trim() || phone.length < 8) throw new Error("Numéro invalide");
 
       if (!user) throw new Error("Non connecté");
@@ -156,8 +158,10 @@ const WalletPage = () => {
   const handleWithdrawSubmit = () => {
     const fcfaAmount = Number(withdrawAmount);
     if (fcfaAmount <= 0 || !phone.trim() || phone.length < 8) return;
-    if ((profile?.fcfa_balance ?? 0) < fcfaAmount) {
-      toast.error("Solde FCFA insuffisant");
+    const _lockedW = (profile as any)?.fcfa_locked_balance ?? 0;
+    const _withdrawableW = (profile?.fcfa_balance ?? 0) - _lockedW;
+    if (_withdrawableW < fcfaAmount) {
+      toast.error(`Solde retraitable insuffisant. Disponible : ${_withdrawableW.toLocaleString("fr-FR")} FCFA (${_lockedW.toLocaleString("fr-FR")} FCFA bloqués — réachat SIM uniquement).`);
       return;
     }
     setWithdrawStep("confirm");
@@ -177,7 +181,9 @@ const WalletPage = () => {
   };
 
   const convertFcfa = Number(convertAmount || 0) * (rate ?? 1);
-  const fcfaAfterWithdraw = (profile?.fcfa_balance ?? 0) - Number(withdrawAmount || 0);
+  const _locked = (profile as any)?.fcfa_locked_balance ?? 0;
+  const _withdrawable = (profile?.fcfa_balance ?? 0) - _locked;
+  const fcfaAfterWithdraw = _withdrawable - Number(withdrawAmount || 0);
 
   const statusStyle: Record<string, string> = {
     pending: "bg-yellow-100 text-yellow-700",
@@ -214,6 +220,11 @@ const WalletPage = () => {
               <div>
                 <p className="text-xs text-primary-foreground/60">Solde FCFA</p>
                 <p className="text-lg font-bold">{(profile?.fcfa_balance ?? 0).toLocaleString("fr-FR")}</p>
+                {((profile as any)?.fcfa_locked_balance ?? 0) > 0 && (
+                  <p className="text-[10px] text-primary-foreground/50">
+                    dont {((profile as any)?.fcfa_locked_balance ?? 0).toLocaleString("fr-FR")} bloqués
+                  </p>
+                )}
               </div>
               <div>
                 <p className="text-xs text-primary-foreground/60">Taux</p>
@@ -397,7 +408,7 @@ const WalletPage = () => {
                       disabled={
                         !withdrawAmount || Number(withdrawAmount) <= 0 ||
                         !phone.trim() || phone.length < 8 ||
-                        (profile?.fcfa_balance ?? 0) < Number(withdrawAmount)
+                        _withdrawable < Number(withdrawAmount)
                       }
                       className="h-14 w-full rounded-2xl gradient-primary text-primary-foreground font-semibold text-base shadow-glow"
                     >
@@ -429,7 +440,7 @@ const WalletPage = () => {
                       <div className="flex items-center justify-between px-4 py-3 bg-destructive/5">
                         <span className="text-sm text-muted-foreground">Solde après retrait</span>
                         <span className="text-sm font-bold text-destructive">
-                          {((profile?.fcfa_balance ?? 0) - Number(withdrawAmount)).toLocaleString("fr-FR")} FCFA
+                          {(_withdrawable - Number(withdrawAmount)).toLocaleString("fr-FR")} FCFA (retraitable)
                         </span>
                       </div>
                     </div>

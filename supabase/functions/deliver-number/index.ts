@@ -6,6 +6,7 @@
  * Pilier 3 : Boucle d'auto-remplacement (cancel + retry si banni ou timeout 180s)
  * Pilier 4 : Table subscriptions Supabase — 30 jours de validité
  * Pilier 5 : Consignes de sécurité après livraison
+ * Pilier 6 : Remboursement wallet bloqué si livraison impossible (ne peut pas être retiré)
  */
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
@@ -18,8 +19,6 @@ const corsHeaders = {
 
 const SMSPOOL_BASE = "https://api.smspool.net";
 const MAX_ATTEMPTS = 5;
-const SMS_TIMEOUT_MS = 180_000;
-const POLL_INTERVAL_MS = 5_000;
 
 const SECURITY_TIPS = [
   "Utilisez la 4G/5G mobile (pas le WiFi) pour recevoir votre SMS de vérification.",
@@ -28,40 +27,15 @@ const SECURITY_TIPS = [
   "Le numéro est valide 30 jours — renouvelez avant expiration pour le conserver.",
 ];
 
-// Service name mapping: app ID → SMSPool service name
 const SERVICE_MAP: Record<string, string> = {
-  whatsapp:   "WhatsApp",
-  telegram:   "Telegram",
-  signal:     "Signal",
-  viber:      "Viber",
-  line:       "Line",
-  wechat:     "WeChat",
-  skype:      "Skype",
-  tiktok:     "TikTok",
-  instagram:  "Instagram",
-  facebook:   "Facebook",
-  twitter:    "Twitter",
-  snapchat:   "Snapchat",
-  linkedin:   "LinkedIn",
-  pinterest:  "Pinterest",
-  reddit:     "Reddit",
-  discord:    "Discord",
-  steam:      "Steam",
-  twitch:     "Twitch",
-  netflix:    "Netflix",
-  spotify:    "Spotify",
-  tinder:     "Tinder",
-  bumble:     "Bumble",
-  google:     "Google",
-  apple:      "Apple",
-  amazon:     "Amazon",
-  paypal:     "PayPal",
-  airbnb:     "Airbnb",
-  uber:       "Uber",
-  shein:      "Shein",
-  aliexpress: "AliExpress",
-  ebay:       "eBay",
-  shopee:     "Shopee",
+  whatsapp: "WhatsApp", telegram: "Telegram", signal: "Signal", viber: "Viber",
+  line: "Line", wechat: "WeChat", skype: "Skype", tiktok: "TikTok",
+  instagram: "Instagram", facebook: "Facebook", twitter: "Twitter", snapchat: "Snapchat",
+  linkedin: "LinkedIn", pinterest: "Pinterest", reddit: "Reddit", discord: "Discord",
+  steam: "Steam", twitch: "Twitch", netflix: "Netflix", spotify: "Spotify",
+  tinder: "Tinder", bumble: "Bumble", google: "Google", apple: "Apple",
+  amazon: "Amazon", paypal: "PayPal", airbnb: "Airbnb", uber: "Uber",
+  shein: "Shein", aliexpress: "AliExpress", ebay: "eBay", shopee: "Shopee",
 };
 
 async function smspoolPost(endpoint: string, body: Record<string, string>, apiKey: string) {
@@ -78,19 +52,8 @@ async function smspoolPost(endpoint: string, body: Record<string, string>, apiKe
   return res.json();
 }
 
-async function smspoolGet(endpoint: string, apiKey: string) {
-  const res = await fetch(`${SMSPOOL_BASE}${endpoint}`, {
-    headers: { Authorization: `Bearer ${apiKey}` },
-  });
-  if (!res.ok) throw new Error(`SMSPool GET error ${res.status}`);
-  return res.json();
-}
-
-async function orderNumber(service: string, apiKey: string) {
-  const data = await smspoolPost("/purchase/sms/", {
-    country: "0",  // 0 = any country
-    service,
-  }, apiKey);
+async function orderNumber(service: string, country: string, apiKey: string) {
+  const data = await smspoolPost("/purchase/sms/", { country, service }, apiKey);
   if (!data.success || !data.number) {
     throw new Error(data.message ?? "SMSPool: aucun numéro disponible");
   }
@@ -105,15 +68,17 @@ async function cancelOrder(orderId: string, apiKey: string) {
   return smspoolPost("/request/cancel/", { order_id: orderId }, apiKey);
 }
 
-async function deliverValidNumber(service: string, apiKey: string, onAttempt?: (n: number, num: string) => void) {
-  const cancelled: string[] = [];
-  let attempts = 0;
+function delay(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}
 
+async function deliverValidNumber(service: string, country: string, apiKey: string) {
+  let attempts = 0;
   while (attempts < MAX_ATTEMPTS) {
     attempts++;
-    let order: { order_id: string; number: string; country: string; service: string };
+    let order: any;
     try {
-      order = await orderNumber(service, apiKey);
+      order = await orderNumber(service, country, apiKey);
     } catch (err: any) {
       console.error(`Attempt ${attempts} order failed:`, err.message);
       if (attempts >= MAX_ATTEMPTS) throw new Error(`Aucun numéro disponible pour ${service} après ${attempts} tentatives.`);
@@ -121,25 +86,15 @@ async function deliverValidNumber(service: string, apiKey: string, onAttempt?: (
       continue;
     }
 
-    onAttempt?.(attempts, order.number);
-
-    // Immediate ban check (Pilier 2)
     const check = await checkSMS(order.order_id, apiKey);
     if (check.status === 6 || check.status === 3) {
-      console.warn(`Number banned (status ${check.status}) — cancelling and retrying`);
       await cancelOrder(order.order_id, apiKey);
-      cancelled.push(order.order_id);
       continue;
     }
 
-    return { orderId: order.order_id, number: order.number, country: order.country, service, attempts, cancelled };
+    return { orderId: order.order_id, number: order.number, country: order.country, service, attempts };
   }
-
   throw new Error(`Impossible de livrer un numéro valide pour ${service} après ${MAX_ATTEMPTS} tentatives.`);
-}
-
-function delay(ms: number) {
-  return new Promise((r) => setTimeout(r, ms));
 }
 
 serve(async (req) => {
@@ -154,18 +109,20 @@ serve(async (req) => {
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    const { service, product_type, fedapay_transaction_id, user_id } = await req.json();
+    const { service, product_type, fedapay_transaction_id, user_id, country } = await req.json();
 
     if (!service || !product_type || !fedapay_transaction_id) {
       throw new Error("Paramètres manquants: service, product_type, fedapay_transaction_id");
     }
-    if (!user_id) throw new Error("Paramètre user_id requis (UID Firebase)");
+    if (!user_id) throw new Error("Paramètre user_id requis");
     const userId = user_id;
+    const orderCountry = country || "0"; // "0" = any country
 
-    // Map app service ID to SMSPool service name
     const smspoolService = SERVICE_MAP[service.toLowerCase()] ?? service;
+    const amount = product_type === "partner" ? 2500 : 2000;
+    const isPartner = product_type === "partner";
 
-    // Idempotency: check if transaction already processed (Pilier 4)
+    // Idempotency check
     const { data: existingTx } = await supabase
       .from("subscriptions")
       .select("id, number")
@@ -179,14 +136,65 @@ serve(async (req) => {
       );
     }
 
-    // Deliver number via auto-replacement engine (Pilier 1 + 3)
-    const delivery = await deliverValidNumber(smspoolService, smspoolKey);
+    let delivery: any = null;
+    let deliveryError = "";
+
+    try {
+      delivery = await deliverValidNumber(smspoolService, orderCountry, smspoolKey);
+    } catch (err: any) {
+      deliveryError = err.message;
+      console.error("Delivery failed:", deliveryError);
+    }
+
+    if (!delivery) {
+      // PILIER 6: Credit wallet with locked balance (refund)
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("fcfa_balance, fcfa_locked_balance")
+        .eq("id", userId)
+        .single();
+
+      const currentBalance = profile?.fcfa_balance ?? 0;
+      const currentLocked = profile?.fcfa_locked_balance ?? 0;
+
+      await supabase.from("profiles").update({
+        fcfa_balance: currentBalance + amount,
+        fcfa_locked_balance: currentLocked + amount,
+      }).eq("id", userId);
+
+      // Record refund transaction
+      await supabase.from("transactions").insert({
+        user_id: userId,
+        type: "refund_wallet",
+        status: "validated",
+        amount_fcfa: amount,
+        description: `Remboursement wallet — livraison ${service} échouée. Montant bloqué pour réachat.`,
+        fedapay_transaction_id,
+      });
+
+      // Notify user
+      await supabase.from("notifications").insert({
+        user_id: userId,
+        title: "Livraison impossible — remboursé dans votre wallet",
+        message: `Aucun numéro ${service} disponible actuellement. ${amount.toLocaleString()} FCFA ajoutés à votre wallet (utilisables pour racheter une SIM). Réessayez dans quelques instants.`,
+        type: "payment_failed",
+      });
+
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: deliveryError,
+          wallet_credited: true,
+          amount_credited: amount,
+          message: `Livraison impossible. ${amount.toLocaleString()} FCFA crédités dans votre wallet (bloqués pour réachat SIM).`,
+        }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
 
     const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
-    const amount = product_type === "partner" ? 2500 : 2000;
-    const isPartner = product_type === "partner";
 
-    // Save to subscriptions (Pilier 4)
+    // Save subscription
     const { error: subError } = await supabase.from("subscriptions").insert({
       user_id: userId,
       number: delivery.number,
@@ -258,15 +266,12 @@ serve(async (req) => {
       }
     }
 
-    // Notification avec consignes de sécurité (Pilier 5)
     await supabase.from("notifications").insert({
       user_id: userId,
       title: "Numéro livré avec succès !",
       message: `Votre numéro ${service} est prêt : ${delivery.number}\n\n${SECURITY_TIPS.join("\n")}`,
       type: "payment_success",
     });
-
-    console.log(`Delivered ${delivery.number} for ${service} (${delivery.attempts} attempts) to user ${userId}`);
 
     return new Response(
       JSON.stringify({
@@ -284,9 +289,9 @@ serve(async (req) => {
     );
   } catch (err: any) {
     const msg = err?.message ?? String(err) ?? "Erreur interne";
-    console.error("deliver-number error:", msg, err?.stack);
+    console.error("deliver-number error:", msg);
     return new Response(
-      JSON.stringify({ success: false, error: msg, stack: err?.stack ?? null }),
+      JSON.stringify({ success: false, error: msg }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
