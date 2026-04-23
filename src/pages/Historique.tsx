@@ -9,16 +9,21 @@ import { format } from "date-fns";
 import { fr } from "date-fns/locale";
 import { motion, AnimatePresence } from "framer-motion";
 
-const filters = ["Tout", "Achat numéro", "Parrainage", "Retrait"] as const;
+const filters = ["Tout", "Achat numéro", "Parrainage", "Retrait", "Remboursement"] as const;
 
 const typeConfig: Record<string, { icon: typeof Download; color: string; label: string }> = {
   deposit: { icon: Download, color: "gradient-primary", label: "Dépôt" },
   withdrawal: { icon: ArrowUpRight, color: "gradient-accent", label: "Retrait" },
-  conversion: { icon: RefreshCw, color: "gradient-primary", label: "Conversion" },
+  withdrawal_request: { icon: ArrowUpRight, color: "gradient-accent", label: "Demande de retrait" },
+  conversion: { icon: RefreshCw, color: "gradient-primary", label: "Conversion π → FCFA" },
   referral_bonus: { icon: Users, color: "gradient-gold", label: "Commission parrainage" },
   number_purchase: { icon: Phone, color: "gradient-primary", label: "Achat numéro" },
-  partner_activation: { icon: Users, color: "gradient-gold", label: "Pack Partenaire" },
+  number_purchase_wallet: { icon: Phone, color: "gradient-primary", label: "Achat numéro (wallet)" },
+  partner_activation: { icon: Users, color: "gradient-gold", label: "Pack Partenaire activé" },
+  refund_wallet: { icon: RefreshCw, color: "gradient-accent", label: "Remboursement (wallet bloqué)" },
 };
+
+const NEGATIVE_TYPES = new Set(["withdrawal", "withdrawal_request", "number_purchase", "number_purchase_wallet"]);
 
 const statusConfig: Record<string, { bg: string; label: string }> = {
   pending: { bg: "bg-warning/10 text-warning", label: "En attente" },
@@ -40,9 +45,10 @@ const Historique = () => {
         .eq("user_id", user.id)
         .order("created_at", { ascending: false });
 
-      if (filter === "Achat numéro") query = query.in("type", ["number_purchase", "partner_activation"]);
+      if (filter === "Achat numéro") query = query.in("type", ["number_purchase", "number_purchase_wallet", "partner_activation"]);
       else if (filter === "Parrainage") query = query.eq("type", "referral_bonus");
-      else if (filter === "Retrait") query = query.eq("type", "withdrawal");
+      else if (filter === "Retrait") query = query.in("type", ["withdrawal", "withdrawal_request"]);
+      else if (filter === "Remboursement") query = query.eq("type", "refund_wallet");
 
       const { data } = await query;
       return data ?? [];
@@ -102,7 +108,7 @@ const Historique = () => {
               const config = typeConfig[tx.type] ?? typeConfig.deposit;
               const status = statusConfig[tx.status] ?? statusConfig.pending;
               const Icon = config.icon;
-              const isPositive = tx.type !== "withdrawal";
+              const isPositive = !NEGATIVE_TYPES.has(tx.type);
               const numberInfo = (tx as any).virtual_number;
 
               return (
@@ -129,7 +135,7 @@ const Historique = () => {
                   </div>
                   <div className="text-right shrink-0">
                     <p className={`font-bold ${isPositive ? "text-accent" : "text-destructive"}`}>
-                      {isPositive ? "+" : "-"}{(tx.amount_fcfa ?? tx.amount_pi ?? 0).toLocaleString("fr-FR")} {tx.amount_fcfa ? "FCFA" : "π"}
+                      {isPositive ? "+" : "-"}{(tx.amount_fcfa ?? 0).toLocaleString("fr-FR")} FCFA
                     </p>
                     <span className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold ${status.bg}`}>
                       {status.label}
