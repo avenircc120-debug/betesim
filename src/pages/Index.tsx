@@ -60,7 +60,12 @@ const Index = () => {
         <motion.div {...fadeUp} className="flex items-center justify-between">
           <div>
             <p className="text-sm text-muted-foreground">Bienvenue 👋</p>
-            <h1 className="text-2xl font-bold text-foreground">{profile?.username ?? "Utilisateur"}</h1>
+            <h1 className="text-2xl font-bold text-foreground">
+              {(profile as any)?.username
+                || (profile as any)?.display_name
+                || user?.email?.split("@")[0]
+                || (user?.phoneNumber ? `Utilisateur ${user.phoneNumber.slice(-4)}` : "Utilisateur")}
+            </h1>
           </div>
           <div className="flex items-center gap-2">
             <NotificationCenter />
