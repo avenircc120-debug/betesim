@@ -220,6 +220,26 @@ serve(async (req) => {
     const amount = product_type === "partner" ? 2500 : 2000;
     const isPartner = product_type === "partner";
 
+    // ── Activation Partenaire immédiate (avant livraison SMSPool) ──────────
+    // On active dès que le paiement est confirmé, indépendamment du délai SMSPool.
+    if (isPartner) {
+      await supabase.from("profiles").update({ is_partner: true }).eq("id", userId);
+      await supabase.from("transactions").insert({
+        user_id: userId,
+        type: "partner_activation",
+        status: "validated",
+        amount_fcfa: 0,
+        description: "Activation Pack Partenaire — parrainage débloqué dès paiement",
+      });
+      await supabase.from("notifications").insert({
+        user_id: userId,
+        title: "Statut Partenaire activé !",
+        message: "Votre lien de parrainage est maintenant actif. Invitez vos amis et gagnez 10% de commission sur chacun de leurs achats.",
+        type: "partner_activated",
+      });
+      console.log(`Partner activated immediately for user ${userId}`);
+    }
+
     // Save to subscriptions (Pilier 4)
     const { error: subError } = await supabase.from("subscriptions").insert({
       user_id: userId,
@@ -244,18 +264,6 @@ serve(async (req) => {
       virtual_number: delivery.number,
       fedapay_transaction_id,
     });
-
-    // Partner activation
-    if (isPartner) {
-      await supabase.from("profiles").update({ is_partner: true }).eq("id", userId);
-      await supabase.from("transactions").insert({
-        user_id: userId,
-        type: "partner_activation",
-        status: "validated",
-        amount_fcfa: 0,
-        description: "Activation Pack Partenaire — parrainage débloqué",
-      });
-    }
 
     // Referral commission
     const { data: referral } = await supabase
