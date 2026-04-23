@@ -1,10 +1,9 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Phone, Loader2, ChevronDown, Search, ArrowLeft, MessageSquare } from "lucide-react";
+import { X, Phone, Loader2, ChevronDown, Search, ArrowLeft, Mail } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { signInWithGoogle } from "@/lib/firebase";
-import { supabase } from "@/integrations/supabase/client";
+import { signInWithGoogle, sendPhoneOTP, auth, RecaptchaVerifier, type ConfirmationResult } from "@/lib/firebase";
 import { toast } from "sonner";
 
 // ─── Country Codes ────────────────────────────────────────────────────────────
@@ -49,13 +48,21 @@ const COUNTRIES: Country[] = [
   { name: "Australie",          dial: "+61",  code: "AU", flag: "🇦🇺" },
   { name: "Afrique du Sud",     dial: "+27",  code: "ZA", flag: "🇿🇦" },
   { name: "Égypte",             dial: "+20",  code: "EG", flag: "🇪🇬" },
+  { name: "Éthiopie",           dial: "+251", code: "ET", flag: "🇪🇹" },
   { name: "Kenya",              dial: "+254", code: "KE", flag: "🇰🇪" },
+  { name: "Tanzanie",           dial: "+255", code: "TZ", flag: "🇹🇿" },
   { name: "Rwanda",             dial: "+250", code: "RW", flag: "🇷🇼" },
+  { name: "Mozambique",         dial: "+258", code: "MZ", flag: "🇲🇿" },
   { name: "Angola",             dial: "+244", code: "AO", flag: "🇦🇴" },
   { name: "Gabon",              dial: "+241", code: "GA", flag: "🇬🇦" },
+  { name: "Guinée Équatoriale", dial: "+240", code: "GQ", flag: "🇬🇶" },
   { name: "Mauritanie",         dial: "+222", code: "MR", flag: "🇲🇷" },
+  { name: "Cap-Vert",           dial: "+238", code: "CV", flag: "🇨🇻" },
+  { name: "Comores",            dial: "+269", code: "KM", flag: "🇰🇲" },
   { name: "Mexique",            dial: "+52",  code: "MX", flag: "🇲🇽" },
+  { name: "Argentine",          dial: "+54",  code: "AR", flag: "🇦🇷" },
   { name: "Russie",             dial: "+7",   code: "RU", flag: "🇷🇺" },
+  { name: "Turquie",            dial: "+90",  code: "TR", flag: "🇹🇷" },
   { name: "Arabie Saoudite",    dial: "+966", code: "SA", flag: "🇸🇦" },
   { name: "Émirats Arabes",     dial: "+971", code: "AE", flag: "🇦🇪" },
 ];
@@ -79,7 +86,9 @@ export function AuthModal({ open, message, onClose, onSuccess }: AuthModalProps)
   const [loadingGoogle, setLoadingGoogle] = useState(false);
   const [loadingPhone, setLoadingPhone] = useState(false);
   const [loadingOtp, setLoadingOtp] = useState(false);
-  const [fullPhone, setFullPhone] = useState("");
+  const [confirmation, setConfirmation] = useState<ConfirmationResult | null>(null);
+  const recaptchaRef = useRef<HTMLDivElement>(null);
+  const recaptchaVerifierRef = useRef<RecaptchaVerifier | null>(null);
 
   // Auto-detect country from IP
   useEffect(() => {
@@ -93,6 +102,22 @@ export function AuthModal({ open, message, onClose, onSuccess }: AuthModalProps)
       .catch(() => {});
   }, [open]);
 
+  // Nettoie complètement le reCAPTCHA (verifier + DOM)
+  const clearRecaptcha = useCallback(() => {
+    if (recaptchaVerifierRef.current) {
+      try { recaptchaVerifierRef.current.clear(); } catch { /* ignore */ }
+      recaptchaVerifierRef.current = null;
+    }
+    if (recaptchaRef.current) {
+      recaptchaRef.current.innerHTML = "";
+    }
+  }, []);
+
+  // Nettoyage à la destruction du composant
+  useEffect(() => {
+    return () => { clearRecaptcha(); };
+  }, [clearRecaptcha]);
+
   // Reset state when modal closes
   useEffect(() => {
     if (!open) {
@@ -102,10 +127,19 @@ export function AuthModal({ open, message, onClose, onSuccess }: AuthModalProps)
         setOtp("");
         setSearch("");
         setShowPicker(false);
-        setFullPhone("");
+        setConfirmation(null);
+        clearRecaptcha();
       }, 300);
     }
-  }, [open]);
+  }, [open, clearRecaptcha]);
+
+  const setupRecaptcha = useCallback(() => {
+    if (!recaptchaRef.current) return;
+    clearRecaptcha();
+    recaptchaVerifierRef.current = new RecaptchaVerifier(auth, recaptchaRef.current, {
+      size: "invisible",
+    });
+  }, [clearRecaptcha]);
 
   const handleGoogle = async () => {
     setLoadingGoogle(true);
@@ -122,7 +156,6 @@ export function AuthModal({ open, message, onClose, onSuccess }: AuthModalProps)
     }
   };
 
-  // ── SANS reCAPTCHA : Supabase phone OTP ──────────────────────────────────
   const handleSendOTP = async () => {
     if (!phone.trim() || phone.length < 6) {
       toast.error("Numéro de téléphone invalide");
@@ -130,15 +163,16 @@ export function AuthModal({ open, message, onClose, onSuccess }: AuthModalProps)
     }
     setLoadingPhone(true);
     try {
-      const computed = country.dial + phone.replace(/^0/, "");
-      setFullPhone(computed);
-      const { error } = await supabase.auth.signInWithOtp({ phone: computed });
-      if (error) throw error;
+      setupRecaptcha();
+      const fullPhone = country.dial + phone.replace(/^0/, "");
+      const result = await sendPhoneOTP(fullPhone, recaptchaVerifierRef.current!);
+      setConfirmation(result);
       setStep("otp");
-      toast.success(`Code envoyé au ${computed}`);
+      toast.success(`Code envoyé au ${fullPhone}`);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Erreur d'envoi du code";
+      const msg = err instanceof Error ? err.message : "Erreur d'envoi";
       toast.error(msg);
+      clearRecaptcha();
     } finally {
       setLoadingPhone(false);
     }
@@ -151,31 +185,14 @@ export function AuthModal({ open, message, onClose, onSuccess }: AuthModalProps)
     }
     setLoadingOtp(true);
     try {
-      const { error } = await supabase.auth.verifyOtp({
-        phone: fullPhone,
-        token: otp,
-        type: "sms",
-      });
-      if (error) throw error;
+      await confirmation!.confirm(otp);
       toast.success("Connexion réussie !");
       onSuccess();
       onClose();
     } catch {
-      toast.error("Code incorrect ou expiré. Vérifiez et réessayez.");
+      toast.error("Code incorrect. Vérifiez et réessayez.");
     } finally {
       setLoadingOtp(false);
-    }
-  };
-
-  const handleResend = async () => {
-    try {
-      const { error } = await supabase.auth.signInWithOtp({ phone: fullPhone });
-      if (error) throw error;
-      toast.success("Nouveau code envoyé !");
-      setOtp("");
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Erreur renvoi";
-      toast.error(msg);
     }
   };
 
@@ -215,7 +232,7 @@ export function AuthModal({ open, message, onClose, onSuccess }: AuthModalProps)
                   {step !== "menu" && (
                     <button
                       onClick={() => {
-                        if (step === "otp") setStep("phone");
+                        if (step === "otp") { clearRecaptcha(); setStep("phone"); }
                         else setStep("menu");
                       }}
                       className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-muted-foreground hover:bg-muted/80"
@@ -253,6 +270,7 @@ export function AuthModal({ open, message, onClose, onSuccess }: AuthModalProps)
                     exit={{ opacity: 0, x: -12 }}
                     className="space-y-3"
                   >
+                    {/* Google Button */}
                     <Button
                       onClick={handleGoogle}
                       disabled={loadingGoogle}
@@ -274,12 +292,14 @@ export function AuthModal({ open, message, onClose, onSuccess }: AuthModalProps)
                       )}
                     </Button>
 
+                    {/* Divider */}
                     <div className="flex items-center gap-3">
                       <div className="h-px flex-1 bg-border" />
                       <span className="text-xs font-medium text-muted-foreground">ou</span>
                       <div className="h-px flex-1 bg-border" />
                     </div>
 
+                    {/* Phone Button */}
                     <Button
                       onClick={() => setStep("phone")}
                       className="h-14 w-full rounded-2xl gradient-primary text-primary-foreground font-semibold shadow-glow"
@@ -304,10 +324,12 @@ export function AuthModal({ open, message, onClose, onSuccess }: AuthModalProps)
                     className="space-y-4"
                   >
                     <p className="text-sm text-muted-foreground">
-                      Entrez votre numéro. Vous recevrez un code SMS directement — sans vérification Google.
+                      Entrez votre numéro. Nous vous enverrons un code de vérification.
                     </p>
 
+                    {/* Country + Phone input */}
                     <div className="flex gap-2">
+                      {/* Country Picker Button */}
                       <button
                         type="button"
                         onClick={() => setShowPicker(!showPicker)}
@@ -328,6 +350,7 @@ export function AuthModal({ open, message, onClose, onSuccess }: AuthModalProps)
                       />
                     </div>
 
+                    {/* Country Picker Dropdown */}
                     <AnimatePresence>
                       {showPicker && (
                         <motion.div
@@ -373,6 +396,8 @@ export function AuthModal({ open, message, onClose, onSuccess }: AuthModalProps)
                       )}
                     </AnimatePresence>
 
+                    <div ref={recaptchaRef} />
+
                     <Button
                       onClick={handleSendOTP}
                       disabled={loadingPhone || phone.length < 6}
@@ -386,7 +411,7 @@ export function AuthModal({ open, message, onClose, onSuccess }: AuthModalProps)
                     </Button>
 
                     <p className="text-center text-xs text-muted-foreground">
-                      Disponible dans tous les pays • Gratuit pour vous • Aucun CAPTCHA
+                      Disponible dans tous les pays • Gratuit pour vous
                     </p>
                   </motion.div>
                 )}
@@ -401,9 +426,13 @@ export function AuthModal({ open, message, onClose, onSuccess }: AuthModalProps)
                     className="space-y-5"
                   >
                     <div className="rounded-2xl bg-primary/5 border border-primary/20 px-4 py-3 text-center">
-                      <MessageSquare className="h-5 w-5 text-primary mx-auto mb-1" />
-                      <p className="text-sm text-foreground font-medium">Code envoyé au</p>
-                      <p className="text-sm font-bold text-primary">{country.flag} {fullPhone}</p>
+                      <Mail className="h-5 w-5 text-primary mx-auto mb-1" />
+                      <p className="text-sm text-foreground font-medium">
+                        Code envoyé au
+                      </p>
+                      <p className="text-sm font-bold text-primary">
+                        {country.flag} {country.dial} {phone}
+                      </p>
                     </div>
 
                     <div className="space-y-2">
@@ -435,7 +464,7 @@ export function AuthModal({ open, message, onClose, onSuccess }: AuthModalProps)
 
                     <button
                       type="button"
-                      onClick={handleResend}
+                      onClick={() => { clearRecaptcha(); setStep("phone"); setOtp(""); }}
                       className="w-full text-center text-sm text-primary hover:underline"
                     >
                       Renvoyer le code
