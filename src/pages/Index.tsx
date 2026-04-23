@@ -61,11 +61,25 @@ const Index = () => {
           <div>
             <p className="text-sm text-muted-foreground">Bienvenue 👋</p>
             <h1 className="text-2xl font-bold text-foreground">
-              {(profile as any)?.username
-                || (profile as any)?.display_name
-                || user?.email?.split("@")[0]
-                || (user?.phoneNumber ? `Utilisateur ${user.phoneNumber.slice(-4)}` : "Utilisateur")}
+              {(() => {
+                if (!user) return "Invité";
+                const p: any = profile ?? {};
+                if (p.username) return p.username;
+                if (p.display_name) return p.display_name;
+                if (user.email) return user.email.split("@")[0];
+                const phone = user.phoneNumber || p.phone_number;
+                if (phone) return `Utilisateur ••${phone.slice(-4)}`;
+                return "Utilisateur";
+              })()}
             </h1>
+            {!user && (
+              <button
+                onClick={() => navigate("/login")}
+                className="mt-1 text-xs font-semibold text-primary underline-offset-2 hover:underline"
+              >
+                Se connecter pour acheter un numéro
+              </button>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <NotificationCenter />
