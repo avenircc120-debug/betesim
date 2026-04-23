@@ -320,7 +320,9 @@ const Boutique = () => {
                       <option value="0">🌍 N'importe quel pays (recommandé)</option>
                       {loadingCountries && <option disabled>Chargement des pays…</option>}
                       {(smspoolCountries ?? []).map((c) => (
-                        <option key={c.id} value={c.id}>{c.name}</option>
+                        <option key={c.id} value={c.id}>
+                          {c.short_name ? `[${c.short_name}] ` : ""}{c.name}
+                        </option>
                       ))}
                     </select>
                   </div>
