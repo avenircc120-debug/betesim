@@ -110,12 +110,12 @@ const Boutique = () => {
   const [search, setSearch] = useState("");
   const [isPaying, setIsPaying] = useState(false);
 
-  // Pays depuis SMSPool
-  const { data: smspoolCountries, isLoading: loadingCountries } = useQuery({
-    queryKey: ["smspool-countries"],
+  // Catalogue BETESIM (pays disponibles)
+  const { data: catalogCountries, isLoading: loadingCountries } = useQuery({
+    queryKey: ["betesim-countries"],
     queryFn: async () => {
       const resp = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/smspool-lookup?action=countries`,
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/betesim-catalog?action=countries`,
         { headers: { apikey: import.meta.env.VITE_SUPABASE_ANON_KEY } }
       );
       const json = await resp.json();
@@ -285,8 +285,8 @@ const Boutique = () => {
 
   const selectedCountryDisplay = selectedCountry === "0"
     ? "🌍 N'importe quel pays"
-    : smspoolCountries?.find(c => c.id === selectedCountry)
-      ? `[${smspoolCountries.find(c => c.id === selectedCountry)?.short_name}] ${smspoolCountries.find(c => c.id === selectedCountry)?.name}`
+    : catalogCountries?.find(c => c.id === selectedCountry)
+      ? `[${catalogCountries.find(c => c.id === selectedCountry)?.short_name}] ${catalogCountries.find(c => c.id === selectedCountry)?.name}`
       : selectedCountryName;
 
   // Si Partenaire est déjà activé, on force "simple"
@@ -304,7 +304,7 @@ const Boutique = () => {
         {/* En-tête */}
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
           <h1 className="text-2xl font-bold text-foreground">Boutique</h1>
-          <p className="text-sm text-muted-foreground">+1 000 services disponibles via SMSPool</p>
+          <p className="text-sm text-muted-foreground">+1 000 services disponibles via BETESIM</p>
         </motion.div>
 
         <AnimatePresence mode="wait">
@@ -465,7 +465,7 @@ const Boutique = () => {
                   >
                     <option value="0">🌍 N'importe quel pays (recommandé)</option>
                     {loadingCountries && <option disabled>Chargement des pays…</option>}
-                    {(smspoolCountries ?? []).map((c) => (
+                    {(catalogCountries ?? []).map((c) => (
                       <option key={c.id} value={c.id}>
                         {c.short_name ? `[${c.short_name}] ` : ""}{c.name}
                       </option>
