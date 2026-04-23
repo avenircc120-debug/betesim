@@ -86,9 +86,9 @@ async function smspoolGet(endpoint: string, apiKey: string) {
   return res.json();
 }
 
-async function orderNumber(service: string, apiKey: string) {
+async function orderNumber(service: string, apiKey: string, country = "0") {
   const data = await smspoolPost("/purchase/sms/", {
-    country: "0",  // 0 = any country
+    country,
     service,
   }, apiKey);
   if (!data.success || !data.number) {
@@ -105,7 +105,7 @@ async function cancelOrder(orderId: string, apiKey: string) {
   return smspoolPost("/request/cancel/", { order_id: orderId }, apiKey);
 }
 
-async function deliverValidNumber(service: string, apiKey: string, onAttempt?: (n: number, num: string) => void) {
+async function deliverValidNumber(service: string, apiKey: string, country = "0", onAttempt?: (n: number, num: string) => void) {
   const cancelled: string[] = [];
   let attempts = 0;
 
@@ -113,7 +113,7 @@ async function deliverValidNumber(service: string, apiKey: string, onAttempt?: (
     attempts++;
     let order: { order_id: string; number: string; country: string; service: string };
     try {
-      order = await orderNumber(service, apiKey);
+      order = await orderNumber(service, apiKey, country);
     } catch (err: any) {
       console.error(`Attempt ${attempts} order failed:`, err.message);
       if (attempts >= MAX_ATTEMPTS) throw new Error(`Aucun numéro disponible pour ${service} après ${attempts} tentatives.`);
@@ -154,7 +154,7 @@ serve(async (req) => {
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    const { service, product_type, fedapay_transaction_id, user_id } = await req.json();
+    const { service, product_type, fedapay_transaction_id, user_id, country } = await req.json();
 
     if (!service || !product_type || !fedapay_transaction_id) {
       throw new Error("Paramètres manquants: service, product_type, fedapay_transaction_id");
@@ -179,8 +179,42 @@ serve(async (req) => {
       );
     }
 
-    // Deliver number via auto-replacement engine (Pilier 1 + 3)
-    const delivery = await deliverValidNumber(smspoolService, smspoolKey);
+    // Deliver number via auto-replacement engine (Pilier 1 + 3 + 6 : wallet sur échec)
+    const orderCountry = country || "0";
+    let delivery: Awaited<ReturnType<typeof deliverValidNumber>>;
+    try {
+      delivery = await deliverValidNumber(smspoolService, smspoolKey, orderCountry);
+    } catch (deliveryErr: any) {
+      // Pilier 6 : rembourser dans wallet bloqué si livraison impossible
+      const refundAmt = product_type === "partner" ? 2500 : 2000;
+      const { data: prof } = await supabase.from("profiles").select("fcfa_balance, fcfa_locked_balance").eq("id", userId).maybeSingle();
+      const curBal = (prof as any)?.fcfa_balance ?? 0;
+      const curLocked = (prof as any)?.fcfa_locked_balance ?? 0;
+      await supabase.from("profiles").update({
+        fcfa_balance: curBal + refundAmt,
+        fcfa_locked_balance: curLocked + refundAmt,
+      }).eq("id", userId);
+      await supabase.from("transactions").insert({
+        user_id: userId,
+        type: "refund_wallet",
+        status: "validated",
+        amount_fcfa: refundAmt,
+        description: `Remboursement wallet — livraison ${service} échouée. Utilisable pour racheter une SIM uniquement.`,
+        fedapay_transaction_id,
+      });
+      await supabase.from("notifications").insert({
+        user_id: userId,
+        title: "Livraison impossible — remboursé dans votre wallet",
+        message: `Aucun numéro ${service} disponible. ${refundAmt.toLocaleString("fr-FR")} FCFA ajoutés à votre wallet (réachat SIM uniquement). Réessayez dans quelques instants.`,
+        type: "payment_failed",
+      });
+      return new Response(JSON.stringify({
+        success: false,
+        wallet_credited: true,
+        amount_credited: refundAmt,
+        error: deliveryErr.message,
+      }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
 
     const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
     const amount = product_type === "partner" ? 2500 : 2000;

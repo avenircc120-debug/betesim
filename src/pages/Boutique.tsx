@@ -1,9 +1,10 @@
 
-import { ShoppingBag, Phone, Users, ArrowLeft, CreditCard, Check, Search } from "lucide-react";
+import { ShoppingBag, Phone, Users, ArrowLeft, CreditCard, Check, Search, MapPin, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import BottomNav from "@/components/BottomNav";
 import { useAuth } from "@/hooks/useAuth";
-import { useQueryClient } from "@tanstack/react-query";
+import { useProfile } from "@/hooks/useProfile";
+import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "framer-motion";
@@ -87,13 +88,30 @@ const PRODUCTS = {
 
 const Boutique = () => {
   const { user, requireAuth } = useAuth();
+  const { data: profile } = useProfile();
   const queryClient = useQueryClient();
   const [step, setStep] = useState<Step>("select");
+  const [selectedCountry, setSelectedCountry] = useState<string>("0");
   const [selectedProduct, setSelectedProduct] = useState<Product>("simple");
   const [selectedService, setSelectedService] = useState<Service>(ALL_SERVICES[0]);
   const [activeCategory, setActiveCategory] = useState("Tous");
   const [search, setSearch] = useState("");
   const [isPaying, setIsPaying] = useState(false);
+
+  // Pays SMSPool — seulement si connecté
+  const { data: smspoolCountries, isLoading: loadingCountries } = useQuery({
+    queryKey: ["smspool-countries"],
+    queryFn: async () => {
+      const resp = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/smspool-lookup?action=countries`,
+        { headers: { apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY } }
+      );
+      const json = await resp.json();
+      return json.success ? json.data as { id: string; name: string; short_name: string }[] : [];
+    },
+    enabled: !!user,
+    staleTime: 10 * 60 * 1000,
+  });
 
 
 
@@ -115,9 +133,11 @@ const Boutique = () => {
     const savedProduct = (sessionStorage.getItem("pending_product") as Product) || "simple";
     const savedServiceId = sessionStorage.getItem("pending_service") || "whatsapp";
     const savedServiceName = sessionStorage.getItem("pending_service_name") || savedServiceId;
+    const savedCountry = sessionStorage.getItem("pending_country") || "0";
     sessionStorage.removeItem("pending_product");
     sessionStorage.removeItem("pending_service");
     sessionStorage.removeItem("pending_service_name");
+    sessionStorage.removeItem("pending_country");
 
     if (status === "approved") {
       (async () => {
@@ -161,6 +181,7 @@ const Boutique = () => {
       sessionStorage.setItem("pending_product", selectedProduct);
       sessionStorage.setItem("pending_service", selectedService.id);
       sessionStorage.setItem("pending_service_name", selectedService.name);
+      sessionStorage.setItem("pending_country", selectedCountry);
       const result = await createFedaPayTransaction({
         amount: product.price,
         description: `${product.name} — Numéro ${selectedService.name}`,
@@ -192,10 +213,10 @@ const Boutique = () => {
           {step === "select" ? (
             <motion.div key="select" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-5">
 
-              {/* OFFRES */}
+              {/* OFFRES — Pack 2500 masqué si déjà partenaire */}
               <div className="space-y-3">
                 <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">1. Choisissez votre offre</h2>
-                {Object.values(PRODUCTS).map((p) => (
+                {Object.values(PRODUCTS).filter(p => !(p.includesPartner && profile?.is_partner)).map((p) => (
                   <motion.button
                     key={p.id}
                     whileTap={{ scale: 0.98 }}
@@ -224,6 +245,12 @@ const Boutique = () => {
                     </div>
                   </motion.button>
                 ))}
+                {profile?.is_partner && (
+                  <div className="flex items-center gap-2 rounded-xl border border-green-200 bg-green-50 px-4 py-2.5">
+                    <Check className="h-4 w-4 text-green-600 shrink-0" />
+                    <p className="text-xs text-green-700 font-medium">Vous êtes déjà Partenaire — utilisez le Numéro Simple à 2 000 FCFA.</p>
+                  </div>
+                )}
               </div>
 
               {/* PARTNER BENEFITS BANNER */}
@@ -246,10 +273,32 @@ const Boutique = () => {
                 </motion.div>
               )}
 
-              {/* SERVICE SELECTOR */}
+              {/* PAYS SELECTOR (Fix 2 — Country First) — visible seulement si connecté (Fix 5) */}
+              {user ? (
+                <div className="space-y-2">
+                  <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">2. Choisissez le pays</h2>
+                  <div className="relative">
+                    <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+                    <select
+                      value={selectedCountry}
+                      onChange={(e) => setSelectedCountry(e.target.value)}
+                      className="w-full rounded-xl border border-border bg-card pl-9 pr-4 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 appearance-none"
+                    >
+                      <option value="0">🌍 N'importe quel pays (recommandé)</option>
+                      {loadingCountries && <option disabled>Chargement des pays…</option>}
+                      {(smspoolCountries ?? []).map((c) => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              ) : null}
+
+              {/* SERVICE SELECTOR — visible seulement si connecté (Fix 5) */}
+              {user ? (
               <div className="space-y-3">
                 <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                  2. Choisissez le service{" "}
+                  3. Choisissez le service{" "}
                   <span className="normal-case font-normal text-primary">— {selectedService.emoji} {selectedService.name} sélectionné</span>
                 </h2>
 
@@ -308,6 +357,12 @@ const Boutique = () => {
                   )}
                 </div>
               </div>
+              ) : (
+                <div className="rounded-2xl border border-border bg-muted/30 px-5 py-6 text-center">
+                  <p className="text-sm font-semibold text-foreground mb-1">Connectez-vous pour choisir votre pays et service</p>
+                  <p className="text-xs text-muted-foreground">La sélection est réservée aux membres betesim.</p>
+                </div>
+              )}
 
               <Button
                 onClick={() => requireAuth(() => setStep("confirm"))}

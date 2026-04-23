@@ -1,9 +1,10 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Phone, Loader2, ChevronDown, Search, ArrowLeft, Mail } from "lucide-react";
+import { X, Phone, Loader2, ChevronDown, Search, ArrowLeft, MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { signInWithGoogle, sendPhoneOTP, auth, RecaptchaVerifier, type ConfirmationResult } from "@/lib/firebase";
+import { signInWithGoogle } from "@/lib/firebase";
+import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
 // ─── Country Codes ────────────────────────────────────────────────────────────
@@ -86,9 +87,7 @@ export function AuthModal({ open, message, onClose, onSuccess }: AuthModalProps)
   const [loadingGoogle, setLoadingGoogle] = useState(false);
   const [loadingPhone, setLoadingPhone] = useState(false);
   const [loadingOtp, setLoadingOtp] = useState(false);
-  const [confirmation, setConfirmation] = useState<ConfirmationResult | null>(null);
-  const recaptchaRef = useRef<HTMLDivElement>(null);
-  const recaptchaVerifierRef = useRef<RecaptchaVerifier | null>(null);
+  const [fullPhone, setFullPhone] = useState("");
 
   // Auto-detect country from IP
   useEffect(() => {
@@ -102,22 +101,6 @@ export function AuthModal({ open, message, onClose, onSuccess }: AuthModalProps)
       .catch(() => {});
   }, [open]);
 
-  // Nettoie complètement le reCAPTCHA (verifier + DOM)
-  const clearRecaptcha = useCallback(() => {
-    if (recaptchaVerifierRef.current) {
-      try { recaptchaVerifierRef.current.clear(); } catch { /* ignore */ }
-      recaptchaVerifierRef.current = null;
-    }
-    if (recaptchaRef.current) {
-      recaptchaRef.current.innerHTML = "";
-    }
-  }, []);
-
-  // Nettoyage à la destruction du composant
-  useEffect(() => {
-    return () => { clearRecaptcha(); };
-  }, [clearRecaptcha]);
-
   // Reset state when modal closes
   useEffect(() => {
     if (!open) {
@@ -127,19 +110,10 @@ export function AuthModal({ open, message, onClose, onSuccess }: AuthModalProps)
         setOtp("");
         setSearch("");
         setShowPicker(false);
-        setConfirmation(null);
-        clearRecaptcha();
+        setFullPhone("");
       }, 300);
     }
-  }, [open, clearRecaptcha]);
-
-  const setupRecaptcha = useCallback(() => {
-    if (!recaptchaRef.current) return;
-    clearRecaptcha();
-    recaptchaVerifierRef.current = new RecaptchaVerifier(auth, recaptchaRef.current, {
-      size: "invisible",
-    });
-  }, [clearRecaptcha]);
+  }, [open]);
 
   const handleGoogle = async () => {
     setLoadingGoogle(true);
@@ -163,16 +137,15 @@ export function AuthModal({ open, message, onClose, onSuccess }: AuthModalProps)
     }
     setLoadingPhone(true);
     try {
-      setupRecaptcha();
-      const fullPhone = country.dial + phone.replace(/^0/, "");
-      const result = await sendPhoneOTP(fullPhone, recaptchaVerifierRef.current!);
-      setConfirmation(result);
+      const computed = country.dial + phone.replace(/^0/, "");
+      setFullPhone(computed);
+      const { error } = await supabase.auth.signInWithOtp({ phone: computed });
+      if (error) throw error;
       setStep("otp");
-      toast.success(`Code envoyé au ${fullPhone}`);
+      toast.success(`Code envoyé au ${computed}`);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Erreur d'envoi";
       toast.error(msg);
-      clearRecaptcha();
     } finally {
       setLoadingPhone(false);
     }
@@ -185,12 +158,13 @@ export function AuthModal({ open, message, onClose, onSuccess }: AuthModalProps)
     }
     setLoadingOtp(true);
     try {
-      await confirmation!.confirm(otp);
+      const { error } = await supabase.auth.verifyOtp({ phone: fullPhone, token: otp, type: "sms" });
+      if (error) throw error;
       toast.success("Connexion réussie !");
       onSuccess();
       onClose();
     } catch {
-      toast.error("Code incorrect. Vérifiez et réessayez.");
+      toast.error("Code incorrect ou expiré. Vérifiez et réessayez.");
     } finally {
       setLoadingOtp(false);
     }
@@ -232,7 +206,7 @@ export function AuthModal({ open, message, onClose, onSuccess }: AuthModalProps)
                   {step !== "menu" && (
                     <button
                       onClick={() => {
-                        if (step === "otp") { clearRecaptcha(); setStep("phone"); }
+                        if (step === "otp") setStep("phone");
                         else setStep("menu");
                       }}
                       className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-muted-foreground hover:bg-muted/80"
@@ -396,7 +370,6 @@ export function AuthModal({ open, message, onClose, onSuccess }: AuthModalProps)
                       )}
                     </AnimatePresence>
 
-                    <div ref={recaptchaRef} />
 
                     <Button
                       onClick={handleSendOTP}
@@ -426,7 +399,7 @@ export function AuthModal({ open, message, onClose, onSuccess }: AuthModalProps)
                     className="space-y-5"
                   >
                     <div className="rounded-2xl bg-primary/5 border border-primary/20 px-4 py-3 text-center">
-                      <Mail className="h-5 w-5 text-primary mx-auto mb-1" />
+                      <MessageSquare className="h-5 w-5 text-primary mx-auto mb-1" />
                       <p className="text-sm text-foreground font-medium">
                         Code envoyé au
                       </p>
@@ -464,7 +437,7 @@ export function AuthModal({ open, message, onClose, onSuccess }: AuthModalProps)
 
                     <button
                       type="button"
-                      onClick={() => { clearRecaptcha(); setStep("phone"); setOtp(""); }}
+                      onClick={() => { setStep("phone"); setOtp(""); }}
                       className="w-full text-center text-sm text-primary hover:underline"
                     >
                       Renvoyer le code
