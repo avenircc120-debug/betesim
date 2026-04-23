@@ -87,6 +87,7 @@ export function AuthModal({ open, message, onClose, onSuccess }: AuthModalProps)
   const [loadingPhone, setLoadingPhone] = useState(false);
   const [loadingOtp, setLoadingOtp] = useState(false);
   const [confirmation, setConfirmation] = useState<ConfirmationResult | null>(null);
+  const [recaptchaReady, setRecaptchaReady] = useState(false);
   const recaptchaRef = useRef<HTMLDivElement>(null);
   const recaptchaVerifierRef = useRef<RecaptchaVerifier | null>(null);
 
@@ -111,6 +112,7 @@ export function AuthModal({ open, message, onClose, onSuccess }: AuthModalProps)
     if (recaptchaRef.current) {
       recaptchaRef.current.innerHTML = "";
     }
+    setRecaptchaReady(false);
   }, []);
 
   // Nettoyage à la destruction du composant
@@ -134,12 +136,26 @@ export function AuthModal({ open, message, onClose, onSuccess }: AuthModalProps)
   }, [open, clearRecaptcha]);
 
   const setupRecaptcha = useCallback(() => {
-    if (!recaptchaRef.current) return;
-    clearRecaptcha();
+    if (!recaptchaRef.current || recaptchaVerifierRef.current) return;
+    recaptchaRef.current.innerHTML = "";
     recaptchaVerifierRef.current = new RecaptchaVerifier(auth, recaptchaRef.current, {
-      size: "invisible",
+      size: "normal",
+      callback: () => setRecaptchaReady(true),
+      "expired-callback": () => setRecaptchaReady(false),
     });
-  }, [clearRecaptcha]);
+    recaptchaVerifierRef.current.render().catch(() => {});
+  }, []);
+
+  // Affiche le reCAPTCHA visible dès l'ouverture de l'étape "phone".
+  useEffect(() => {
+    if (open && step === "phone") {
+      setupRecaptcha();
+    }
+    if (step !== "phone") {
+      // Nettoie quand on quitte l'étape téléphone (sauf sur fermeture qui le fait déjà)
+      if (step !== "otp") clearRecaptcha();
+    }
+  }, [open, step, setupRecaptcha, clearRecaptcha]);
 
   const handleGoogle = async () => {
     setLoadingGoogle(true);
@@ -161,9 +177,13 @@ export function AuthModal({ open, message, onClose, onSuccess }: AuthModalProps)
       toast.error("Numéro de téléphone invalide");
       return;
     }
+    if (!recaptchaReady) {
+      toast.error("Veuillez cocher \"Je ne suis pas un robot\" avant d'envoyer le code.");
+      return;
+    }
     setLoadingPhone(true);
     try {
-      setupRecaptcha();
+      if (!recaptchaVerifierRef.current) setupRecaptcha();
       const fullPhone = country.dial + phone.replace(/^0/, "");
       const result = await sendPhoneOTP(fullPhone, recaptchaVerifierRef.current!);
       setConfirmation(result);
@@ -396,11 +416,15 @@ export function AuthModal({ open, message, onClose, onSuccess }: AuthModalProps)
                       )}
                     </AnimatePresence>
 
-                    <div ref={recaptchaRef} />
+                    {/* reCAPTCHA visible — placé entre le numéro et le bouton de validation */}
+                    <div className="flex flex-col items-center gap-2">
+                      <p className="text-xs text-muted-foreground">Vérifiez que vous n'êtes pas un robot :</p>
+                      <div ref={recaptchaRef} className="flex justify-center" />
+                    </div>
 
                     <Button
                       onClick={handleSendOTP}
-                      disabled={loadingPhone || phone.length < 6}
+                      disabled={loadingPhone || phone.length < 6 || !recaptchaReady}
                       className="h-13 w-full rounded-2xl gradient-primary text-primary-foreground font-semibold shadow-glow"
                     >
                       {loadingPhone ? (

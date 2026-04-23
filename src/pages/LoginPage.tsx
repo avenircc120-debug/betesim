@@ -80,6 +80,7 @@ const LoginPage = () => {
   const [loadingPhone, setLoadingPhone] = useState(false);
   const [loadingOtp, setLoadingOtp] = useState(false);
   const [confirmation, setConfirmation] = useState<ConfirmationResult | null>(null);
+  const [recaptchaReady, setRecaptchaReady] = useState(false);
   const recaptchaRef = useRef<HTMLDivElement>(null);
   const recaptchaVerifierRef = useRef<RecaptchaVerifier | null>(null);
 
@@ -107,13 +108,28 @@ const LoginPage = () => {
     if (recaptchaRef.current) {
       recaptchaRef.current.innerHTML = "";
     }
+    setRecaptchaReady(false);
   }, []);
 
   const setupRecaptcha = useCallback(() => {
-    if (!recaptchaRef.current) return;
-    clearRecaptcha();
-    recaptchaVerifierRef.current = new RecaptchaVerifier(auth, recaptchaRef.current, { size: "invisible" });
-  }, [clearRecaptcha]);
+    if (!recaptchaRef.current || recaptchaVerifierRef.current) return;
+    recaptchaRef.current.innerHTML = "";
+    recaptchaVerifierRef.current = new RecaptchaVerifier(auth, recaptchaRef.current, {
+      size: "normal",
+      callback: () => setRecaptchaReady(true),
+      "expired-callback": () => setRecaptchaReady(false),
+    });
+    recaptchaVerifierRef.current.render().catch(() => {});
+  }, []);
+
+  // Render the visible reCAPTCHA as soon as the user reaches the phone step.
+  useEffect(() => {
+    if (step === "phone") {
+      setupRecaptcha();
+    } else {
+      clearRecaptcha();
+    }
+  }, [step, setupRecaptcha, clearRecaptcha]);
 
   useEffect(() => {
     return () => { clearRecaptcha(); };
@@ -139,9 +155,10 @@ const LoginPage = () => {
 
   const handleSendOTP = async () => {
     if (!phone.trim() || phone.length < 6) { toast.error("Numéro invalide"); return; }
+    if (!recaptchaReady) { toast.error("Veuillez cocher \"Je ne suis pas un robot\" avant d'envoyer le code."); return; }
     setLoadingPhone(true);
     try {
-      setupRecaptcha();
+      if (!recaptchaVerifierRef.current) setupRecaptcha();
       const fullPhone = country.dial + phone.replace(/^0/, "");
       const result = await sendPhoneOTP(fullPhone, recaptchaVerifierRef.current!);
       setConfirmation(result);
@@ -333,11 +350,15 @@ const LoginPage = () => {
                   )}
                 </AnimatePresence>
 
-                <div ref={recaptchaRef} />
+                {/* reCAPTCHA visible — placé entre le numéro et le bouton de validation */}
+                <div className="flex flex-col items-center gap-2 py-1">
+                  <p className="text-xs text-muted-foreground">Vérifiez que vous n'êtes pas un robot :</p>
+                  <div ref={recaptchaRef} className="flex justify-center" />
+                </div>
 
                 <Button
                   onClick={handleSendOTP}
-                  disabled={loadingPhone || phone.length < 6}
+                  disabled={loadingPhone || phone.length < 6 || !recaptchaReady}
                   className="h-14 w-full rounded-2xl gradient-primary text-primary-foreground font-semibold shadow-glow"
                 >
                   {loadingPhone ? <Loader2 className="h-5 w-5 animate-spin" /> : "Envoyer le code"}

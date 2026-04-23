@@ -116,6 +116,12 @@ const WalletPage = () => {
   const withdrawMutation = useMutation({
     mutationFn: async () => {
       const fcfaAmount = Number(withdrawAmount);
+      if (withdrawableBalance < fcfaAmount) {
+        const lockedMsg = lockedBalance > 0
+          ? ` (${lockedBalance.toLocaleString("fr-FR")} FCFA bloqués pour réachat de SIM uniquement)`
+          : "";
+        throw new Error(`Solde retirable insuffisant. Disponible : ${withdrawableBalance.toLocaleString("fr-FR")} FCFA${lockedMsg}.`);
+      }
       if (fcfaAmount <= 0) throw new Error("Montant invalide");
       if ((profile?.fcfa_balance ?? 0) < fcfaAmount) throw new Error("Solde FCFA insuffisant");
       if (!phone.trim() || phone.length < 8) throw new Error("Numéro invalide");
@@ -177,7 +183,10 @@ const WalletPage = () => {
   };
 
   const convertFcfa = Number(convertAmount || 0) * (rate ?? 1);
-  const fcfaAfterWithdraw = (profile?.fcfa_balance ?? 0) - Number(withdrawAmount || 0);
+  // Solde réellement retirable = solde total - portion bloquée (issue des remboursements de livraison)
+  const lockedBalance = (profile as any)?.fcfa_locked_balance ?? 0;
+  const withdrawableBalance = Math.max(0, (profile?.fcfa_balance ?? 0) - lockedBalance);
+  const fcfaAfterWithdraw = withdrawableBalance - Number(withdrawAmount || 0);
 
   const statusStyle: Record<string, string> = {
     pending: "bg-yellow-100 text-yellow-700",
@@ -224,6 +233,16 @@ const WalletPage = () => {
                 <p className="text-lg font-bold">{referralCount ?? 0}</p>
               </div>
             </div>
+            {lockedBalance > 0 && (
+              <div className="mt-3 rounded-xl bg-white/10 px-3 py-2 text-xs">
+                <p className="font-semibold">
+                  {lockedBalance.toLocaleString("fr-FR")} FCFA bloqués (réachat de SIM uniquement)
+                </p>
+                <p className="text-primary-foreground/70 mt-0.5">
+                  Issus d'un remboursement de livraison. Retirable : {withdrawableBalance.toLocaleString("fr-FR")} FCFA.
+                </p>
+              </div>
+            )}
           </div>
         </motion.div>
 
@@ -327,11 +346,21 @@ const WalletPage = () => {
                   <motion.div key="form" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-5">
                     <h3 className="text-lg font-semibold text-foreground">Retirer des FCFA</h3>
 
-                    <div className="flex items-center justify-between rounded-xl bg-muted/50 px-4 py-3">
-                      <span className="text-sm text-muted-foreground">Solde FCFA disponible</span>
-                      <span className="text-sm font-bold text-foreground">
-                        {(profile?.fcfa_balance ?? 0).toLocaleString("fr-FR")} FCFA
-                      </span>
+                    <div className="rounded-xl bg-muted/50 px-4 py-3 space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-muted-foreground">Solde retirable</span>
+                        <span className="text-sm font-bold text-foreground">
+                          {withdrawableBalance.toLocaleString("fr-FR")} FCFA
+                        </span>
+                      </div>
+                      {lockedBalance > 0 && (
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-muted-foreground">dont bloqués (réachat SIM)</span>
+                          <span className="font-semibold text-amber-600">
+                            {lockedBalance.toLocaleString("fr-FR")} FCFA
+                          </span>
+                        </div>
+                      )}
                     </div>
 
                     <div className="space-y-1.5">
@@ -397,7 +426,7 @@ const WalletPage = () => {
                       disabled={
                         !withdrawAmount || Number(withdrawAmount) <= 0 ||
                         !phone.trim() || phone.length < 8 ||
-                        (profile?.fcfa_balance ?? 0) < Number(withdrawAmount)
+                        withdrawableBalance < Number(withdrawAmount)
                       }
                       className="h-14 w-full rounded-2xl gradient-primary text-primary-foreground font-semibold text-base shadow-glow"
                     >

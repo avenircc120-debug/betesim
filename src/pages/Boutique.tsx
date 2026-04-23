@@ -199,7 +199,40 @@ const Boutique = () => {
     }
   }, [user, selectedProduct, selectedService]);
 
+  const handlePayFromWallet = useCallback(async () => {
+    setIsPaying(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("purchase-from-wallet", {
+        body: {
+          user_id: user.id,
+          service: selectedService.id,
+          country: selectedCountry,
+        },
+      });
+      if (error) throw new Error(error.message);
+      if (!data?.success) {
+        if (data?.retry_other_country) {
+          toast.error("Aucun numéro disponible pour ce pays. Aucun débit. Choisissez un autre pays et réessayez.");
+          setStep("select");
+        } else {
+          toast.error(data?.error || "Achat impossible.");
+        }
+        return;
+      }
+      toast.success(`Numéro livré : ${data.number}`);
+      setStep("select");
+      queryClient.invalidateQueries({ queryKey: ["profile"] });
+      queryClient.invalidateQueries({ queryKey: ["subscriptions"] });
+    } catch (e: any) {
+      toast.error(e.message || "Erreur lors de l'achat depuis le wallet.");
+    } finally {
+      setIsPaying(false);
+    }
+  }, [user, selectedService, selectedCountry, queryClient]);
+
   const product = PRODUCTS[selectedProduct];
+  const walletBalance = profile?.fcfa_balance ?? 0;
+  const canPayFromWallet = selectedProduct === "simple" && walletBalance >= product.price;
 
   return (
     <div className="min-h-screen bg-background pb-24">
@@ -447,7 +480,7 @@ const Boutique = () => {
                 {isPaying ? (
                   <div className="flex items-center gap-2">
                     <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary-foreground/30 border-t-primary-foreground" />
-                    <span>Redirection vers FedaPay…</span>
+                    <span>Patientez…</span>
                   </div>
                 ) : (
                   <>
@@ -456,6 +489,28 @@ const Boutique = () => {
                   </>
                 )}
               </Button>
+
+              {canPayFromWallet && (
+                <>
+                  <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                    <div className="h-px flex-1 bg-border" />
+                    <span>ou</span>
+                    <div className="h-px flex-1 bg-border" />
+                  </div>
+                  <Button
+                    onClick={() => requireAuth(handlePayFromWallet)}
+                    disabled={isPaying}
+                    variant="outline"
+                    className="h-12 w-full rounded-xl border-2 border-primary/40 bg-primary/5 font-semibold text-sm"
+                  >
+                    Payer avec mon portefeuille ({walletBalance.toLocaleString("fr-FR")} FCFA dispo.)
+                  </Button>
+                  <p className="text-center text-[11px] text-muted-foreground -mt-1">
+                    Idéal pour retenter sur un autre pays après un remboursement.
+                  </p>
+                </>
+              )}
+
               <p className="text-center text-xs text-muted-foreground">Paiement 100% sécurisé via FedaPay</p>
             </motion.div>
           )}
