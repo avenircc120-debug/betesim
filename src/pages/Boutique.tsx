@@ -83,7 +83,7 @@ const PRODUCTS = {
       "1 numéro virtuel pour n'importe quel service",
       "Lien de parrainage débloqué dès le paiement",
       "10% de commission sur chaque achat de vos filleuls",
-      "Statut Partenaire officiel betesim",
+      "Statut Partenaire officiel WINPACK",
     ],
     gradientClass: "from-amber-500 to-orange-600",
     includesPartner: true,
@@ -110,12 +110,12 @@ const Boutique = () => {
   const [search, setSearch] = useState("");
   const [isPaying, setIsPaying] = useState(false);
 
-  // Catalogue BETESIM (pays disponibles)
+  // Catalogue WINPACK (pays disponibles)
   const { data: catalogCountries, isLoading: loadingCountries } = useQuery({
-    queryKey: ["betesim-countries"],
+    queryKey: ["winpack-countries"],
     queryFn: async () => {
       const resp = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/betesim-catalog?action=countries`,
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/winpack-catalog?action=countries`,
         { headers: { apikey: import.meta.env.VITE_SUPABASE_ANON_KEY } }
       );
       const json = await resp.json();
