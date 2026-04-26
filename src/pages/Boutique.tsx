@@ -8,6 +8,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "framer-motion";
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import { createFedaPayTransaction } from "@/lib/fedapay";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -95,6 +96,7 @@ const Boutique = () => {
   const { user, requireAuth } = useAuth();
   const { data: profile } = useProfile();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
 
   // Navigation entre les écrans
   const [step, setStep] = useState<Step>("offer");
@@ -146,6 +148,33 @@ const Boutique = () => {
     sessionStorage.removeItem("pending_country");
 
     if (status === "approved") {
+      // ─── Pack Partenaire : flow dédié en 4 étapes ─────────────────────────
+      if (savedProduct === "partner") {
+        toast.loading("Activation de votre Pack Partenaire…", { id: "delivery" });
+        (async () => {
+          try {
+            const { data, error } = await supabase.functions.invoke("partner-pack", {
+              body: {
+                action: "init",
+                user_id: user.uid ?? user.id,
+                fedapay_transaction_id: transactionId,
+              },
+            });
+            toast.dismiss("delivery");
+            if (error) throw new Error(error.message);
+            if (!data?.success) throw new Error(data?.error || "Erreur d'activation du Pack Partenaire");
+            queryClient.invalidateQueries({ queryKey: ["profile"] });
+            toast.success("Pack Partenaire activé ! Suivez les étapes pour recevoir votre numéro Telegram.", { duration: 5000 });
+            navigate(`/pack-partenaire?id=${data.pack.id}`);
+          } catch (e: any) {
+            toast.dismiss("delivery");
+            toast.error(e.message || "Erreur lors de l'activation du Pack Partenaire. Contactez le support.");
+          }
+        })();
+        return;
+      }
+
+      // ─── Achat Direct : flow classique ────────────────────────────────────
       toast.loading("Livraison du numéro en cours…", { id: "delivery" });
       (async () => {
         try {
@@ -214,6 +243,36 @@ const Boutique = () => {
     setSelectedService(s);
     requireAuth(() => setStep("payment"));
   }, [requireAuth]);
+
+  // ── Paiement Pack Partenaire — direct, sans choix service/pays ────────────
+  const handlePartnerPack = useCallback(async () => {
+    if (!user) return;
+    setIsPaying(true);
+    try {
+      const product = PRODUCTS.partner;
+      sessionStorage.setItem("pending_product", "partner");
+      // Service & pays neutres : la livraison du Telegram se fera à l'étape 4 du flow dédié
+      sessionStorage.setItem("pending_service", "telegram");
+      sessionStorage.setItem("pending_service_name", "Telegram");
+      sessionStorage.setItem("pending_country", "0");
+
+      const result = await createFedaPayTransaction({
+        amount: product.price,
+        description: "Pack Partenaire WINPACK",
+        userId: user.id,
+        paymentType: "partner_pack",
+        callbackUrl: `${window.location.origin}/boutique`,
+      });
+      window.location.href = result.paymentUrl;
+    } catch (e: any) {
+      setIsPaying(false);
+      sessionStorage.removeItem("pending_product");
+      sessionStorage.removeItem("pending_service");
+      sessionStorage.removeItem("pending_service_name");
+      sessionStorage.removeItem("pending_country");
+      toast.error(e.message || "Erreur paiement. Réessayez.");
+    }
+  }, [user]);
 
   // ── Paiement FedaPay ──────────────────────────────────────────────────────
   const handlePay = useCallback(async () => {
@@ -384,10 +443,19 @@ const Boutique = () => {
               </div>
 
               <Button
-                onClick={() => requireAuth(() => setStep("select"))}
-                className="h-13 w-full rounded-xl gradient-primary text-primary-foreground font-bold text-base shadow-glow py-4"
+                onClick={() => {
+                  if (selectedProduct === "partner") {
+                    requireAuth(handlePartnerPack);
+                  } else {
+                    requireAuth(() => setStep("select"));
+                  }
+                }}
+                disabled={isPaying}
+                className="h-13 w-full rounded-xl gradient-primary text-primary-foreground font-bold text-base shadow-glow py-4 disabled:opacity-50"
               >
-                Continuer — Choisir pays & service
+                {selectedProduct === "partner"
+                  ? (isPaying ? "Redirection vers le paiement…" : "Payer 2 500 FCFA — Pack Partenaire")
+                  : "Continuer — Choisir pays & service"}
               </Button>
 
               {/* Comment ça marche */}
