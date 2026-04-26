@@ -304,7 +304,7 @@ const Boutique = () => {
         {/* En-tête */}
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
           <h1 className="text-2xl font-bold text-foreground">Boutique</h1>
-          <p className="text-sm text-muted-foreground">+1 000 services disponibles via BETESIM</p>
+          <p className="text-sm text-muted-foreground">+1 000 services disponibles via WINPACK</p>
         </motion.div>
 
         <AnimatePresence mode="wait">
