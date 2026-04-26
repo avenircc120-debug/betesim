@@ -21,6 +21,8 @@ import Install from "./pages/Install";
 import NotFound from "./pages/NotFound";
 import AuthCallback from "./pages/AuthCallback";
 import LoginPage from "./pages/LoginPage";
+import PackPartenaire from "./pages/PackPartenaire";
+import Admin from "./pages/Admin";
 
 const queryClient = new QueryClient();
 
@@ -58,6 +60,8 @@ const AppContent = () => {
           <Route path="/login" element={<LoginPage />} />
           <Route path="/auth" element={<LoginPage />} />
           <Route path="/reset-password" element={<ResetPassword />} />
+          <Route path="/pack-partenaire" element={<PackPartenaire />} />
+          <Route path="/admin" element={<Admin />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </AuthProvider>
