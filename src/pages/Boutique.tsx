@@ -61,7 +61,7 @@ const ALL_SERVICES: Service[] = [
 
 const CATEGORIES = ["Tous", "Messagerie", "Réseaux sociaux", "Gaming / Divertissement", "Rencontres", "Tech", "Shopping"];
 
-// Préfixe d'appel pour l'aperçu masqué « +33 6 ** ** ** ** »
+// Indicatif + amorce visible pour l'aperçu masqué (style « +33 6 45 ** ** ** »)
 const COUNTRY_DIAL: Record<string, string> = {
   FR: "+33", US: "+1",  GB: "+44", DE: "+49", ES: "+34", IT: "+39", CA: "+1",
   RU: "+7", CN: "+86", IN: "+91", BR: "+55", JP: "+81", KR: "+82", TR: "+90",
@@ -74,9 +74,26 @@ const COUNTRY_DIAL: Record<string, string> = {
   IL: "+972", AE: "+971", SA: "+966",
 };
 
+// Amorce plausible (préfixe mobile + 1er duo) — masque le reste
+const COUNTRY_TEASE: Record<string, string> = {
+  FR: "6 45", US: "415 22", GB: "7 82", DE: "1 51", ES: "6 12", IT: "3 47", CA: "514 22",
+  RU: "9 12", CN: "1 38", IN: "9 87", BR: "1 19", JP: "9 0", KR: "1 0", TR: "5 32",
+  PL: "5 12", NL: "6 12", BE: "4 78", PT: "9 12", RO: "7 21", UA: "9 7",
+  SE: "7 0", NO: "9 12", DK: "2 12", FI: "4 0", CH: "7 8", AT: "6 64", IE: "8 7",
+  GR: "6 9", CZ: "6 0", HU: "2 0", BG: "8 7", HR: "9 1", SK: "9 0",
+  AR: "1 1", MX: "5 5", CO: "3 0", CL: "9 7", PE: "9 7", VE: "4 12",
+  AU: "4 12", NZ: "2 1", ZA: "8 2", EG: "1 0", NG: "8 0", KE: "7 0", MA: "6 12",
+  ID: "8 1", TH: "8 1", VN: "9 0", PH: "9 17", MY: "1 2", SG: "8 1", HK: "5 1",
+  IL: "5 0", AE: "5 0", SA: "5 0",
+};
+
 function maskedPreview(shortName?: string | null): string {
-  const dial = shortName ? (COUNTRY_DIAL[shortName.toUpperCase()] || "+••") : "+••";
-  return `${dial} • ** ** ** **`;
+  const key = shortName ? shortName.toUpperCase() : null;
+  const dial = key ? (COUNTRY_DIAL[key] || "+••") : "+••";
+  const tease = key ? (COUNTRY_TEASE[key] || "") : "";
+  return tease
+    ? `${dial} ${tease} ** ** **`
+    : `${dial} ** ** ** ** **`;
 }
 
 const PRODUCTS = {
