@@ -9,6 +9,7 @@ import SplashScreen from "@/components/SplashScreen";
 import NotificationPermissionBanner from "@/components/NotificationPermissionBanner";
 import InAppNotificationBanner from "@/components/InAppNotificationBanner";
 import InstallBanner from "@/components/InstallBanner";
+import ProfileGate from "@/components/ProfileGate";
 import Index from "./pages/Index";
 import ResetPassword from "./pages/ResetPassword";
 import Boutique from "./pages/Boutique";
@@ -23,6 +24,7 @@ import AuthCallback from "./pages/AuthCallback";
 import LoginPage from "./pages/LoginPage";
 import PackPartenaire from "./pages/PackPartenaire";
 import Admin from "./pages/Admin";
+import Onboarding from "./pages/Onboarding";
 
 const queryClient = new QueryClient();
 
@@ -40,30 +42,33 @@ const AppContent = () => {
   return (
     <BrowserRouter>
       <AuthProvider>
-        {showSplash && <SplashScreen onComplete={handleSplashComplete} />}
-        <InAppNotificationBanner />
-        <NotificationPermissionBanner />
-        <InstallBanner />
-        <Toaster />
-        <Sonner />
+        <ProfileGate>
+          {showSplash && <SplashScreen onComplete={handleSplashComplete} />}
+          <InAppNotificationBanner />
+          <NotificationPermissionBanner />
+          <InstallBanner />
+          <Toaster />
+          <Sonner />
 
-        <Routes>
-          <Route path="/" element={<Index />} />
-          <Route path="/boutique" element={<Boutique />} />
-          <Route path="/wallet" element={<WalletPage />} />
-          <Route path="/historique" element={<Historique />} />
-          <Route path="/compte" element={<Compte />} />
-          <Route path="/leaderboard" element={<Leaderboard />} />
-          <Route path="/faq" element={<FAQ />} />
-          <Route path="/install" element={<Install />} />
-          <Route path="/auth/callback" element={<AuthCallback />} />
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/auth" element={<LoginPage />} />
-          <Route path="/reset-password" element={<ResetPassword />} />
-          <Route path="/pack-partenaire" element={<PackPartenaire />} />
-          <Route path="/admin" element={<Admin />} />
-          <Route path="*" element={<NotFound />} />
-        </Routes>
+          <Routes>
+            <Route path="/" element={<Index />} />
+            <Route path="/boutique" element={<Boutique />} />
+            <Route path="/wallet" element={<WalletPage />} />
+            <Route path="/historique" element={<Historique />} />
+            <Route path="/compte" element={<Compte />} />
+            <Route path="/leaderboard" element={<Leaderboard />} />
+            <Route path="/faq" element={<FAQ />} />
+            <Route path="/install" element={<Install />} />
+            <Route path="/auth/callback" element={<AuthCallback />} />
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/auth" element={<LoginPage />} />
+            <Route path="/reset-password" element={<ResetPassword />} />
+            <Route path="/pack-partenaire" element={<PackPartenaire />} />
+            <Route path="/admin" element={<Admin />} />
+            <Route path="/onboarding" element={<Onboarding />} />
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </ProfileGate>
       </AuthProvider>
     </BrowserRouter>
   );
