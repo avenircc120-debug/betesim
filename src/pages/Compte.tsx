@@ -1,6 +1,6 @@
 
 import { useState } from "react";
-import { User, Shield, HelpCircle, LogOut, ChevronRight, Users, Bell, Settings, Star, Pencil, Check, X, Trophy, Moon, Sun, Lock, Eye, EyeOff, Phone } from "lucide-react";
+import { User, Shield, HelpCircle, LogOut, ChevronRight, Users, Bell, Settings, Star, Pencil, Check, X, Trophy, Moon, Sun, Lock, Eye, EyeOff, Phone, ShoppingBag, History, Package, Smartphone } from "lucide-react";
 import { toast } from "sonner";
 import { motion } from "framer-motion";
 import { Input } from "@/components/ui/input";
@@ -88,7 +88,7 @@ const Compte = () => {
 
   const changePasswordMutation = useMutation({
     mutationFn: async () => {
-      toast.info("Votre sécurité est gérée par Google ou SMS. Aucun mot de passe requis.");
+      toast.info("Votre compte Betesim est sécurisé par code OTP envoyé par SMS. Aucun mot de passe requis.");
     },
     onSuccess: () => {
       setShowSecurity(false);
@@ -115,16 +115,16 @@ const Compte = () => {
               <User className="h-12 w-12 text-primary-foreground" />
             </div>
             <div>
-              <h2 className="text-2xl font-bold text-foreground">Mon compte</h2>
-              <p className="mt-2 text-sm text-muted-foreground">Connectez-vous pour accéder à votre profil, vos filleuls et vos statistiques.</p>
+              <h2 className="text-2xl font-bold text-foreground">Mon compte Betesim</h2>
+              <p className="mt-2 text-sm text-muted-foreground">Connectez-vous pour gérer vos services winpack, suivre vos filleuls et encaisser vos commissions.</p>
             </div>
             <Button
-              onClick={() => showAuthModal("Connectez-vous pour accéder à votre compte")}
+              onClick={() => showAuthModal("Connectez-vous pour accéder à votre espace winpack")}
               className="h-14 w-full max-w-xs rounded-2xl gradient-primary text-primary-foreground font-semibold shadow-glow text-base"
             >
               Se connecter
             </Button>
-            <p className="text-xs text-muted-foreground">Google ou SMS · Rapide et sécurisé</p>
+            <p className="text-xs text-muted-foreground">Code OTP par SMS · Rapide et sécurisé</p>
           </motion.div>
         </div>
         <BottomNav />
@@ -148,9 +148,36 @@ const Compte = () => {
   };
 
   const menuSections = [
-    { title: "Général", items: [{ icon: Bell, label: "Notifications", desc: "Gérer vos alertes", path: "" }, { icon: Trophy, label: "Classement", desc: "Top partenaires & parrains", path: "/leaderboard" }] },
-    { title: "Sécurité", items: [{ icon: Shield, label: "Sécurité", desc: "Mot de passe", path: "" }, { icon: Settings, label: "Préférences", desc: "Thème et paramètres", path: "" }] },
-    { title: "Support", items: [{ icon: HelpCircle, label: "Centre d'aide", desc: "FAQ et assistance", path: "/faq" }, { icon: Star, label: "Évaluer l'app", desc: "Donnez-nous 5 étoiles", path: "" }] },
+    {
+      title: "Mon activité",
+      items: [
+        { icon: ShoppingBag,  label: "Boutique",          desc: "Acheter un service winpack",              path: "/boutique" },
+        { icon: History,      label: "Historique",         desc: "Mes achats et numéros livrés",            path: "/historique" },
+        { icon: Package,      label: "Pack Partenaire",    desc: "Numéro Telegram + lien de parrainage",   path: "/pack-partenaire" },
+      ],
+    },
+    {
+      title: "Général",
+      items: [
+        { icon: Bell,         label: "Notifications",      desc: "Gérer vos alertes",                      path: "" },
+        { icon: Trophy,       label: "Classement",         desc: "Top partenaires & parrains",             path: "/leaderboard" },
+      ],
+    },
+    {
+      title: "Sécurité",
+      items: [
+        { icon: Shield,       label: "Sécurité",           desc: "Mot de passe",                           path: "" },
+        { icon: Settings,     label: "Préférences",        desc: "Thème et paramètres",                   path: "" },
+      ],
+    },
+    {
+      title: "Application",
+      items: [
+        { icon: Smartphone,   label: "Installer l'app",    desc: "Ajouter Betesim sur votre écran d'accueil", path: "/install" },
+        { icon: HelpCircle,   label: "Centre d'aide",      desc: "FAQ et assistance",                      path: "/faq" },
+        { icon: Star,         label: "Évaluer l'app",      desc: "Donnez-nous 5 étoiles",                 path: "" },
+      ],
+    },
   ];
 
   return (
@@ -177,18 +204,18 @@ const Compte = () => {
             </span>
           )}
           <div className="mt-5 grid w-full grid-cols-3 gap-3 border-t border-border pt-5">
-            <div className="text-center">
+            <button onClick={() => navigate("/historique")} className="text-center rounded-xl p-1 hover:bg-muted/50 transition-colors">
               <p className="text-2xl font-bold text-foreground">{purchasedCount ?? 0}</p>
-              <p className="text-xs text-muted-foreground">Numéros achetés</p>
-            </div>
-            <div className="text-center border-x border-border">
+              <p className="text-xs text-muted-foreground">Services achetés</p>
+            </button>
+            <button onClick={() => navigate("/leaderboard")} className="text-center border-x border-border rounded-none hover:bg-muted/50 transition-colors">
               <p className="text-2xl font-bold text-foreground">{referralCount ?? 0}</p>
-              <p className="text-xs text-muted-foreground">Filleuls</p>
-            </div>
-            <div className="text-center">
-              <p className="text-2xl font-bold text-foreground">{(profile?.fcfa_balance ?? 0).toLocaleString("fr-FR")}</p>
-              <p className="text-xs text-muted-foreground">FCFA</p>
-            </div>
+              <p className="text-xs text-muted-foreground">Filleuls actifs</p>
+            </button>
+            <button onClick={() => navigate("/wallet")} className="text-center rounded-xl p-1 hover:bg-muted/50 transition-colors">
+              <p className="text-2xl font-bold text-primary">{(profile?.fcfa_balance ?? 0).toLocaleString("fr-FR")}</p>
+              <p className="text-xs text-muted-foreground">FCFA Wallet</p>
+            </button>
           </div>
         </motion.div>
 
@@ -268,20 +295,24 @@ const Compte = () => {
 
       <Dialog open={showSecurity} onOpenChange={setShowSecurity}>
         <DialogContent className="max-w-md rounded-2xl">
-          <DialogHeader><DialogTitle className="flex items-center gap-2"><Lock className="h-5 w-5 text-primary" />Changer le mot de passe</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle className="flex items-center gap-2"><Lock className="h-5 w-5 text-primary" />Sécurité du compte</DialogTitle></DialogHeader>
           <div className="space-y-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-foreground">Nouveau mot de passe</label>
-              <div className="relative">
-                <Input type={showPassword ? "text" : "password"} value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="Min. 6 caractères" className="pr-10 rounded-xl" />
-                <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">{showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button>
+            <div className="rounded-xl bg-primary/5 border border-primary/20 p-4 space-y-2">
+              <div className="flex items-center gap-2">
+                <Phone className="h-4 w-4 text-primary" />
+                <p className="font-semibold text-foreground text-sm">Connexion par OTP SMS</p>
               </div>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Votre compte Betesim est sécurisé par un code OTP envoyé par SMS à votre numéro de téléphone. Aucun mot de passe n'est nécessaire — c'est plus simple et plus sûr.
+              </p>
             </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-foreground">Confirmer le mot de passe</label>
-              <Input type={showPassword ? "text" : "password"} value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="Répétez le mot de passe" className="rounded-xl" />
+            <div className="rounded-xl bg-muted/40 p-4 space-y-1">
+              <p className="text-xs text-muted-foreground">Compte connecté</p>
+              <p className="font-semibold text-foreground text-sm">{user?.email ?? "—"}</p>
             </div>
-            <Button onClick={() => changePasswordMutation.mutate()} disabled={changePasswordMutation.isPending || newPassword.length < 6} className="w-full h-11 rounded-xl gradient-primary text-primary-foreground font-semibold">{changePasswordMutation.isPending ? "Mise à jour..." : "Mettre à jour"}</Button>
+            <Button onClick={() => { setShowSecurity(false); navigate("/boutique"); }} className="w-full h-11 rounded-xl gradient-primary text-primary-foreground font-semibold">
+              Aller à la boutique winpack
+            </Button>
           </div>
         </DialogContent>
       </Dialog>
