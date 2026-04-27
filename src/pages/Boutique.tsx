@@ -168,9 +168,9 @@ const PRODUCTS = {
     id: "simple" as Product,
     name: "Achat Direct",
     price: 2000,
-    description: "1 numéro virtuel pour n'importe quel service",
+    description: "1 service winpack pour n'importe quel réseau",
     features: [
-      "1 numéro virtuel actif 30 jours",
+      "1 service winpack actif 30 jours",
       "Livraison instantanée après paiement",
       "Compatible +1 000 services",
     ],
@@ -181,9 +181,9 @@ const PRODUCTS = {
     id: "partner" as Product,
     name: "Pack Partenaire",
     price: 2500,
-    description: "Numéro virtuel + parrainage activé immédiatement",
+    description: "Service winpack + parrainage activé immédiatement",
     features: [
-      "1 numéro virtuel pour n'importe quel service",
+      "1 service winpack pour n'importe quel réseau",
       "Lien de parrainage débloqué dès le paiement",
       "10% de commission sur chaque achat de vos filleuls",
       "Statut Partenaire officiel WINPACK",
@@ -638,7 +638,7 @@ const Boutique = () => {
                   { icon: ShoppingBag, title: "1. Choisissez votre offre",         desc: "Achat Direct (2 000F) ou Pack Partenaire (2 500F)" },
                   { icon: MapPin,      title: "2. Pays → Service",                 desc: "Choisissez où et pour quel réseau social vous voulez un numéro" },
                   { icon: CreditCard,  title: "3. Paiement sécurisé",              desc: "FedaPay — Mobile Money, carte bancaire…" },
-                  { icon: Phone,       title: "4. Numéro livré",                   desc: "Votre numéro virtuel apparaît dans votre historique instantanément" },
+                  { icon: Phone,       title: "4. Numéro livré",                   desc: "Votre service winpack apparaît dans votre historique instantanément" },
                 ].map((item) => (
                   <div key={item.title} className="flex items-center gap-3 rounded-2xl bg-card p-4 shadow-card">
                     <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl gradient-primary">

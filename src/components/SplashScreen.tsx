@@ -68,7 +68,7 @@ const SplashScreen = ({ onComplete }: SplashScreenProps) => {
             className="mt-2 text-sm"
             style={{ color: "#c4b5fd" }}
           >
-            Numéros virtuels pour tous vos services
+            Services winpack pour tous vos réseaux
           </motion.p>
 
           <motion.div

@@ -254,7 +254,7 @@ const Compte = () => {
         <motion.button whileTap={{ scale: 0.98 }} onClick={signOut} className="flex w-full items-center justify-center gap-2 rounded-2xl border border-destructive/20 bg-destructive/5 p-4 text-destructive font-semibold transition-colors hover:bg-destructive/10">
           <LogOut className="h-5 w-5" />Déconnexion
         </motion.button>
-        <p className="text-center text-xs text-muted-foreground pb-4">Betesim v1.0.0 · Numéros virtuels SIM</p>
+        <p className="text-center text-xs text-muted-foreground pb-4">Betesim v1.0.0 · Services winpack</p>
       </div>
       <BottomNav />
 

@@ -224,7 +224,7 @@ const LoginPage = () => {
               {step === "otp" && "Vérification"}
             </h1>
             <p className="mt-2 text-center text-sm text-muted-foreground max-w-[260px]">
-              {step === "menu" && "Connectez-vous à Betesim pour acheter des numéros virtuels"}
+              {step === "menu" && "Connectez-vous à Betesim pour acheter des services winpack"}
               {step === "phone" && "Nous vous envoyons un code par SMS"}
               {step === "otp" && `Code envoyé au ${country.flag} ${country.dial} ${phone}`}
             </p>
