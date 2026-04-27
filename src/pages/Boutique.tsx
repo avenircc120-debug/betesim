@@ -106,27 +106,61 @@ const COUNTRY_DIAL: Record<string, string> = {
   ZM: "+260",  ZW: "+263",
 };
 
-// Amorce visible plausible (préfixe mobile + 1er duo). Si absente : duo générique.
+// Vrai préfixe mobile de chaque pays + 1 duo plausible (le reste reste masqué)
+// Sources : plans de numérotation nationaux ITU / opérateurs mobiles principaux.
 const COUNTRY_TEASE: Record<string, string> = {
-  FR: "6 45",  US: "415 22", GB: "7 82",  DE: "1 51",  ES: "6 12", IT: "3 47", CA: "514 22",
-  RU: "9 12",  CN: "1 38",   IN: "9 87",  BR: "1 19",  JP: "9 0",  KR: "1 0",  TR: "5 32",
-  PL: "5 12",  NL: "6 12",   BE: "4 78",  PT: "9 12",  RO: "7 21", UA: "9 7",
-  SE: "7 0",   NO: "9 12",   DK: "2 12",  FI: "4 0",   CH: "7 8",  AT: "6 64", IE: "8 7",
-  GR: "6 9",   CZ: "6 0",    HU: "2 0",   BG: "8 7",   HR: "9 1",  SK: "9 0",
-  AR: "1 1",   MX: "5 5",    CO: "3 0",   CL: "9 7",   PE: "9 7",  VE: "4 12",
-  AU: "4 12",  NZ: "2 1",    ZA: "8 2",   EG: "1 0",   NG: "8 0",  KE: "7 0",  MA: "6 12",
-  ID: "8 1",   TH: "8 1",    VN: "9 0",   PH: "9 17",  MY: "1 2",  SG: "8 1",  HK: "5 1",
-  IL: "5 0",   AE: "5 0",    SA: "5 0",
+  // ─── Europe ─────────────────────────────────────────────────────────────
+  FR: "6 45", BE: "4 78", LU: "6 21", MC: "6 12", CH: "7 8",  AT: "6 64",
+  DE: "1 51", NL: "6 12", IE: "8 7",  GB: "7 70", IM: "7 8",  GG: "7 8",  JE: "7 8",
+  ES: "6 12", PT: "9 12", IT: "3 47", VA: "3 47", SM: "6 6",  AD: "3 12", GI: "5 4",
+  GR: "6 9",  CY: "9 6",  MT: "7 9",
+  SE: "7 0",  NO: "9 12", DK: "2 12", FI: "4 0",  IS: "6 1",  FO: "2 1",
+  PL: "5 12", CZ: "6 0",  SK: "9 0",  HU: "30 7", RO: "7 21", BG: "8 7",
+  HR: "9 1",  SI: "4 0",  RS: "6 0",  BA: "6 1",  ME: "6 7",  MK: "7 0",
+  AL: "6 8",  XK: "4 4",  MD: "6 0",
+  RU: "9 12", BY: "29 7", UA: "9 7",
+  EE: "5 0",  LV: "2 0",  LT: "6 0",  LI: "7 8",
+  // ─── Amériques ──────────────────────────────────────────────────────────
+  US: "415 22", CA: "514 22",
+  MX: "55 1",   GT: "5 5",   BZ: "6 2",   SV: "7 0",  HN: "9 8", NI: "8 5",
+  CR: "8 3",    PA: "6 1",   CU: "5 2",   HT: "3 4",  DO: "8 09", PR: "787 5",
+  JM: "876 5",  BS: "242 4", BB: "246 2", TT: "868 7",
+  BR: "11 9",   AR: "9 11",  CL: "9 7",   CO: "3 0",  PE: "9 7", VE: "4 12",
+  EC: "9 8",    BO: "7 5",   PY: "9 8",   UY: "9 8",  GY: "6 0", SR: "8 8",
+  GF: "6 94",   GP: "6 90",  MQ: "6 96",  BL: "6 90", MF: "6 90", PM: "508 4",
+  // ─── Asie ───────────────────────────────────────────────────────────────
+  CN: "1 38", JP: "9 0",  KR: "1 0",  KP: "1 9",  TW: "9 0",  HK: "5 1", MO: "6 6",
+  IN: "9 87", PK: "3 0",  BD: "1 7",  LK: "7 1",  NP: "9 8",  BT: "1 7",  MV: "7 7",
+  AF: "7 0",  IR: "9 12", IQ: "7 7",  SY: "9 3",  LB: "7 1",  JO: "7 9",
+  IL: "5 0",  PS: "5 9",  SA: "5 0",  AE: "5 0",  QA: "5 5",  BH: "3 6",
+  KW: "5 0",  OM: "9 1",  YE: "7 7",  TR: "5 32",
+  GE: "5 5",  AM: "9 4",  AZ: "5 0",  KZ: "7 1",  UZ: "9 0",  KG: "5 5",
+  TJ: "9 0",  TM: "6 5",
+  TH: "8 1",  VN: "9 0",  LA: "2 0",  KH: "1 2",  MM: "9 5",  MY: "1 2",
+  SG: "8 1",  BN: "7 1",  ID: "8 1",  PH: "9 17", TL: "7 5",  MN: "8 8",
+  // ─── Afrique ────────────────────────────────────────────────────────────
+  EG: "1 0",  LY: "9 1",  TN: "2 0",  DZ: "5 50", MA: "6 12", EH: "6 12",
+  MR: "2 2",  SN: "7 7",  GM: "7 0",  ML: "7 6",  GN: "6 2",  GW: "5 5",
+  CV: "9 9",  SL: "7 6",  LR: "7 7",  CI: "0 7",  BF: "7 0",  GH: "2 4",
+  TG: "9 0",  BJ: "9 7",  NE: "9 0",  NG: "80 3", CM: "6 5",  TD: "9 1",
+  CF: "7 0",  GQ: "2 22", ST: "9 9",  GA: "0 7",  CG: "0 6",  CD: "8 1",
+  AO: "9 2",  RW: "7 8",  BI: "7 9",  UG: "7 7",  KE: "7 1",  TZ: "7 4",
+  DJ: "7 7",  SO: "6 1",  ER: "7 1",  ET: "9 1",  SS: "9 5",  SD: "9 1",
+  KM: "3 2",  MG: "3 4",  RE: "6 92", YT: "6 39", MU: "5 9",  SC: "2 5",
+  MZ: "8 2",  ZM: "9 7",  ZW: "7 7",  MW: "9 9",  BW: "7 1",  NA: "8 1",
+  ZA: "8 2",  LS: "5 0",  SZ: "7 6",  SH: "5 1",
+  // ─── Océanie ────────────────────────────────────────────────────────────
+  AU: "4 12", NZ: "2 1",  FJ: "7 0",  PG: "7 0",  SB: "7 4",  VU: "5 9",
+  NC: "8 8",  PF: "8 7",  WS: "7 5",  TO: "7 7",  CK: "5 0",
 };
-
-const DEFAULT_TEASE = "6 12";
 
 function maskedPreview(shortName?: string | null): string {
   const key = shortName ? shortName.toUpperCase() : null;
   if (!key) return "+•• ** ** ** ** **";
   const dial = COUNTRY_DIAL[key] || `+${key}`;
-  const tease = COUNTRY_TEASE[key] || DEFAULT_TEASE;
-  return `${dial} ${tease} ** ** **`;
+  const tease = COUNTRY_TEASE[key];
+  // Si on n'a pas le vrai préfixe pour ce pays, on n'invente rien : mask total.
+  return tease ? `${dial} ${tease} ** ** **` : `${dial} ** ** ** ** **`;
 }
 
 const PRODUCTS = {
