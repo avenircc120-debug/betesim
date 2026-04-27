@@ -274,7 +274,7 @@ const PackPartenaire = () => {
               <p className="font-bold text-foreground text-sm">
                 Configuration de votre compte Telegram Professionnel
               </p>
-              <p className="text-xs text-muted-foreground mt-0.5">Obligatoire · Service inclus dans le pack</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Service inclus dans le pack</p>
             </div>
           </motion.div>
 
