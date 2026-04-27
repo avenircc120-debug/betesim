@@ -1,15 +1,15 @@
 /**
  * Edge Function: partner-pack
  *
- * Gère le flow Pack Partenaire simplifié + l'admin dashboard.
- *
- * Actions (champ `action` dans le body) :
- *   - "init"            : crée la ligne partner_pack après paiement FedaPay confirmé
- *   - "deliver"         : alloue le numéro Telegram via SMSPool et finalise le pack
- *   - "settings-get"    : retourne la valeur publique de partner_link
- *   - "admin-check"     : vérifie si l'email courant est admin
- *   - "admin-list"      : (admin) liste les partner_packs
- *   - "admin-set-link"  : (admin) met à jour partner_link
+ * Actions :
+ *   - "init"                : crée le pack après paiement FedaPay
+ *   - "deliver"             : alloue le numéro Telegram via SMSPool
+ *   - "settings-get"        : retourne partner_link (public)
+ *   - "admin-check"         : vérifie si l'utilisateur est admin
+ *   - "admin-list"          : liste les partner_packs (admin)
+ *   - "admin-set-link"      : met à jour partner_link (admin)
+ *   - "admin-credit-wallet" : crédite le wallet d'un client (admin)
+ *   - "admin-redeliver"     : re-livre un numéro manuellement (admin)
  */
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
@@ -155,7 +155,6 @@ serve(async (req) => {
 
       const orderCountry = String(country ?? "0");
       const delivery = await orderTelegram(smspoolKey, orderCountry);
-
       const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
 
       const { data: sub, error: subErr } = await supabase.from("subscriptions").insert({
@@ -199,31 +198,53 @@ serve(async (req) => {
       return ok({ success: true, pack: updatedPack, subscription: sub });
     }
 
-    // ─── Admin ───────────────────────────────────────────────────────────
+    // ─── Admin : check ───────────────────────────────────────────────────
     if (action === "admin-check") {
       const { user_id, email } = body;
       const admin = await isAdmin(supabase, user_id ?? null, email ?? null);
       return ok({ success: true, is_admin: admin });
     }
 
+    // ─── Admin : list ────────────────────────────────────────────────────
     if (action === "admin-list") {
       const { user_id, email, limit = 100, offset = 0, search } = body;
       if (!(await isAdmin(supabase, user_id ?? null, email ?? null))) {
         return ok({ success: false, error: "Accès refusé" }, 403);
       }
+
+      const searchTerm = search ? String(search).trim() : "";
+      let matchingUserIds: string[] = [];
+
+      // Recherche cross-table : chercher dans profiles d'abord
+      if (searchTerm) {
+        const s = `%${searchTerm}%`;
+        const { data: profileMatches } = await supabase
+          .from("profiles")
+          .select("id")
+          .or(`username.ilike.${s},email.ilike.${s},phone_number.ilike.${s}`);
+        matchingUserIds = (profileMatches ?? []).map((p: any) => p.id);
+      }
+
       let q = supabase
         .from("partner_packs")
-        .select("*, profiles:user_id(email, username, phone_number)", { count: "exact" })
+        .select("*, profiles:user_id(id, email, username, phone_number)", { count: "exact" })
         .order("created_at", { ascending: false });
-      if (search && String(search).trim()) {
-        const s = `%${String(search).trim()}%`;
-        q = q.or(`telegram_number.ilike.${s}`);
+
+      if (searchTerm) {
+        const s = `%${searchTerm}%`;
+        const conditions: string[] = [`telegram_number.ilike.${s}`, `fedapay_transaction_id.ilike.${s}`];
+        if (matchingUserIds.length > 0) {
+          conditions.push(`user_id.in.(${matchingUserIds.join(",")})`);
+        }
+        q = q.or(conditions.join(","));
       }
-      const { data, error, count } = await q.range(offset, offset + limit - 1);
+
+      const { data, error, count } = await q.range(offset, offset + Number(limit) - 1);
       if (error) throw new Error(error.message);
       return ok({ success: true, packs: data, total: count ?? 0 });
     }
 
+    // ─── Admin : set link ────────────────────────────────────────────────
     if (action === "admin-set-link") {
       const { user_id, email, partner_link } = body;
       if (!(await isAdmin(supabase, user_id ?? null, email ?? null))) {
@@ -235,6 +256,91 @@ serve(async (req) => {
         .upsert({ key: "partner_link", value, updated_at: new Date().toISOString() }, { onConflict: "key" });
       if (error) throw new Error(error.message);
       return ok({ success: true, partner_link: value });
+    }
+
+    // ─── Admin : credit wallet ───────────────────────────────────────────
+    if (action === "admin-credit-wallet") {
+      const { user_id, email, target_user_id, amount_fcfa, reason } = body;
+      if (!(await isAdmin(supabase, user_id ?? null, email ?? null))) {
+        return ok({ success: false, error: "Accès refusé" }, 403);
+      }
+      const amount = parseInt(String(amount_fcfa ?? 0), 10);
+      if (!target_user_id) throw new Error("target_user_id requis");
+      if (isNaN(amount) || amount <= 0) throw new Error("amount_fcfa doit être un entier positif");
+
+      const { data: profile } = await supabase.from("profiles").select("fcfa_balance").eq("id", target_user_id).maybeSingle();
+      const currentBalance = (profile as any)?.fcfa_balance ?? 0;
+      const newBalance = currentBalance + amount;
+
+      const { error: updateErr } = await supabase.from("profiles")
+        .update({ fcfa_balance: newBalance })
+        .eq("id", target_user_id);
+      if (updateErr) throw new Error(updateErr.message);
+
+      await supabase.from("transactions").insert({
+        user_id: target_user_id,
+        type: "admin_credit",
+        status: "validated",
+        amount_fcfa: amount,
+        description: reason ? String(reason) : `Crédit manuel administrateur : ${amount} FCFA`,
+      });
+
+      await supabase.from("notifications").insert({
+        user_id: target_user_id,
+        title: "Crédit wallet reçu",
+        message: `Votre wallet a été crédité de ${amount} FCFA par l'administrateur.`,
+        type: "payment_success",
+      });
+
+      return ok({ success: true, new_balance: newBalance });
+    }
+
+    // ─── Admin : re-livrer manuellement ─────────────────────────────────
+    if (action === "admin-redeliver") {
+      const { user_id, email, pack_id } = body;
+      if (!(await isAdmin(supabase, user_id ?? null, email ?? null))) {
+        return ok({ success: false, error: "Accès refusé" }, 403);
+      }
+      if (!pack_id) throw new Error("pack_id requis");
+
+      const { data: pack } = await supabase.from("partner_packs").select("*").eq("id", pack_id).maybeSingle();
+      if (!pack) throw new Error("Pack introuvable");
+
+      const smspoolKey = Deno.env.get("SMSPOOL_API_KEY");
+      if (!smspoolKey) throw new Error("SMSPOOL_API_KEY non configurée");
+
+      const delivery = await orderTelegram(smspoolKey, "0");
+      const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+
+      const { data: sub } = await supabase.from("subscriptions").insert({
+        user_id: pack.user_id,
+        number: delivery.number,
+        country: delivery.country,
+        service: "telegram",
+        smspool_order_id: delivery.orderId,
+        status: "active",
+        expires_at: expiresAt,
+        attempts: 1,
+      }).select().single();
+
+      const { data: updatedPack } = await supabase
+        .from("partner_packs")
+        .update({
+          status: "delivered",
+          subscription_id: (sub as any)?.id ?? null,
+          telegram_number: delivery.number,
+          delivered_at: new Date().toISOString(),
+        })
+        .eq("id", pack_id).select().single();
+
+      await supabase.from("notifications").insert({
+        user_id: pack.user_id,
+        title: "Numéro Telegram livré",
+        message: `Votre numéro Telegram est prêt : ${delivery.number}.`,
+        type: "payment_success",
+      });
+
+      return ok({ success: true, pack: updatedPack, subscription: sub });
     }
 
     throw new Error(`Action inconnue: ${action}`);

@@ -120,6 +120,7 @@ function maskedPreview(shortName?: string | null): string {
 }
 
 const PARTNER_COUNTRY_KEY = "pending_partner_country";
+const FALLBACK_1WIN = "https://1w.run/?p=YvTH";
 
 const PackPartenaire = () => {
   const { user, requireAuth, loading: authLoading } = useAuth();
@@ -138,6 +139,17 @@ const PackPartenaire = () => {
   useEffect(() => {
     if (!authLoading && !user) requireAuth(() => {});
   }, [authLoading, user, requireAuth]);
+
+  const { data: partnerLink } = useQuery({
+    queryKey: ["partner-link"],
+    queryFn: async () => {
+      const { data } = await supabase.functions.invoke("partner-pack", {
+        body: { action: "settings-get" },
+      });
+      return (data?.partner_link as string) || FALLBACK_1WIN;
+    },
+    staleTime: 5 * 60_000,
+  });
 
   const { data: catalogCountries = [], isLoading: loadingCountries } = useQuery({
     queryKey: ["winpack-countries"],
@@ -547,7 +559,7 @@ const PackPartenaire = () => {
                 Votre compte Telegram est prêt. Cliquez ci-dessous pour rejoindre 1win avec votre lien partenaire et commencer à générer des commissions.
               </p>
               <Button
-                onClick={() => window.open("https://1w.run/?p=YvTH", "_blank", "noopener,noreferrer")}
+                onClick={() => window.open(partnerLink || FALLBACK_1WIN, "_blank", "noopener,noreferrer")}
                 className="h-12 w-full rounded-xl gradient-primary text-primary-foreground font-bold shadow-glow"
               >
                 <ExternalLink className="h-4 w-4 mr-2" />
