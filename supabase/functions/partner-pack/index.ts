@@ -1,20 +1,15 @@
 /**
  * Edge Function: partner-pack
  *
- * Gère le flow Pack Partenaire en 4 étapes + l'admin dashboard.
+ * Gère le flow Pack Partenaire simplifié + l'admin dashboard.
  *
  * Actions (champ `action` dans le body) :
  *   - "init"            : crée la ligne partner_pack après paiement FedaPay confirmé
- *   - "submit-id"       : enregistre l'ID Partenaire saisi par le client
  *   - "deliver"         : alloue le numéro Telegram via SMSPool et finalise le pack
  *   - "settings-get"    : retourne la valeur publique de partner_link
  *   - "admin-check"     : vérifie si l'email courant est admin
  *   - "admin-list"      : (admin) liste les partner_packs
  *   - "admin-set-link"  : (admin) met à jour partner_link
- *
- * Sécurité : app utilise Firebase Auth, donc le user_id / email sont passés dans
- * le body. Les actions admin vérifient profiles.is_admin = true OU l'email
- * contre la variable d'env ADMIN_EMAILS (séparée par virgules).
  */
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
@@ -104,7 +99,6 @@ serve(async (req) => {
       if (!user_id) throw new Error("user_id requis");
       if (!fedapay_transaction_id) throw new Error("fedapay_transaction_id requis");
 
-      // Idempotence
       const { data: existing } = await supabase
         .from("partner_packs")
         .select("*")
@@ -120,55 +114,28 @@ serve(async (req) => {
       }).select().single();
       if (error) throw new Error(error.message);
 
-      // Activation Partenaire immédiate (mêmes effets que deliver-number partner)
       await supabase.from("profiles").update({ is_partner: true }).eq("id", user_id);
 
-      // Une seule ligne transactions porte le fedapay_transaction_id (index UNIQUE)
       await supabase.from("transactions").insert({
         user_id,
         type: "partner_activation",
         status: "validated",
         amount_fcfa: 2500,
-        description: "Pack Partenaire — paiement validé. Continuez la procédure pour recevoir votre numéro Telegram.",
+        description: "Pack Partenaire — paiement validé. Votre numéro Telegram est en cours de livraison.",
         fedapay_transaction_id,
       });
 
       await supabase.from("notifications").insert({
         user_id,
         title: "Pack Partenaire activé",
-        message: "Votre paiement est confirmé. Continuez la procédure pour recevoir votre numéro Telegram.",
+        message: "Votre paiement est confirmé. Votre numéro Telegram va être livré automatiquement.",
         type: "partner_activated",
       });
 
       return ok({ success: true, pack });
     }
 
-    // ─── submit-id : étape 3 ─────────────────────────────────────────────
-    if (action === "submit-id") {
-      const { user_id, pack_id, partner_id } = body;
-      if (!user_id || !pack_id) throw new Error("user_id et pack_id requis");
-      const cleanId = String(partner_id ?? "").trim();
-      if (cleanId.length < 3) throw new Error("ID Partenaire trop court (3 caractères minimum)");
-
-      const { data: pack } = await supabase
-        .from("partner_packs").select("*").eq("id", pack_id).maybeSingle();
-      if (!pack) throw new Error("Pack introuvable");
-      if (pack.user_id !== user_id) throw new Error("Accès refusé");
-      if (pack.status === "delivered") return ok({ success: true, pack });
-
-      const { data: updated, error } = await supabase
-        .from("partner_packs")
-        .update({
-          partner_id: cleanId,
-          partner_id_submitted_at: new Date().toISOString(),
-          status: pack.status === "paid" ? "partner_id_provided" : pack.status,
-        })
-        .eq("id", pack_id).select().single();
-      if (error) throw new Error(error.message);
-      return ok({ success: true, pack: updated });
-    }
-
-    // ─── deliver : étape 4 (numéro Telegram) ─────────────────────────────
+    // ─── deliver : livraison directe du numéro Telegram ──────────────────
     if (action === "deliver") {
       const { user_id, pack_id, country } = body;
       if (!user_id || !pack_id) throw new Error("user_id et pack_id requis");
@@ -177,7 +144,6 @@ serve(async (req) => {
         .from("partner_packs").select("*").eq("id", pack_id).maybeSingle();
       if (!pack) throw new Error("Pack introuvable");
       if (pack.user_id !== user_id) throw new Error("Accès refusé");
-      if (!pack.partner_id) throw new Error("Vous devez d'abord saisir votre ID Partenaire");
 
       if (pack.status === "delivered" && pack.subscription_id) {
         const { data: sub } = await supabase.from("subscriptions").select("*").eq("id", pack.subscription_id).maybeSingle();
@@ -198,7 +164,6 @@ serve(async (req) => {
         country: delivery.country,
         service: "telegram",
         smspool_order_id: delivery.orderId,
-        // pas de fedapay_transaction_id ici : déjà porté par partner_packs (UNIQUE)
         status: "active",
         expires_at: expiresAt,
         attempts: 1,
@@ -215,7 +180,6 @@ serve(async (req) => {
         })
         .eq("id", pack_id).select().single();
 
-      // Transaction sans fedapay_transaction_id (porté par l'init)
       await supabase.from("transactions").insert({
         user_id,
         type: "number_purchase",
@@ -253,7 +217,7 @@ serve(async (req) => {
         .order("created_at", { ascending: false });
       if (search && String(search).trim()) {
         const s = `%${String(search).trim()}%`;
-        q = q.or(`partner_id.ilike.${s},telegram_number.ilike.${s}`);
+        q = q.or(`telegram_number.ilike.${s}`);
       }
       const { data, error, count } = await q.range(offset, offset + limit - 1);
       if (error) throw new Error(error.message);
