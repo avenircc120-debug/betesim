@@ -2,12 +2,14 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { ArrowRight, Check, Copy, ExternalLink, Loader2, MessageCircle, ShieldCheck, AlertTriangle } from "lucide-react";
+import { ArrowRight, Check, Copy, ExternalLink, Loader2, MessageCircle, ShieldCheck, AlertTriangle, Users } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import BottomNav from "@/components/BottomNav";
+import ShareButtons from "@/components/ShareButtons";
 import { useAuth } from "@/hooks/useAuth";
+import { useProfile } from "@/hooks/useProfile";
 import { supabase } from "@/integrations/supabase/client";
 
 type PackStatus = "paid" | "partner_id_provided" | "delivered";
@@ -25,6 +27,7 @@ interface PartnerPack {
 
 const PackPartenaire = () => {
   const { user, requireAuth, loading: authLoading } = useAuth();
+  const { data: profile } = useProfile();
   const [searchParams] = useSearchParams();
   const packId = searchParams.get("id");
   const navigate = useNavigate();
@@ -354,6 +357,29 @@ const PackPartenaire = () => {
                 </Button>
               </div>
             )}
+          </motion.div>
+        )}
+
+        {/* Bonus : lien de parrainage débloqué */}
+        {pack.status === "delivered" && profile?.referral_code && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.15 }}
+            className="rounded-2xl bg-card p-5 shadow-card space-y-4 border border-gold/30"
+          >
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl gradient-gold">
+                <Users className="h-5 w-5 text-gold-foreground" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-foreground">Votre lien de parrainage</h3>
+                <p className="text-xs text-muted-foreground">Gagnez une commission sur chaque achat de vos filleuls</p>
+              </div>
+            </div>
+            <ShareButtons
+              referralLink={`${typeof window !== "undefined" ? window.location.origin : "https://betesim.vercel.app"}/auth?ref=${profile.referral_code}`}
+            />
           </motion.div>
         )}
       </div>
