@@ -1,4 +1,4 @@
-import { ShoppingBag, Phone, Users, ArrowLeft, CreditCard, Check, Search, MapPin, Loader2, Wallet } from "lucide-react";
+import { ShoppingBag, Phone, Users, ArrowLeft, CreditCard, Check, Search, MapPin, Loader2, Wallet, Lock, Unlock, Sparkles, Copy, MessageCircle, ExternalLink, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import BottomNav from "@/components/BottomNav";
 import { useAuth } from "@/hooks/useAuth";
@@ -12,7 +12,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { createFedaPayTransaction } from "@/lib/fedapay";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
-type Step = "offer" | "select" | "payment";
+type Step = "offer" | "select" | "payment" | "delivered";
 type Product = "simple" | "partner";
 
 interface Service {
@@ -60,6 +60,24 @@ const ALL_SERVICES: Service[] = [
 ];
 
 const CATEGORIES = ["Tous", "Messagerie", "Réseaux sociaux", "Gaming / Divertissement", "Rencontres", "Tech", "Shopping"];
+
+// Préfixe d'appel pour l'aperçu masqué « +33 6 ** ** ** ** »
+const COUNTRY_DIAL: Record<string, string> = {
+  FR: "+33", US: "+1",  GB: "+44", DE: "+49", ES: "+34", IT: "+39", CA: "+1",
+  RU: "+7", CN: "+86", IN: "+91", BR: "+55", JP: "+81", KR: "+82", TR: "+90",
+  PL: "+48", NL: "+31", BE: "+32", PT: "+351", RO: "+40", UA: "+380",
+  SE: "+46", NO: "+47", DK: "+45", FI: "+358", CH: "+41", AT: "+43", IE: "+353",
+  GR: "+30", CZ: "+420", HU: "+36", BG: "+359", HR: "+385", SK: "+421",
+  AR: "+54", MX: "+52", CO: "+57", CL: "+56", PE: "+51", VE: "+58",
+  AU: "+61", NZ: "+64", ZA: "+27", EG: "+20", NG: "+234", KE: "+254", MA: "+212",
+  ID: "+62", TH: "+66", VN: "+84", PH: "+63", MY: "+60", SG: "+65", HK: "+852",
+  IL: "+972", AE: "+971", SA: "+966",
+};
+
+function maskedPreview(shortName?: string | null): string {
+  const dial = shortName ? (COUNTRY_DIAL[shortName.toUpperCase()] || "+••") : "+••";
+  return `${dial} • ** ** ** **`;
+}
 
 const PRODUCTS = {
   simple: {
@@ -116,6 +134,35 @@ const Boutique = () => {
   const [search, setSearch] = useState("");
   const [isPaying, setIsPaying] = useState(false);
 
+  // Révélation après paiement
+  const [deliveredNumber, setDeliveredNumber] = useState<string | null>(null);
+  const [deliveredSubscriptionId, setDeliveredSubscriptionId] = useState<string | null>(null);
+  const [deliveredService, setDeliveredService] = useState<{ id: string; name: string; emoji: string; color: string } | null>(null);
+  const [deliveredCountryName, setDeliveredCountryName] = useState<string>("");
+  const [deliveredExpiresAt, setDeliveredExpiresAt] = useState<string | null>(null);
+
+  // Lien partenaire 1win (admin-éditable)
+  const { data: partnerLink } = useQuery({
+    queryKey: ["partner-link"],
+    queryFn: async () => {
+      const { data } = await supabase.functions.invoke("partner-pack", { body: { action: "settings-get" } });
+      return (data?.partner_link as string) ?? "";
+    },
+    staleTime: 60_000,
+  });
+
+  // Polling SMS pour la révélation
+  const { data: deliveredSubscription } = useQuery({
+    queryKey: ["delivered-subscription", deliveredSubscriptionId],
+    queryFn: async () => {
+      if (!deliveredSubscriptionId) return null;
+      const { data } = await supabase.from("subscriptions").select("*").eq("id", deliveredSubscriptionId).maybeSingle();
+      return data;
+    },
+    enabled: !!deliveredSubscriptionId && step === "delivered",
+    refetchInterval: 8000,
+  });
+
   // Catalogue WINPACK (pays disponibles)
   const { data: catalogCountries, isLoading: loadingCountries } = useQuery({
     queryKey: ["winpack-countries"],
@@ -130,6 +177,19 @@ const Boutique = () => {
     enabled: !!user,
     staleTime: 10 * 60 * 1000,
   });
+
+  // ── Récupère le subscription_id à partir du numéro livré ──────────────────
+  const fetchSubscriptionId = useCallback(async (userId: string, number: string): Promise<string | null> => {
+    const { data } = await supabase
+      .from("subscriptions")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("number", number)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    return (data as any)?.id ?? null;
+  }, []);
 
   // ── Gestion du retour FedaPay ─────────────────────────────────────────────
   useEffect(() => {
@@ -214,11 +274,26 @@ const Boutique = () => {
           } else if (data?.success === false) {
             throw new Error(data?.error || "Erreur livraison numéro");
           } else {
-            // Partenaire activé immédiatement si pack partenaire
-            if (savedProduct === "partner") {
-              toast.success("Statut Partenaire activé ! Votre lien de parrainage est disponible.", { duration: 5000 });
+            // ─── Révélation du numéro à l'écran ──────────────────────────────
+            const realNumber: string | undefined = data?.number;
+            if (realNumber) {
+              const svcMeta = ALL_SERVICES.find((s) => s.id === savedServiceId)
+                ?? { id: savedServiceId, name: savedServiceName, emoji: "📱", color: "bg-primary" };
+              const subId = await fetchSubscriptionId(user.uid ?? user.id, realNumber);
+
+              setDeliveredNumber(realNumber);
+              setDeliveredService(svcMeta);
+              setDeliveredCountryName(
+                catalogCountries?.find((c) => c.id === savedCountry)?.name
+                ?? (savedCountry === "0" ? "N'importe quel pays" : savedCountry)
+              );
+              setDeliveredSubscriptionId(subId);
+              setDeliveredExpiresAt(data?.expires_at ?? null);
+              setStep("delivered");
+              toast.success("Votre numéro est débloqué !", { duration: 4000 });
+            } else {
+              toast.success(`Numéro ${savedServiceName} livré ! Consultez votre historique.`, { duration: 6000 });
             }
-            toast.success(`Numéro ${savedServiceName} livré avec succès ! Consultez votre historique.`, { duration: 6000 });
           }
 
           queryClient.invalidateQueries({ queryKey: ["profile"] });
@@ -329,9 +404,19 @@ const Boutique = () => {
         }
         return;
       }
-      toast.success(`Numéro livré : ${data.number}`);
-      setStep("offer");
-      setSelectedService(null);
+      // ─── Révélation du numéro à l'écran ────────────────────────────────────
+      const realNumber: string = data.number;
+      const subId = await fetchSubscriptionId(user.id, realNumber);
+      setDeliveredNumber(realNumber);
+      setDeliveredService(selectedService);
+      setDeliveredCountryName(
+        catalogCountries?.find((c) => c.id === selectedCountry)?.name
+        ?? (selectedCountry === "0" ? "N'importe quel pays" : selectedCountryName)
+      );
+      setDeliveredSubscriptionId(subId);
+      setDeliveredExpiresAt(data?.expires_at ?? null);
+      setStep("delivered");
+      toast.success("Votre numéro est débloqué !");
       queryClient.invalidateQueries({ queryKey: ["profile"] });
       queryClient.invalidateQueries({ queryKey: ["subscriptions"] });
     } catch (e: any) {
@@ -630,38 +715,49 @@ const Boutique = () => {
                 Modifier ma sélection
               </button>
 
-              {/* Récapitulatif complet */}
-              <div className="rounded-2xl bg-card border border-border p-4 shadow-card space-y-4">
-                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Récapitulatif</p>
+              {/* ╔═══════════════════════════════════════════════════════════╗
+                  ║   TEASER : « Votre numéro est prêt » (masqué + verrou)    ║
+                  ╚═══════════════════════════════════════════════════════════╝ */}
+              {(() => {
+                const shortName = catalogCountries?.find((c) => c.id === selectedCountry)?.short_name;
+                return (
+                  <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-primary/10 via-card to-accent/10 border-2 border-primary/30 p-5 shadow-glow">
+                    <div className="absolute -top-6 -right-6 h-24 w-24 rounded-full bg-primary/10 blur-2xl" />
+                    <div className="relative space-y-3">
+                      <div className="flex items-center gap-2">
+                        <Sparkles className="h-4 w-4 text-primary" />
+                        <p className="text-[11px] font-bold uppercase tracking-wider text-primary">
+                          Votre numéro est prêt
+                        </p>
+                      </div>
 
-                {/* Service + pays */}
-                <div className="flex items-center gap-3">
-                  <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl ${selectedService.color}`}>
-                    <span className="text-2xl">{selectedService.emoji}</span>
-                  </div>
-                  <div className="flex-1">
-                    <p className="font-bold text-foreground">{selectedService.name}</p>
-                    <p className="text-xs text-muted-foreground">{selectedCountryDisplay}</p>
-                  </div>
-                </div>
+                      <div className="flex items-center gap-3">
+                        <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${selectedService.color}`}>
+                          <span className="text-xl">{selectedService.emoji}</span>
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs text-muted-foreground truncate">
+                            {selectedService.name} · {selectedCountryDisplay}
+                          </p>
+                        </div>
+                      </div>
 
-                <div className="border-t border-border" />
+                      <div className="rounded-xl bg-background/80 backdrop-blur p-4 border border-border relative">
+                        <p className="text-2xl font-mono font-bold tracking-wider text-foreground/80 select-none">
+                          {maskedPreview(shortName)}
+                        </p>
+                        <div className="absolute top-2 right-2 flex h-7 w-7 items-center justify-center rounded-lg bg-amber-500/15 border border-amber-400/40">
+                          <Lock className="h-3.5 w-3.5 text-amber-600" />
+                        </div>
+                      </div>
 
-                {/* Offre + total */}
-                <div className="flex items-center gap-3">
-                  <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br ${product.gradientClass}`}>
-                    <ShoppingBag className="h-5 w-5 text-white" />
+                      <p className="text-xs text-muted-foreground leading-relaxed">
+                        🔒 Numéro <strong>verrouillé</strong>. Pour le débloquer et l'utiliser dans {selectedService.name}, validez le paiement ci-dessous.
+                      </p>
+                    </div>
                   </div>
-                  <div className="flex-1">
-                    <p className="font-semibold text-foreground text-sm">{product.name}</p>
-                    <p className="text-[11px] text-muted-foreground">{product.description}</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-lg font-bold text-foreground">{product.price.toLocaleString("fr-FR")}</p>
-                    <p className="text-[10px] text-muted-foreground">FCFA</p>
-                  </div>
-                </div>
-              </div>
+                );
+              })()}
 
               {/* ── BOUTON DE PAIEMENT ── */}
               <div className="space-y-3 pt-1">
@@ -677,8 +773,8 @@ const Boutique = () => {
                     </div>
                   ) : (
                     <div className="flex items-center gap-2">
-                      <CreditCard className="h-5 w-5" />
-                      <span>Payer {product.price.toLocaleString("fr-FR")} FCFA via FedaPay</span>
+                      <Unlock className="h-5 w-5" />
+                      <span>Débloquer mon numéro — {product.price.toLocaleString("fr-FR")} FCFA</span>
                     </div>
                   )}
                 </Button>
@@ -712,6 +808,172 @@ const Boutique = () => {
                 <p className="text-center text-[11px] text-muted-foreground">
                   Si aucun numéro n'est trouvé, vous êtes remboursé automatiquement dans votre Wallet.
                 </p>
+              </div>
+            </motion.div>
+          )}
+
+          {/* ═══════════════════════════════════════════════════════════
+              ÉCRAN 4 — RÉVÉLATION : vrai numéro + SMS + CTA 1win
+          ═══════════════════════════════════════════════════════════ */}
+          {step === "delivered" && deliveredNumber && (
+            <motion.div
+              key="delivered"
+              initial={{ opacity: 0, scale: 0.96 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.96 }}
+              className="space-y-5"
+            >
+              {/* Bannière succès */}
+              <div className="rounded-2xl bg-accent/10 border border-accent/30 p-4 flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-accent">
+                  <Check className="h-5 w-5 text-accent-foreground" />
+                </div>
+                <div>
+                  <p className="font-bold text-foreground text-sm">Paiement confirmé</p>
+                  <p className="text-[11px] text-muted-foreground">Votre numéro est débloqué et actif</p>
+                </div>
+              </div>
+
+              {/* Carte révélation : numéro complet visible */}
+              <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-accent/15 via-card to-primary/15 border-2 border-accent/40 p-5 shadow-glow">
+                <div className="absolute -top-8 -right-8 h-28 w-28 rounded-full bg-accent/15 blur-2xl" />
+                <div className="relative space-y-4">
+                  <div className="flex items-center gap-2">
+                    <Unlock className="h-4 w-4 text-accent" />
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-accent">
+                      Votre vrai numéro
+                    </p>
+                  </div>
+
+                  {deliveredService && (
+                    <div className="flex items-center gap-3">
+                      <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${deliveredService.color}`}>
+                        <span className="text-xl">{deliveredService.emoji}</span>
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs text-muted-foreground truncate">
+                          {deliveredService.name} · {deliveredCountryName || "International"}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="rounded-xl bg-background p-4 border border-border">
+                    <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1">
+                      Numéro complet
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-2xl font-mono font-bold text-foreground flex-1 break-all">
+                        {deliveredNumber}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(deliveredNumber);
+                          toast.success("Numéro copié");
+                        }}
+                        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-card text-muted-foreground hover:text-foreground border border-border"
+                      >
+                        <Copy className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {deliveredExpiresAt && (
+                    <p className="text-[11px] text-muted-foreground">
+                      Valide jusqu'au {new Date(deliveredExpiresAt).toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" })}
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {/* Carte SMS */}
+              <div className="rounded-2xl bg-card p-4 shadow-card border border-border space-y-3">
+                <div className="flex items-center gap-2">
+                  <MessageCircle className="h-4 w-4 text-primary" />
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-primary">
+                    Code de validation (SMS)
+                  </p>
+                </div>
+
+                {(deliveredSubscription as any)?.last_sms_code ? (
+                  <div className="rounded-xl border border-accent/40 bg-accent/5 p-4">
+                    <div className="flex items-center gap-2">
+                      <p className="text-3xl font-mono font-bold text-accent tracking-widest flex-1">
+                        {(deliveredSubscription as any).last_sms_code}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText((deliveredSubscription as any).last_sms_code);
+                          toast.success("Code copié");
+                        }}
+                        className="flex h-9 w-9 items-center justify-center rounded-lg bg-card text-muted-foreground hover:text-foreground border border-border"
+                      >
+                        <Copy className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-border bg-muted/30 p-4 flex items-center gap-3">
+                    <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                    <p className="text-sm text-muted-foreground">
+                      En attente du SMS… (jusqu'à 3 min)
+                    </p>
+                  </div>
+                )}
+
+                <p className="text-[11px] text-muted-foreground leading-relaxed">
+                  ➜ Saisissez le numéro ci-dessus dans {deliveredService?.name ?? "votre application"}, puis recopiez le code reçu ici.
+                </p>
+              </div>
+
+              {/* CTA 1win — finalité du parcours */}
+              {partnerLink && (
+                <div className="rounded-2xl bg-gradient-to-br from-amber-500/10 to-orange-500/10 border-2 border-amber-400/40 p-5 space-y-3">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-500">
+                      <Sparkles className="h-5 w-5 text-white" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="font-bold text-foreground text-sm">Finalisez votre inscription</p>
+                      <p className="text-[11px] text-amber-700">
+                        Inscrivez-vous sur 1win avec votre nouveau numéro pour activer votre compte
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    onClick={() => window.open(partnerLink, "_blank", "noopener,noreferrer")}
+                    className="h-12 w-full rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold shadow-glow"
+                  >
+                    <ExternalLink className="h-4 w-4 mr-2" />
+                    M'inscrire sur 1win
+                  </Button>
+                </div>
+              )}
+
+              {/* Actions secondaires */}
+              <div className="grid grid-cols-2 gap-3">
+                <Button
+                  variant="outline"
+                  onClick={() => navigate("/historique")}
+                  className="h-11 rounded-xl"
+                >
+                  Mon historique
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setDeliveredNumber(null);
+                    setDeliveredSubscriptionId(null);
+                    setDeliveredService(null);
+                    setSelectedService(null);
+                    setStep("offer");
+                  }}
+                  className="h-11 rounded-xl"
+                >
+                  Nouvel achat
+                </Button>
               </div>
             </motion.div>
           )}
