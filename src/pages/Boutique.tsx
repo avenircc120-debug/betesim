@@ -8,7 +8,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "framer-motion";
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { createFedaPayTransaction } from "@/lib/fedapay";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -97,6 +97,7 @@ const Boutique = () => {
   const { data: profile } = useProfile();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   // Navigation entre les écrans
   const [step, setStep] = useState<Step>("offer");
@@ -105,7 +106,10 @@ const Boutique = () => {
   const [selectedCountry, setSelectedCountry] = useState<string>("0");
   const [selectedCountryName, setSelectedCountryName] = useState<string>("N'importe quel pays");
   const [selectedService, setSelectedService] = useState<Service | null>(null);
-  const [selectedProduct, setSelectedProduct] = useState<Product>("simple");
+  const [selectedProduct, setSelectedProduct] = useState<Product>(() => {
+    const p = searchParams.get("product");
+    return p === "partner" ? "partner" : "simple";
+  });
 
   // UI
   const [activeCategory, setActiveCategory] = useState("Tous");
