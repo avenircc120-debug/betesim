@@ -1,6 +1,6 @@
 
 import { useState } from "react";
-import { User, Shield, HelpCircle, LogOut, ChevronRight, Users, Bell, Settings, Star, Pencil, Check, X, Trophy, Moon, Sun, Lock, Eye, EyeOff, Phone, ShoppingBag, History, Package, Smartphone } from "lucide-react";
+import { User, Shield, HelpCircle, LogOut, ChevronRight, Users, Bell, Settings, Star, Pencil, Check, X, Trophy, Moon, Sun, Lock, Eye, EyeOff, Phone, ShoppingBag, History, Package, Smartphone, BarChart2 } from "lucide-react";
 import { toast } from "sonner";
 import { motion } from "framer-motion";
 import { Input } from "@/components/ui/input";
@@ -154,6 +154,7 @@ const Compte = () => {
         { icon: ShoppingBag,  label: "Boutique",          desc: "Acheter un service winpack",              path: "/boutique" },
         { icon: History,      label: "Historique",         desc: "Mes achats et numéros livrés",            path: "/historique" },
         { icon: Package,      label: "Pack Partenaire",    desc: "Numéro Telegram + lien de parrainage",   path: "/pack-partenaire" },
+        { icon: BarChart2,    label: "Pronostics",         desc: "Analyses football & coupons partenaires", path: "/pronostics" },
       ],
     },
     {
