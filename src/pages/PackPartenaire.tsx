@@ -139,16 +139,21 @@ const PackPartenaire = () => {
     if (!authLoading && !user) requireAuth(() => {});
   }, [authLoading, user, requireAuth]);
 
-  const { data: partnerLink } = useQuery({
-    queryKey: ["partner-link"],
+  const { data: settings } = useQuery({
+    queryKey: ["partner-settings"],
     queryFn: async () => {
       const { data } = await supabase.functions.invoke("partner-pack", {
         body: { action: "settings-get" },
       });
-      return (data?.partner_link as string) || FALLBACK_1WIN;
+      return {
+        partnerLink: (data?.partner_link as string) || FALLBACK_1WIN,
+        telegramBotLink: (data?.telegram_bot_link as string) || "",
+      };
     },
     staleTime: 5 * 60_000,
   });
+  const partnerLink    = settings?.partnerLink    || FALLBACK_1WIN;
+  const telegramBotLink = settings?.telegramBotLink || "";
 
   const { data: catalogCountries = [], isLoading: loadingCountries } = useQuery({
     queryKey: ["winpack-countries"],
@@ -542,6 +547,31 @@ const PackPartenaire = () => {
                 </div>
               </div>
             </motion.div>
+
+            {/* CTA Bot Telegram de guidage */}
+            {telegramBotLink && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.05 }}
+                className="rounded-2xl bg-sky-500/10 border border-sky-400/30 p-5 space-y-3"
+              >
+                <div className="flex items-center gap-2">
+                  <MessageCircle className="h-5 w-5 text-sky-600 shrink-0" />
+                  <h2 className="font-bold text-foreground">Bot Telegram de guidage</h2>
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  Rejoignez le Bot Telegram officiel pour recevoir les pronostics, gérer vos coupons et suivre vos commissions directement sur votre téléphone.
+                </p>
+                <Button
+                  onClick={() => window.open(telegramBotLink, "_blank", "noopener,noreferrer")}
+                  className="h-12 w-full rounded-xl bg-sky-500 hover:bg-sky-600 text-white font-bold shadow-glow"
+                >
+                  <MessageCircle className="h-4 w-4 mr-2" />
+                  Accéder au Bot Telegram
+                </Button>
+              </motion.div>
+            )}
 
             {/* CTA 1win */}
             <motion.div

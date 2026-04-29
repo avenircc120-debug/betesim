@@ -25,6 +25,7 @@ import LoginPage from "./pages/LoginPage";
 import PackPartenaire from "./pages/PackPartenaire";
 import Admin from "./pages/Admin";
 import Onboarding from "./pages/Onboarding";
+import Pronostics from "./pages/Pronostics";
 
 const queryClient = new QueryClient();
 
@@ -66,6 +67,7 @@ const AppContent = () => {
             <Route path="/pack-partenaire" element={<PackPartenaire />} />
             <Route path="/admin" element={<Admin />} />
             <Route path="/onboarding" element={<Onboarding />} />
+            <Route path="/pronostics" element={<Pronostics />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </ProfileGate>

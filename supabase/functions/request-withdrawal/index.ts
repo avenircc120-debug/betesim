@@ -72,7 +72,19 @@ serve(async (req) => {
       );
     }
 
-    // Débiter le wallet (la portion débitée vient toujours de la part déverrouillée)
+    // ── Commission 20% pour les partenaires ──────────────────────────────
+    const { data: profFull } = await supabase
+      .from("profiles").select("is_partner").eq("id", user_id).maybeSingle();
+    const isPartner = !!(profFull as any)?.is_partner;
+
+    let netAmount   = amount_fcfa;
+    let commission  = 0;
+    if (isPartner) {
+      commission = Math.round(amount_fcfa * 0.20);
+      netAmount  = amount_fcfa - commission;
+    }
+
+    // Débiter le wallet (montant brut demandé)
     const newBalance = balance - amount_fcfa;
     const { error: updErr } = await supabase
       .from("profiles")
@@ -80,12 +92,12 @@ serve(async (req) => {
       .eq("id", user_id);
     if (updErr) throw new Error(updErr.message);
 
-    // Créer la demande de retrait
+    // Créer la demande de retrait (montant net reçu par l'utilisateur)
     const { data: wd, error: wdErr } = await supabase
       .from("withdrawal_requests")
       .insert({
         user_id,
-        amount_fcfa,
+        amount_fcfa: netAmount,
         phone_number: String(phone_number).trim(),
         provider: providerNorm,
         status: "pending",
@@ -93,21 +105,35 @@ serve(async (req) => {
       .select("id")
       .single();
     if (wdErr) {
-      // rollback
       await supabase.from("profiles").update({ fcfa_balance: balance }).eq("id", user_id);
       throw new Error(wdErr.message);
+    }
+
+    // Enregistrer la commission si partenaire
+    if (isPartner && commission > 0) {
+      await supabase.from("commission_records").insert({
+        partner_id: user_id,
+        type: "withdrawal",
+        gross_amount: amount_fcfa,
+        commission_amount: commission,
+        net_amount: netAmount,
+        reference_id: wd.id,
+        description: `Commission 20% sur retrait ${providerNorm.toUpperCase()} de ${amount_fcfa.toLocaleString("fr-FR")} FCFA`,
+      });
     }
 
     await supabase.from("transactions").insert({
       user_id,
       type: "withdrawal_request",
       status: "pending",
-      amount_fcfa,
-      description: `Demande de retrait ${providerNorm.toUpperCase()} vers ${phone_number}`,
+      amount_fcfa: netAmount,
+      description: isPartner
+        ? `Retrait ${providerNorm.toUpperCase()} vers ${phone_number} (${netAmount.toLocaleString("fr-FR")} FCFA après commission 20%)`
+        : `Demande de retrait ${providerNorm.toUpperCase()} vers ${phone_number}`,
     });
 
     return new Response(
-      JSON.stringify({ success: true, withdrawal_id: wd.id, amount_fcfa }),
+      JSON.stringify({ success: true, withdrawal_id: wd.id, amount_fcfa: netAmount, commission_fcfa: commission }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (err: any) {

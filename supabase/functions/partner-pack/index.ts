@@ -89,8 +89,15 @@ serve(async (req) => {
 
     // ─── Public : settings-get ───────────────────────────────────────────
     if (action === "settings-get") {
-      const { data } = await supabase.from("app_settings").select("value").eq("key", "partner_link").maybeSingle();
-      return ok({ success: true, partner_link: (data as any)?.value ?? "" });
+      const [{ data: linkData }, { data: botData }] = await Promise.all([
+        supabase.from("app_settings").select("value").eq("key", "partner_link").maybeSingle(),
+        supabase.from("app_settings").select("value").eq("key", "telegram_bot_link").maybeSingle(),
+      ]);
+      return ok({
+        success: true,
+        partner_link: (linkData as any)?.value ?? "",
+        telegram_bot_link: (botData as any)?.value ?? "",
+      });
     }
 
     // ─── init : après paiement FedaPay confirmé ──────────────────────────
