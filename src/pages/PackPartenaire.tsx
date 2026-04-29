@@ -13,13 +13,12 @@ import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { createFedaPayTransaction } from "@/lib/fedapay";
 
-type PackStatus = "paid" | "partner_id_provided" | "delivered";
+type PackStatus = "paid" | "delivered";
 
 interface PartnerPack {
   id: string;
   user_id: string;
   status: PackStatus;
-  partner_id: string | null;
   telegram_number: string | null;
   subscription_id: string | null;
   fedapay_transaction_id: string | null;
