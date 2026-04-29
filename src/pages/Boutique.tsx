@@ -618,7 +618,7 @@ const Boutique = () => {
               <Button
                 onClick={() => {
                   if (selectedProduct === "partner") {
-                    requireAuth(handlePartnerPack);
+                    requireAuth(() => navigate("/pack-partenaire"));
                   } else {
                     requireAuth(() => setStep("select"));
                   }
@@ -627,7 +627,7 @@ const Boutique = () => {
                 className="h-13 w-full rounded-xl gradient-primary text-primary-foreground font-bold text-base shadow-glow py-4 disabled:opacity-50"
               >
                 {selectedProduct === "partner"
-                  ? (isPaying ? "Redirection vers le paiement…" : "Payer 2 500 FCFA — Pack Partenaire")
+                  ? "Continuer — Choisir mon pays"
                   : "Continuer — Choisir pays & service"}
               </Button>
 
