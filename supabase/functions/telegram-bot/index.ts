@@ -271,7 +271,38 @@ function escapeHtml(s: string): string {
 }
 
 // ─── Webhook handler ────────────────────────────────────────────────────────
+const FUNCTION_URL = `https://mqwrhiffrtbkizyuiytt.supabase.co/functions/v1/telegram-bot`;
+
 serve(async (req) => {
+  const url = new URL(req.url);
+  const action = url.searchParams.get("action");
+
+  // ── GET ?action=info  → état du webhook Telegram ─────────────────────────
+  if (req.method === "GET" && action === "info") {
+    const token = Deno.env.get("TELEGRAM_BOT_TOKEN");
+    if (!token) return new Response(JSON.stringify({ error: "TELEGRAM_BOT_TOKEN manquant" }), { status: 500 });
+    const r = await fetch(`${TG_API}/bot${token}/getWebhookInfo`);
+    const json = await r.json();
+    return new Response(JSON.stringify(json, null, 2), {
+      status: 200, headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  // ── GET ?action=register → enregistre le webhook Telegram ────────────────
+  if (req.method === "GET" && action === "register") {
+    const token = Deno.env.get("TELEGRAM_BOT_TOKEN");
+    if (!token) return new Response(JSON.stringify({ error: "TELEGRAM_BOT_TOKEN manquant" }), { status: 500 });
+    const r = await fetch(`${TG_API}/bot${token}/setWebhook`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: FUNCTION_URL, allowed_updates: ["message", "callback_query"] }),
+    });
+    const json = await r.json();
+    return new Response(JSON.stringify(json, null, 2), {
+      status: 200, headers: { "Content-Type": "application/json" },
+    });
+  }
+
   if (req.method !== "POST") {
     return new Response("OK", { status: 200 });
   }
@@ -331,7 +362,7 @@ serve(async (req) => {
           chatId,
           `🎯 Ouvre Pack Officiel <b>en plein écran</b> directement ici :`,
           { inline_keyboard: [[
-            { text: "🎯 Ouvrir Pack Officiel", web_app: { url: `${base}/?tg=1` } },
+            { text: "📊 Voir les Pronostics", web_app: { url: `${base}/pronostics?tg=1` } },
           ]] },
         );
       } else {
@@ -362,7 +393,7 @@ serve(async (req) => {
           base = base.replace(/\/+$/, "");
           return {
             inline_keyboard: [[
-              { text: "🎯 Ouvrir Pack Officiel", web_app: { url: `${base}/?tg=1` } },
+              { text: "📊 Voir les Pronostics", web_app: { url: `${base}/pronostics?tg=1` } },
             ]],
           };
         }
