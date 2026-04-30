@@ -23,6 +23,11 @@ interface PartnerPack {
   subscription_id: string | null;
   fedapay_transaction_id: string | null;
   created_at: string;
+  // Suivi parcours bot Telegram
+  bot_started_at: string | null;
+  secured_2fa_at: string | null;
+  partner_clicked_at: string | null;
+  software_unlocked_at: string | null;
 }
 
 const COUNTRY_DIAL: Record<string, string> = {
@@ -558,37 +563,82 @@ const PackPartenaire = () => {
               </div>
             </motion.div>
 
-            {/* CTA Bot Telegram de guidage */}
-            {telegramBotLink && (
-              <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.05 }}
-                className="rounded-2xl bg-sky-500/10 border border-sky-400/30 p-5 space-y-3"
-              >
-                <div className="flex items-center gap-2">
-                  <MessageCircle className="h-5 w-5 text-sky-600 shrink-0" />
-                  <h2 className="font-bold text-foreground">Bot Telegram de guidage</h2>
-                </div>
-                <p className="text-sm text-muted-foreground">
-                  Rejoignez le Bot Telegram officiel pour recevoir les pronostics, gérer vos coupons et suivre vos commissions directement sur votre téléphone.
-                </p>
-                <Button
-                  onClick={() => {
-                    // Deep link : passe l'ID du pack au bot via /start <pack_id>
-                    const sep = telegramBotLink.includes("?") ? "&" : "?";
-                    const url = telegramBotLink.includes("t.me/")
-                      ? `${telegramBotLink}${sep}start=${pack.id}`
-                      : telegramBotLink;
-                    window.open(url, "_blank", "noopener,noreferrer");
-                  }}
-                  className="h-12 w-full rounded-xl bg-sky-500 hover:bg-sky-600 text-white font-bold shadow-glow"
+            {/* CTA Bot Telegram — affichage adaptatif selon l'avancement */}
+            {telegramBotLink && (() => {
+              const unlocked = !!pack.software_unlocked_at;
+              const started  = !!pack.bot_started_at;
+              const did2fa   = !!pack.secured_2fa_at;
+
+              // Texte d'état + libellé bouton dynamiques (gestion de la continuité)
+              let title: string;
+              let subtitle: string;
+              let cta: string;
+              if (unlocked) {
+                title = "✅ Pack Officiel actif";
+                subtitle = "Votre logiciel de pronostics est débloqué. Ouvrez-le directement dans Telegram en plein écran.";
+                cta = "📊 Ouvrir le logiciel";
+              } else if (did2fa) {
+                title = "Continuer mon activation";
+                subtitle = "2FA activée ✓ — Il vous reste l'inscription 1win à valider dans le bot pour débloquer le logiciel.";
+                cta = "▶️ Reprendre dans Telegram";
+              } else if (started) {
+                title = "Continuer mon activation";
+                subtitle = "Vous avez commencé l'activation. Reprenez là où vous étiez, vous ne perdez rien.";
+                cta = "▶️ Reprendre dans Telegram";
+              } else {
+                title = "Bot Telegram de guidage";
+                subtitle = "Démarrez l'activation guidée : sécurisation 2FA puis inscription 1win pour débloquer votre logiciel.";
+                cta = "🚀 Démarrer l'activation";
+              }
+
+              const openBot = () => {
+                const sep = telegramBotLink.includes("?") ? "&" : "?";
+                const url = telegramBotLink.includes("t.me/")
+                  ? `${telegramBotLink}${sep}start=${pack.id}`
+                  : telegramBotLink;
+                window.open(url, "_blank", "noopener,noreferrer");
+              };
+
+              return (
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.05 }}
+                  className={`rounded-2xl border p-5 space-y-3 ${
+                    unlocked
+                      ? "bg-accent/10 border-accent/40"
+                      : "bg-sky-500/10 border-sky-400/30"
+                  }`}
                 >
-                  <MessageCircle className="h-4 w-4 mr-2" />
-                  Accéder au Bot Telegram
-                </Button>
-              </motion.div>
-            )}
+                  <div className="flex items-center gap-2">
+                    <MessageCircle className={`h-5 w-5 shrink-0 ${unlocked ? "text-accent" : "text-sky-600"}`} />
+                    <h2 className="font-bold text-foreground">{title}</h2>
+                  </div>
+                  <p className="text-sm text-muted-foreground">{subtitle}</p>
+
+                  {/* Mini-progress steps : visuel de continuité */}
+                  {!unlocked && (
+                    <div className="flex items-center gap-1 text-[11px] font-medium">
+                      <span className={did2fa ? "text-accent" : "text-muted-foreground"}>● 2FA</span>
+                      <span className="text-muted-foreground/40">—</span>
+                      <span className="text-muted-foreground">○ 1win</span>
+                      <span className="text-muted-foreground/40">—</span>
+                      <span className="text-muted-foreground">○ Logiciel</span>
+                    </div>
+                  )}
+
+                  <Button
+                    onClick={openBot}
+                    className={`h-12 w-full rounded-xl text-white font-bold shadow-glow ${
+                      unlocked ? "gradient-primary" : "bg-sky-500 hover:bg-sky-600"
+                    }`}
+                  >
+                    <MessageCircle className="h-4 w-4 mr-2" />
+                    {cta}
+                  </Button>
+                </motion.div>
+              );
+            })()}
 
             {/* CTA 1win */}
             <motion.div
