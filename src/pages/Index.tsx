@@ -3,6 +3,7 @@ import { ShoppingBag, TrendingUp, Users, ArrowUpRight, Sparkles, Trophy, Downloa
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import WalletBanner from "@/components/WalletBanner";
+import ContinueActivationBanner from "@/components/ContinueActivationBanner";
 import NotificationCenter from "@/components/NotificationCenter";
 import BottomNav from "@/components/BottomNav";
 import ShareButtons from "@/components/ShareButtons";
@@ -92,6 +93,13 @@ const Index = () => {
         <motion.div {...fadeUp} transition={{ delay: 0.05 }}>
           <WalletBanner profile={profile ?? null} />
         </motion.div>
+
+        {/* Reprise du tunnel Pack Officiel si commencé mais non terminé */}
+        {user && (
+          <motion.div {...fadeUp} transition={{ delay: 0.07 }}>
+            <ContinueActivationBanner />
+          </motion.div>
+        )}
 
         {/* Tableau de bord — Le Choix : 2 grandes cartes */}
         <motion.div {...fadeUp} transition={{ delay: 0.1 }} className="space-y-2">
