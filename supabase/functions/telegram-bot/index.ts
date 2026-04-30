@@ -150,6 +150,28 @@ serve(async (req) => {
   }
 
   try {
+    // ── /app : ouvre la Mini App plein écran ─────────────────────────────
+    if (update.message?.text?.startsWith("/app")) {
+      const chatId = update.message.chat.id;
+      const { data: appUrlRow } = await supabase
+        .from("app_settings").select("value").eq("key", "app_base_url").maybeSingle();
+      let base = ((appUrlRow as any)?.value || "").trim();
+      if (base) {
+        if (!/^https?:\/\//i.test(base)) base = "https://" + base;
+        base = base.replace(/\/+$/, "");
+        await sendMessage(
+          chatId,
+          `🎯 Ouvrez Pack Officiel <b>en plein écran</b> directement ici :`,
+          { inline_keyboard: [[
+            { text: "🎯 Ouvrir Pack Officiel", web_app: { url: `${base}/?tg=1` } },
+          ]] },
+        );
+      } else {
+        await sendMessage(chatId, `Application non configurée. Contactez le support.`);
+      }
+      return new Response("ok", { status: 200 });
+    }
+
     // ── /start <pack_id> ──────────────────────────────────────────────────
     if (update.message?.text?.startsWith("/start")) {
       const msg = update.message;
@@ -162,15 +184,39 @@ serve(async (req) => {
       const parts = msg.text.split(" ");
       const packId = parts[1]?.trim();
 
+      // Helper : ouvre la Mini App en plein écran depuis le bot
+      const openAppBaseKeyboard = async () => {
+        const { data: appUrlRow } = await supabase
+          .from("app_settings").select("value").eq("key", "app_base_url").maybeSingle();
+        let base = ((appUrlRow as any)?.value || "").trim();
+        if (base) {
+          if (!/^https?:\/\//i.test(base)) base = "https://" + base;
+          base = base.replace(/\/+$/, "");
+          return {
+            inline_keyboard: [[
+              { text: "🎯 Ouvrir Pack Officiel", web_app: { url: `${base}/?tg=1` } },
+            ]],
+          };
+        }
+        return undefined;
+      };
+
       if (!packId) {
+        // Lien promo / start direct → on propose d'ouvrir l'app en plein écran
         await sendMessage(
           chatId,
           [
-            `👋 <b>Bienvenue sur Pack Officiel</b>`,
+            `👋 <b>Bienvenue ${firstName} sur Pack Officiel !</b>`,
             ``,
-            `Pour accéder au pack, vous devez passer par l'application après votre achat.`,
-            `Le bouton "Accéder au Bot Telegram" sur la page Pack Partenaire vous redirigera ici avec votre identifiant unique.`,
+            `🎯 <b>Tout se passe ici, dans Telegram, en plein écran.</b>`,
+            ``,
+            `Cliquez sur le bouton ci-dessous pour démarrer :`,
+            `1. Choisir votre pack`,
+            `2. Recevoir votre numéro Telegram sécurisé`,
+            `3. Activer la 2FA + l'inscription 1win`,
+            `4. Accéder aux pronostics du jour`,
           ].join("\n"),
+          await openAppBaseKeyboard(),
         );
         return new Response("ok", { status: 200 });
       }
