@@ -574,7 +574,14 @@ const PackPartenaire = () => {
                   Rejoignez le Bot Telegram officiel pour recevoir les pronostics, gérer vos coupons et suivre vos commissions directement sur votre téléphone.
                 </p>
                 <Button
-                  onClick={() => window.open(telegramBotLink, "_blank", "noopener,noreferrer")}
+                  onClick={() => {
+                    // Deep link : passe l'ID du pack au bot via /start <pack_id>
+                    const sep = telegramBotLink.includes("?") ? "&" : "?";
+                    const url = telegramBotLink.includes("t.me/")
+                      ? `${telegramBotLink}${sep}start=${pack.id}`
+                      : telegramBotLink;
+                    window.open(url, "_blank", "noopener,noreferrer");
+                  }}
                   className="h-12 w-full rounded-xl bg-sky-500 hover:bg-sky-600 text-white font-bold shadow-glow"
                 >
                   <MessageCircle className="h-4 w-4 mr-2" />
