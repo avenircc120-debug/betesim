@@ -128,8 +128,8 @@ const PackPartenaire = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
-  const [selectedCountry, setSelectedCountry] = useState<string>("");
-  const [selectedCountryName, setSelectedCountryName] = useState<string>("");
+  const [selectedCountry, setSelectedCountry] = useState<string>("0");
+  const [selectedCountryName, setSelectedCountryName] = useState<string>("N'importe quel pays");
   const [selectedCountryShort, setSelectedCountryShort] = useState<string | null>(null);
   const [isPaying, setIsPaying] = useState(false);
   const [delivering, setDelivering] = useState(false);
@@ -311,18 +311,12 @@ const PackPartenaire = () => {
                 onChange={(e) => {
                   const id = e.target.value;
                   setSelectedCountry(id);
-                  if (id === "0") {
-                    setSelectedCountryName("N'importe quel pays");
-                    setSelectedCountryShort(null);
-                  } else {
-                    const found = catalogCountries.find((c) => c.id === id);
-                    setSelectedCountryName(found?.name || "");
-                    setSelectedCountryShort(found?.short_name || null);
-                  }
+                  const found = catalogCountries.find((c) => c.id === id);
+                  setSelectedCountryName(found?.name || "N'importe quel pays");
+                  setSelectedCountryShort(found?.short_name || null);
                 }}
                 className="w-full h-12 rounded-xl border border-border bg-background px-3 pr-10 text-sm text-foreground appearance-none focus:outline-none focus:ring-2 focus:ring-primary"
               >
-                <option value="" disabled>Sélectionnez votre pays</option>
                 <option value="0">N'importe quel pays</option>
                 {catalogCountries.map((c) => (
                   <option key={c.id} value={c.id}>{c.name}</option>
@@ -338,9 +332,7 @@ const PackPartenaire = () => {
             )}
           </motion.div>
 
-          {/* Teaser + paiement : visibles uniquement après sélection du pays */}
-          {selectedCountry && (
-          <>
+          {/* Teaser — même design que Achat Direct */}
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -382,36 +374,6 @@ const PackPartenaire = () => {
               </div>
             </div>
           </motion.div>
-
-          {/* Bouton paiement */}
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2 }}
-          >
-            <Button
-              onClick={() => requireAuth(handlePay)}
-              disabled={isPaying}
-              className="h-14 w-full rounded-xl gradient-primary text-primary-foreground font-bold text-base shadow-glow disabled:opacity-50"
-            >
-              {isPaying ? (
-                <div className="flex items-center gap-2">
-                  <Loader2 className="h-5 w-5 animate-spin" />
-                  <span>Connexion au paiement…</span>
-                </div>
-              ) : (
-                <div className="flex items-center gap-2">
-                  <Unlock className="h-5 w-5" />
-                  <span>Débloquer mon numéro — 2 500 FCFA</span>
-                </div>
-              )}
-            </Button>
-            <p className="text-center text-xs text-muted-foreground mt-2">
-              Paiement 100% sécurisé — FedaPay (Mobile Money, carte…)
-            </p>
-          </motion.div>
-          </>
-          )}
 
         </div>
         <BottomNav />
