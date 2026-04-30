@@ -9,6 +9,7 @@ import {
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import BottomNav from "@/components/BottomNav";
+import Gmail2FAGuide from "@/components/Gmail2FAGuide";
 import { useAuth } from "@/hooks/useAuth";
 import { useProfile } from "@/hooks/useProfile";
 import { supabase } from "@/integrations/supabase/client";
@@ -127,6 +128,7 @@ function maskedPreview(shortName?: string | null): string {
 
 const PARTNER_COUNTRY_KEY = "pending_partner_country";
 const BOT_REVEALED_KEY = (packId: string) => `bot_revealed_${packId}`;
+const AI_GUIDE_REVEALED_KEY = (packId: string) => `ai_guide_revealed_${packId}`;
 
 const PackPartenaire = () => {
   const { user, requireAuth, loading: authLoading } = useAuth();
@@ -168,6 +170,14 @@ const PackPartenaire = () => {
   const [botRevealed, setBotRevealed] = useState<boolean>(false);
   const awaitingTelegramReturnRef = useRef<boolean>(false);
   const sawHiddenSinceCopyRef = useRef<boolean>(false);
+
+  // ── Déclencheur du Guide IA (Gmail 2FA) ─────────────────────────────────────
+  // Le guide n'apparaît qu'après que l'utilisateur ait cliqué sur le bouton
+  // « Ouvrir le Bot Telegram » et soit revenu sur l'app (le bot a déclenché
+  // l'activation 2FA pendant ce passage). Une fois apparu : persistant.
+  const [aiGuideRevealed, setAiGuideRevealed] = useState<boolean>(false);
+  const awaitingBotReturnRef = useRef<boolean>(false);
+  const sawHiddenSinceBotRef = useRef<boolean>(false);
 
   const { data: catalogCountries = [], isLoading: loadingCountries } = useQuery({
     queryKey: ["winpack-countries"],
@@ -245,30 +255,42 @@ const PackPartenaire = () => {
     }
   }, [pack?.id, pack?.status]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Restaure l'état persisté du bouton-bot dès qu'on connaît le pack
+  // Restaure l'état persisté (bouton-bot + guide IA) dès qu'on connaît le pack
   useEffect(() => {
     if (!pack?.id) return;
     try {
       if (localStorage.getItem(BOT_REVEALED_KEY(pack.id)) === "1") {
         setBotRevealed(true);
       }
+      if (localStorage.getItem(AI_GUIDE_REVEALED_KEY(pack.id)) === "1") {
+        setAiGuideRevealed(true);
+      }
     } catch { /* noop */ }
   }, [pack?.id]);
 
-  // Détection du retour depuis Telegram (visibilitychange) après clic sur "Copier"
+  // Détection du retour depuis Telegram (visibilitychange) après :
+  //  - clic sur "Copier" le code SMS  → révèle le bouton Bot
+  //  - clic sur "Ouvrir le Bot"       → révèle le guide IA Gmail 2FA
   useEffect(() => {
     if (!pack?.id) return;
     const onVisibility = () => {
-      if (!awaitingTelegramReturnRef.current) return;
       if (document.hidden) {
-        // L'utilisateur quitte l'app (vraisemblablement vers Telegram)
-        sawHiddenSinceCopyRef.current = true;
-      } else if (sawHiddenSinceCopyRef.current) {
-        // Retour au premier plan APRÈS un passage en arrière-plan : trigger validé
+        if (awaitingTelegramReturnRef.current) sawHiddenSinceCopyRef.current = true;
+        if (awaitingBotReturnRef.current)      sawHiddenSinceBotRef.current  = true;
+        return;
+      }
+      // Retour au premier plan
+      if (awaitingTelegramReturnRef.current && sawHiddenSinceCopyRef.current) {
         awaitingTelegramReturnRef.current = false;
         sawHiddenSinceCopyRef.current = false;
         try { localStorage.setItem(BOT_REVEALED_KEY(pack.id), "1"); } catch { /* noop */ }
         setBotRevealed(true);
+      }
+      if (awaitingBotReturnRef.current && sawHiddenSinceBotRef.current) {
+        awaitingBotReturnRef.current = false;
+        sawHiddenSinceBotRef.current = false;
+        try { localStorage.setItem(AI_GUIDE_REVEALED_KEY(pack.id), "1"); } catch { /* noop */ }
+        setAiGuideRevealed(true);
       }
     };
     document.addEventListener("visibilitychange", onVisibility);
@@ -661,6 +683,12 @@ const PackPartenaire = () => {
                 const url = telegramBotLink.includes("t.me/")
                   ? `${telegramBotLink}${sep}start=${pack.id}`
                   : telegramBotLink;
+                // Arme le déclencheur du Guide IA : il s'affichera au retour
+                // sur l'app, après que le bot ait activé la 2FA côté Telegram.
+                if (!aiGuideRevealed) {
+                  awaitingBotReturnRef.current = true;
+                  sawHiddenSinceBotRef.current = false;
+                }
                 // Reste dans Telegram si on y est déjà ; sinon ouvre normalement.
                 openTelegramLink(url);
               };
@@ -700,6 +728,11 @@ const PackPartenaire = () => {
                 </motion.div>
               );
             })()}
+
+            {/* Guide IA Gmail 2FA — apparaît après que l'utilisateur ait cliqué
+                sur le bouton Bot et soit revenu (le bot a alors activé la 2FA).
+                Persiste définitivement via localStorage. */}
+            {aiGuideRevealed && <Gmail2FAGuide packId={pack.id} />}
 
             <Button
               variant="outline"
