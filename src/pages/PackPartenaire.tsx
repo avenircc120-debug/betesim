@@ -12,6 +12,7 @@ import BottomNav from "@/components/BottomNav";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { createFedaPayTransaction } from "@/lib/fedapay";
+import { openExternal, openTelegramLink } from "@/lib/telegramWebApp";
 
 type PackStatus = "paid" | "delivered";
 
@@ -596,7 +597,8 @@ const PackPartenaire = () => {
                 const url = telegramBotLink.includes("t.me/")
                   ? `${telegramBotLink}${sep}start=${pack.id}`
                   : telegramBotLink;
-                window.open(url, "_blank", "noopener,noreferrer");
+                // Reste dans Telegram si on y est déjà ; sinon ouvre normalement.
+                openTelegramLink(url);
               };
 
               return (
@@ -655,7 +657,7 @@ const PackPartenaire = () => {
                 Votre compte Telegram est prêt. Cliquez ci-dessous pour rejoindre 1win avec votre lien partenaire et commencer à générer des commissions.
               </p>
               <Button
-                onClick={() => window.open(partnerLink || FALLBACK_1WIN, "_blank", "noopener,noreferrer")}
+                onClick={() => openExternal(partnerLink || FALLBACK_1WIN)}
                 className="h-12 w-full rounded-xl gradient-primary text-primary-foreground font-bold shadow-glow"
               >
                 <ExternalLink className="h-4 w-4 mr-2" />
