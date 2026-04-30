@@ -1,10 +1,10 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import {
-  Check, Copy, ExternalLink, Loader2, MessageCircle,
-  ShieldCheck, Lock, Unlock, Sparkles, ChevronDown, Globe,
+  Check, Copy, Loader2, MessageCircle,
+  Lock, Unlock, Sparkles, ChevronDown, Globe,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -13,7 +13,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useProfile } from "@/hooks/useProfile";
 import { supabase } from "@/integrations/supabase/client";
 import { createFedaPayTransaction } from "@/lib/fedapay";
-import { openExternal, openTelegramLink } from "@/lib/telegramWebApp";
+import { openTelegramLink } from "@/lib/telegramWebApp";
 
 type PackStatus = "paid" | "delivered";
 
@@ -126,7 +126,7 @@ function maskedPreview(shortName?: string | null): string {
 }
 
 const PARTNER_COUNTRY_KEY = "pending_partner_country";
-const FALLBACK_1WIN = "https://1w.run/?p=YvTH";
+const BOT_REVEALED_KEY = (packId: string) => `bot_revealed_${packId}`;
 
 const PackPartenaire = () => {
   const { user, requireAuth, loading: authLoading } = useAuth();
@@ -154,14 +154,20 @@ const PackPartenaire = () => {
         body: { action: "settings-get" },
       });
       return {
-        partnerLink: (data?.partner_link as string) || FALLBACK_1WIN,
         telegramBotLink: (data?.telegram_bot_link as string) || "",
       };
     },
     staleTime: 5 * 60_000,
   });
-  const partnerLink    = settings?.partnerLink    || FALLBACK_1WIN;
   const telegramBotLink = settings?.telegramBotLink || "";
+
+  // ── Déclencheur du bouton permanent vers le Bot ─────────────────────────────
+  // Le bouton n'apparaît qu'après que l'utilisateur ait cliqué sur "Copier"
+  // le code SMS, soit basculé vers Telegram, puis soit revenu sur l'app.
+  // Une fois apparu, il est mémorisé en localStorage et ne disparaît plus.
+  const [botRevealed, setBotRevealed] = useState<boolean>(false);
+  const awaitingTelegramReturnRef = useRef<boolean>(false);
+  const sawHiddenSinceCopyRef = useRef<boolean>(false);
 
   const { data: catalogCountries = [], isLoading: loadingCountries } = useQuery({
     queryKey: ["winpack-countries"],
@@ -239,6 +245,36 @@ const PackPartenaire = () => {
     }
   }, [pack?.id, pack?.status]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Restaure l'état persisté du bouton-bot dès qu'on connaît le pack
+  useEffect(() => {
+    if (!pack?.id) return;
+    try {
+      if (localStorage.getItem(BOT_REVEALED_KEY(pack.id)) === "1") {
+        setBotRevealed(true);
+      }
+    } catch { /* noop */ }
+  }, [pack?.id]);
+
+  // Détection du retour depuis Telegram (visibilitychange) après clic sur "Copier"
+  useEffect(() => {
+    if (!pack?.id) return;
+    const onVisibility = () => {
+      if (!awaitingTelegramReturnRef.current) return;
+      if (document.hidden) {
+        // L'utilisateur quitte l'app (vraisemblablement vers Telegram)
+        sawHiddenSinceCopyRef.current = true;
+      } else if (sawHiddenSinceCopyRef.current) {
+        // Retour au premier plan APRÈS un passage en arrière-plan : trigger validé
+        awaitingTelegramReturnRef.current = false;
+        sawHiddenSinceCopyRef.current = false;
+        try { localStorage.setItem(BOT_REVEALED_KEY(pack.id), "1"); } catch { /* noop */ }
+        setBotRevealed(true);
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, [pack?.id]);
+
   const handlePay = useCallback(async () => {
     if (!user) return;
     setIsPaying(true);
@@ -310,6 +346,15 @@ const PackPartenaire = () => {
 
   const copyToClipboard = (text: string, label: string) => {
     navigator.clipboard.writeText(text).then(() => toast.success(`${label} copié`));
+  };
+
+  // Copie spécifique au code SMS : arme le détecteur de retour Telegram
+  const copySmsCode = (text: string) => {
+    navigator.clipboard.writeText(text).then(() => {
+      toast.success("Code copié — collez-le dans Telegram");
+      awaitingTelegramReturnRef.current = true;
+      sawHiddenSinceCopyRef.current = false;
+    });
   };
 
   // ── PRÉ-PAIEMENT ───────────────────────────────────────────────────────────
@@ -583,7 +628,7 @@ const PackPartenaire = () => {
                       </p>
                       <button
                         type="button"
-                        onClick={() => copyToClipboard((subscription as any).last_sms_code, "Code")}
+                        onClick={() => copySmsCode((subscription as any).last_sms_code)}
                         className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-card text-muted-foreground hover:text-foreground border border-border"
                       >
                         <Copy className="h-4 w-4" />
@@ -605,33 +650,11 @@ const PackPartenaire = () => {
               </div>
             </motion.div>
 
-            {/* CTA Bot Telegram — affichage adaptatif selon l'avancement */}
-            {telegramBotLink && (() => {
+            {/* Bouton permanent vers le Bot — n'apparaît qu'après le trigger
+                (clic sur "Copier" + aller-retour vers Telegram). Une fois
+                affiché, persiste définitivement (localStorage). */}
+            {telegramBotLink && botRevealed && (() => {
               const unlocked = !!pack.software_unlocked_at;
-              const started  = !!pack.bot_started_at;
-              const did2fa   = !!pack.secured_2fa_at;
-
-              // Texte d'état + libellé bouton dynamiques (gestion de la continuité)
-              let title: string;
-              let subtitle: string;
-              let cta: string;
-              if (unlocked) {
-                title = "✅ Pack Officiel actif";
-                subtitle = "Votre logiciel de pronostics est débloqué. Ouvrez-le directement dans Telegram en plein écran.";
-                cta = "📊 Ouvrir le logiciel";
-              } else if (did2fa) {
-                title = "Continuer mon activation";
-                subtitle = "2FA activée ✓ — Il vous reste l'inscription 1win à valider dans le bot pour débloquer le logiciel.";
-                cta = "▶️ Reprendre dans Telegram";
-              } else if (started) {
-                title = "Continuer mon activation";
-                subtitle = "Vous avez commencé l'activation. Reprenez là où vous étiez, vous ne perdez rien.";
-                cta = "▶️ Reprendre dans Telegram";
-              } else {
-                title = "Bot Telegram de guidage";
-                subtitle = "Démarrez l'activation guidée : sécurisation 2FA puis inscription 1win pour débloquer votre logiciel.";
-                cta = "🚀 Démarrer l'activation";
-              }
 
               const openBot = () => {
                 const sep = telegramBotLink.includes("?") ? "&" : "?";
@@ -655,20 +678,15 @@ const PackPartenaire = () => {
                 >
                   <div className="flex items-center gap-2">
                     <MessageCircle className={`h-5 w-5 shrink-0 ${unlocked ? "text-accent" : "text-sky-600"}`} />
-                    <h2 className="font-bold text-foreground">{title}</h2>
+                    <h2 className="font-bold text-foreground">
+                      {unlocked ? "✅ Bot prêt" : "Bot Telegram"}
+                    </h2>
                   </div>
-                  <p className="text-sm text-muted-foreground">{subtitle}</p>
-
-                  {/* Mini-progress steps : visuel de continuité */}
-                  {!unlocked && (
-                    <div className="flex items-center gap-1 text-[11px] font-medium">
-                      <span className={did2fa ? "text-accent" : "text-muted-foreground"}>● 2FA</span>
-                      <span className="text-muted-foreground/40">—</span>
-                      <span className="text-muted-foreground">○ 1win</span>
-                      <span className="text-muted-foreground/40">—</span>
-                      <span className="text-muted-foreground">○ Logiciel</span>
-                    </div>
-                  )}
+                  <p className="text-sm text-muted-foreground">
+                    {unlocked
+                      ? "Ouvrez directement votre Bot dans Telegram en plein écran."
+                      : "Accédez à votre Bot Telegram — c'est la porte d'entrée de votre business."}
+                  </p>
 
                   <Button
                     onClick={openBot}
@@ -677,34 +695,11 @@ const PackPartenaire = () => {
                     }`}
                   >
                     <MessageCircle className="h-4 w-4 mr-2" />
-                    {cta}
+                    Ouvrir le Bot Telegram
                   </Button>
                 </motion.div>
               );
             })()}
-
-            {/* CTA 1win */}
-            <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.1 }}
-              className="rounded-2xl bg-card p-5 shadow-card space-y-3 border border-primary/20"
-            >
-              <div className="flex items-center gap-2">
-                <ShieldCheck className="h-5 w-5 text-primary shrink-0" />
-                <h2 className="font-bold text-foreground">Inscription 1win</h2>
-              </div>
-              <p className="text-sm text-muted-foreground">
-                Votre compte Telegram est prêt. Cliquez ci-dessous pour rejoindre 1win avec votre lien partenaire et commencer à générer des commissions.
-              </p>
-              <Button
-                onClick={() => openExternal(partnerLink || FALLBACK_1WIN)}
-                className="h-12 w-full rounded-xl gradient-primary text-primary-foreground font-bold shadow-glow"
-              >
-                <ExternalLink className="h-4 w-4 mr-2" />
-                S'inscrire sur 1win
-              </Button>
-            </motion.div>
 
             <Button
               variant="outline"

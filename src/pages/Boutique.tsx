@@ -1,4 +1,4 @@
-import { ShoppingBag, Phone, Users, ArrowLeft, CreditCard, Check, Search, MapPin, Loader2, Wallet, Lock, Unlock, Sparkles, Copy, MessageCircle, ExternalLink, ShieldCheck } from "lucide-react";
+import { ShoppingBag, Phone, Users, ArrowLeft, CreditCard, Check, Search, MapPin, Loader2, Wallet, Lock, Unlock, Sparkles, Copy, MessageCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import BottomNav from "@/components/BottomNav";
 import ContinueActivationBanner from "@/components/ContinueActivationBanner";
@@ -225,16 +225,6 @@ const Boutique = () => {
   const [deliveredService, setDeliveredService] = useState<{ id: string; name: string; emoji: string; color: string } | null>(null);
   const [deliveredCountryName, setDeliveredCountryName] = useState<string>("");
   const [deliveredExpiresAt, setDeliveredExpiresAt] = useState<string | null>(null);
-
-  // Lien partenaire 1win (admin-éditable)
-  const { data: partnerLink } = useQuery({
-    queryKey: ["partner-link"],
-    queryFn: async () => {
-      const { data } = await supabase.functions.invoke("partner-pack", { body: { action: "settings-get" } });
-      return (data?.partner_link as string) ?? "";
-    },
-    staleTime: 60_000,
-  });
 
   // Polling SMS pour la révélation
   const { data: deliveredSubscription } = useQuery({
@@ -1015,30 +1005,6 @@ const Boutique = () => {
                   ➜ Saisissez le numéro ci-dessus dans {deliveredService?.name ?? "votre application"}, puis recopiez le code reçu ici.
                 </p>
               </div>
-
-              {/* CTA 1win — finalité du parcours */}
-              {partnerLink && (
-                <div className="rounded-2xl bg-gradient-to-br from-amber-500/10 to-orange-500/10 border-2 border-amber-400/40 p-5 space-y-3">
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-500">
-                      <Sparkles className="h-5 w-5 text-white" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="font-bold text-foreground text-sm">Finalisez votre inscription</p>
-                      <p className="text-[11px] text-amber-700">
-                        Inscrivez-vous sur 1win avec votre nouveau numéro pour activer votre compte
-                      </p>
-                    </div>
-                  </div>
-                  <Button
-                    onClick={() => window.open(partnerLink, "_blank", "noopener,noreferrer")}
-                    className="h-12 w-full rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold shadow-glow"
-                  >
-                    <ExternalLink className="h-4 w-4 mr-2" />
-                    M'inscrire sur 1win
-                  </Button>
-                </div>
-              )}
 
               {/* Actions secondaires */}
               <div className="grid grid-cols-2 gap-3">

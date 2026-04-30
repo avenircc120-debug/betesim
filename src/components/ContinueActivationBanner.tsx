@@ -17,17 +17,14 @@ export default function ContinueActivationBanner() {
   if (!data || !data.hasPack || data.isComplete) return null;
 
   // Étape courante (texte + pourcentage)
-  let stepLabel = "Étape 1/3 — Récupérer votre numéro Telegram";
-  let percent = 25;
-  if (data.didPartner) {
-    stepLabel = "Étape 3/3 — Débloquer le logiciel";
-    percent = 90;
-  } else if (data.did2fa) {
-    stepLabel = "Étape 3/3 — Inscription 1win";
-    percent = 70;
+  let stepLabel = "Étape 1/2 — Récupérer votre numéro Telegram";
+  let percent = 30;
+  if (data.didPartner || data.did2fa) {
+    stepLabel = "Étape 2/2 — Ouvrir le Bot Telegram";
+    percent = 85;
   } else if (data.isDelivered) {
-    stepLabel = "Étape 2/3 — Sécurisation 2FA";
-    percent = 50;
+    stepLabel = "Étape 2/2 — Connectez-vous à Telegram";
+    percent = 60;
   }
 
   return (

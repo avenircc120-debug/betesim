@@ -138,7 +138,7 @@ const Index = () => {
               <div>
                 <p className="font-bold text-foreground text-sm leading-tight">Pack Partenaire</p>
                 <p className="text-[11px] text-amber-700 mt-0.5 leading-tight">
-                  1win + Telegram<br/>+ Commissions
+                  Telegram Pro<br/>+ Bot dédié
                 </p>
               </div>
               <ArrowUpRight className="ml-auto h-4 w-4 text-amber-500 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
