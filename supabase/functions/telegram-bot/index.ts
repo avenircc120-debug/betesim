@@ -1,14 +1,34 @@
 /**
  * Edge Function: telegram-bot
  *
- * Webhook du Bot Telegram "Pack Officiel".
+ * Webhook du Bot Telegram "Pack Officiel" — version pilotée par l'IA Groq
+ * avec rythme humain (typing 2-3 s entre chaque message).
  *
- * Parcours utilisateur (cahier des charges) :
- *   /start <pack_id>  → Accueil + bouton 2FA (tg://settings/security)
- *   callback done_2fa → Étape 1win : bouton lien partenaire + "J'ai cliqué"
- *   callback done_1win → Déblocage logiciel + bouton Web App PLEIN ÉCRAN
+ * Parcours complet (3 étapes) :
  *
- * Données auto récupérées : telegram_user_id, username, first_name.
+ *   /start <pack_id>
+ *     ↓ accueil personnalisé
+ *   ÉTAPE 1 — Sécurité 2FA (Gmail + mot de passe 8 caractères)
+ *     bouton → tg://settings/2fa
+ *     callback "done_2fa"
+ *     ↓
+ *   ÉTAPE 2 — Extraction auto (Nom / Username / lien t.me)
+ *     blocs <code> copiables sur Samsung A05
+ *     callback "goto_1win"
+ *     ↓
+ *   ÉTAPE 3 — Inscription 1win avec choix forcés
+ *     • Messagerie : Telegram (obligatoire)
+ *     • Expérience : Aucune expérience (obligatoire)
+ *     • Site Web   : https://t.me/<username>
+ *     callback "done_1win"
+ *     ↓
+ *   ✅ Logiciel débloqué (bouton WebApp plein écran)
+ *
+ * Optimisation quota :
+ *   • Toutes les données utilisateur viennent de partner_packs (DB-first).
+ *   • Aucun appel Groq dans le bot tant que les infos sont déjà connues.
+ *   • Les messages "narratifs" sont écrits en dur ; Groq n'est appelé que pour
+ *     l'analyse de pronostics (autre Edge Function : pronostic-analysis).
  */
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
@@ -16,6 +36,10 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const TG_API = "https://api.telegram.org";
 const FALLBACK_1WIN = "https://1w.run/?p=YvTH";
+
+// Délais "humains" entre messages (ms). 2-3 s comme demandé.
+const TYPING_DELAY_MS = 2200;
+const TYPING_DELAY_LONG_MS = 2800;
 
 // ─── Helpers Telegram ───────────────────────────────────────────────────────
 async function tg(method: string, body: Record<string, unknown>) {
@@ -53,64 +77,182 @@ const editMessage = (chatId: number, messageId: number, text: string, keyboard?:
 const answerCallback = (callbackId: string, text?: string) =>
   tg("answerCallbackQuery", { callback_query_id: callbackId, text });
 
-// ─── Étapes du parcours ─────────────────────────────────────────────────────
+const sendChatAction = (chatId: number, action: "typing" | "upload_photo" = "typing") =>
+  tg("sendChatAction", { chat_id: chatId, action });
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Envoie un message avec rythme humain : active "typing…" puis attend
+ * `delayMs` avant d'envoyer le message. Crée l'illusion d'un humain qui
+ * réfléchit et tape — booste fortement la conversion.
+ */
+async function sendHuman(
+  chatId: number,
+  text: string,
+  keyboard?: unknown,
+  delayMs: number = TYPING_DELAY_MS,
+) {
+  await sendChatAction(chatId, "typing");
+  await sleep(delayMs);
+  return sendMessage(chatId, text, keyboard);
+}
+
+// ─── Étape 1 — 2FA (Gmail + mot de passe 8 caractères) ──────────────────────
 function welcomeMessage(firstName: string) {
   return [
-    `🎉 <b>Bienvenue ${firstName} sur Pack Officiel !</b>`,
+    `🎉 <b>Salut ${firstName} !</b>`,
     ``,
-    `Votre numéro Telegram est livré. Avant d'accéder au logiciel, suivons 2 étapes rapides pour sécuriser votre compte.`,
-    ``,
-    `<b>ÉTAPE 1 — Sécuriser votre compte (2FA obligatoire)</b>`,
-    ``,
-    `Cliquez sur le bouton ci-dessous, puis dans Telegram :`,
-    `• Activez la <b>Double Authentification</b>`,
-    `• Mettez votre <b>Gmail personnel</b> (indispensable pour ne jamais perdre votre compte)`,
-    ``,
-    `Une fois fait, revenez ici et cliquez sur "J'ai activé la 2FA".`,
+    `Bienvenue dans <b>Pack Officiel</b>. Avant de débloquer ton accès,`,
+    `on va sécuriser ton compte en 3 minutes chrono. Suis-moi étape par étape 👇`,
   ].join("\n");
 }
 
-const welcomeKeyboard = {
+function step1Message() {
+  return [
+    `🔒 <b>ÉTAPE 1 / 3 — Sécurise ton compte (2FA)</b>`,
+    ``,
+    `C'est l'étape la plus importante. Sans 2FA, n'importe qui peut prendre`,
+    `ton numéro et tes gains.`,
+    ``,
+    `Quand tu cliques sur le bouton, Telegram va te demander :`,
+    ``,
+    `1️⃣  Un <b>mot de passe de 8 caractères minimum</b>`,
+    `      → choisis quelque chose dont tu te souviens (ex : <code>Bete2026!</code>)`,
+    ``,
+    `2️⃣  Une <b>adresse Gmail de récupération</b>`,
+    `      → mets celle <b>déjà sur ton téléphone</b> (Play Store / Samsung)`,
+    `      → SURTOUT pas un nouveau Gmail que tu vas oublier !`,
+    ``,
+    `📱 Sur Samsung A05 : appui sur le bouton → Telegram s'ouvre directement`,
+    `sur la bonne page.`,
+    ``,
+    `Une fois fait, reviens ici et clique sur "✅ J'ai activé la 2FA".`,
+  ].join("\n");
+}
+
+const step1Keyboard = {
   inline_keyboard: [
-    [{ text: "🔒 Activer la 2FA (Gmail)", url: "tg://settings/security" }],
+    [{ text: "🔒 Activer la 2FA maintenant", url: "tg://settings/2fa" }],
     [{ text: "✅ J'ai activé la 2FA", callback_data: "done_2fa" }],
   ],
 };
 
-function partnerMessage() {
+// ─── Étape 2 — Extraction auto des infos pour copier-coller ─────────────────
+function step2Intro() {
   return [
-    `<b>ÉTAPE 2 — Inscription Partenaire 1win</b>`,
+    `🎯 <b>Parfait, ta 2FA est en place !</b>`,
     ``,
-    `Inscrivez-vous via le lien partenaire 1win ci-dessous pour valider votre accès au Pack Officiel.`,
-    ``,
-    `⚠️ L'accès au logiciel reste bloqué tant que vous n'avez pas confirmé votre inscription.`,
+    `Je récupère automatiquement tes infos depuis ton profil Telegram…`,
   ].join("\n");
 }
 
-const partnerKeyboard = (link: string) => ({
+function step2Infos(firstName: string, username: string | null) {
+  const tmeLink = username ? `https://t.me/${username}` : null;
+
+  if (!username) {
+    return [
+      `📋 <b>ÉTAPE 2 / 3 — Tes infos perso</b>`,
+      ``,
+      `⚠️ <b>Tu n'as pas encore d'@username Telegram.</b>`,
+      ``,
+      `C'est obligatoire pour la suite. Voilà comment faire (30 secondes) :`,
+      ``,
+      `1. Ouvre <b>Réglages</b> Telegram (icône engrenage)`,
+      `2. Touche <b>Modifier le profil</b>`,
+      `3. Touche <b>Nom d'utilisateur</b>`,
+      `4. Choisis un username (ex : <code>${firstName.toLowerCase().replace(/\s+/g, "")}_pro</code>)`,
+      ``,
+      `Une fois fait, reviens ici et tape /start <pack_id> à nouveau,`,
+      `ou simplement clique sur "🔄 J'ai créé mon username".`,
+    ].join("\n");
+  }
+
+  return [
+    `📋 <b>ÉTAPE 2 / 3 — Tes infos pour la suite</b>`,
+    ``,
+    `Voilà tes 3 infos perso. Garde cet écran ouvert, tu vas en avoir besoin :`,
+    ``,
+    `📛 <b>Ton prénom :</b>`,
+    `<code>${escapeHtml(firstName)}</code>`,
+    ``,
+    `🔖 <b>Ton @username :</b>`,
+    `<code>@${escapeHtml(username)}</code>`,
+    ``,
+    `🌐 <b>Ton lien Telegram personnel :</b>`,
+    `<code>${tmeLink}</code>`,
+    ``,
+    `📱 <b>Sur Samsung A05 :</b> appuie longuement sur un bloc gris ci-dessus`,
+    `puis touche <b>"Copier"</b>. C'est instantané.`,
+    ``,
+    `👇 Quand tu es prêt(e), passe à l'étape finale.`,
+  ].join("\n");
+}
+
+const step2Keyboard = (hasUsername: boolean) =>
+  hasUsername
+    ? {
+        inline_keyboard: [
+          [{ text: "🚀 Continuer vers l'étape 3", callback_data: "goto_1win" }],
+        ],
+      }
+    : {
+        inline_keyboard: [
+          [{ text: "📖 Voir le tuto vidéo (1 min)", url: "https://telegram.org/faq#q-how-do-i-get-a-username" }],
+          [{ text: "🔄 J'ai créé mon username", callback_data: "recheck_username" }],
+        ],
+      };
+
+// ─── Étape 3 — 1win avec choix forcés ───────────────────────────────────────
+function step3Message(username: string, partnerLink: string) {
+  const tmeLink = `https://t.me/${username}`;
+  return [
+    `🚀 <b>ÉTAPE 3 / 3 — Inscription Partenaire 1win</b>`,
+    ``,
+    `Dernière ligne droite ! Le lien d'inscription :`,
+    `${partnerLink}`,
+    ``,
+    `⚠️ <b>3 CHOIX OBLIGATOIRES</b> pendant l'inscription, sinon ton accès`,
+    `ne pourra pas être validé :`,
+    ``,
+    `1️⃣  <b>Messagerie préférée</b>`,
+    `     Dans le menu déroulant, choisis 👉 <b>Telegram</b>`,
+    ``,
+    `2️⃣  <b>Niveau d'expérience</b>`,
+    `     Coche 👉 <b>Aucune expérience</b>`,
+    ``,
+    `3️⃣  <b>Site Web</b> (champ optionnel mais important)`,
+    `     Colle ton lien Telegram personnel :`,
+    `     <code>${tmeLink}</code>`,
+    ``,
+    `📱 <b>Astuce Samsung A05 :</b> garde ce chat ouvert, fais glisser entre`,
+    `1win et Telegram pour copier-coller.`,
+    ``,
+    `Une fois inscrit, reviens et clique sur "✅ Je me suis inscrit".`,
+  ].join("\n");
+}
+
+const step3Keyboard = (link: string) => ({
   inline_keyboard: [
-    [{ text: "🔗 S'inscrire sur 1win", url: link }],
+    [{ text: "🔗 Ouvrir 1win maintenant", url: link }],
     [{ text: "✅ Je me suis inscrit sur 1win", callback_data: "done_1win" }],
   ],
 });
 
-function unlockedMessage(softwareUrl: string | null) {
+// ─── Final — accès débloqué ─────────────────────────────────────────────────
+function unlockedMessage(firstName: string, softwareUrl: string | null) {
   return [
-    `🚀 <b>Accès débloqué !</b>`,
+    `🎊 <b>BRAVO ${firstName.toUpperCase()} !</b>`,
     ``,
-    `Félicitations, votre Pack Officiel est maintenant actif.`,
+    `Ton compte est <b>100 % sécurisé et activé</b>. Tu fais maintenant`,
+    `partie du Pack Officiel.`,
     ``,
     softwareUrl
-      ? `Cliquez ci-dessous pour ouvrir le logiciel <b>en plein écran directement dans Telegram</b>.`
-      : `Votre accès est validé. Le lien du logiciel vous sera communiqué dans un instant.`,
+      ? `Touche le bouton ci-dessous pour ouvrir le logiciel <b>en plein écran directement dans Telegram</b>. Tes pronostics du jour t'attendent.`
+      : `Le lien du logiciel arrive dans un instant. Reste connecté(e).`,
   ].join("\n");
 }
 
-/**
- * Bouton WebApp plein écran (mode immersion).
- * Telegram ouvre l'URL dans une web app intégrée — la page React appelle
- * `Telegram.WebApp.expand()` et `requestFullscreen()` pour passer en grand.
- */
 const unlockedKeyboard = (softwareUrl: string | null) =>
   softwareUrl
     ? {
@@ -119,6 +261,14 @@ const unlockedKeyboard = (softwareUrl: string | null) =>
         ]],
       }
     : undefined;
+
+// ─── Utils ──────────────────────────────────────────────────────────────────
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
 
 // ─── Webhook handler ────────────────────────────────────────────────────────
 serve(async (req) => {
@@ -149,6 +299,24 @@ serve(async (req) => {
     return `${base}/pronostics?pack_id=${packId}&tg=1`;
   }
 
+  async function getPartnerLink(): Promise<string> {
+    const { data: linkRow } = await supabase
+      .from("app_settings").select("value").eq("key", "partner_link").maybeSingle();
+    return (linkRow as any)?.value || FALLBACK_1WIN;
+  }
+
+  // Récupère les infos Telegram fraîches (DB-first ; on n'appelle Groq pour rien)
+  async function getPackByTgUser(tgUserId: number) {
+    const { data } = await supabase
+      .from("partner_packs")
+      .select("*")
+      .eq("telegram_user_id", tgUserId)
+      .order("bot_started_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    return data;
+  }
+
   try {
     // ── /app : ouvre la Mini App plein écran ─────────────────────────────
     if (update.message?.text?.startsWith("/app")) {
@@ -161,7 +329,7 @@ serve(async (req) => {
         base = base.replace(/\/+$/, "");
         await sendMessage(
           chatId,
-          `🎯 Ouvrez Pack Officiel <b>en plein écran</b> directement ici :`,
+          `🎯 Ouvre Pack Officiel <b>en plein écran</b> directement ici :`,
           { inline_keyboard: [[
             { text: "🎯 Ouvrir Pack Officiel", web_app: { url: `${base}/?tg=1` } },
           ]] },
@@ -202,19 +370,14 @@ serve(async (req) => {
       };
 
       if (!packId) {
-        // Lien promo / start direct → on propose d'ouvrir l'app en plein écran
         await sendMessage(
           chatId,
           [
-            `👋 <b>Bienvenue ${firstName} sur Pack Officiel !</b>`,
+            `👋 <b>Bienvenue ${escapeHtml(firstName)} sur Pack Officiel !</b>`,
             ``,
             `🎯 <b>Tout se passe ici, dans Telegram, en plein écran.</b>`,
             ``,
-            `Cliquez sur le bouton ci-dessous pour démarrer :`,
-            `1. Choisir votre pack`,
-            `2. Recevoir votre numéro Telegram sécurisé`,
-            `3. Activer la 2FA + l'inscription 1win`,
-            `4. Accéder aux pronostics du jour`,
+            `Touche le bouton ci-dessous pour démarrer.`,
           ].join("\n"),
           await openAppBaseKeyboard(),
         );
@@ -245,12 +408,13 @@ serve(async (req) => {
       // Si déjà débloqué, renvoyer directement vers le logiciel
       if (pack.software_unlocked_at) {
         const softwareUrl = await buildSoftwareUrl(pack.id);
-        await sendMessage(chatId, unlockedMessage(softwareUrl), unlockedKeyboard(softwareUrl));
+        await sendHuman(chatId, unlockedMessage(firstName, softwareUrl), unlockedKeyboard(softwareUrl), TYPING_DELAY_MS);
         return new Response("ok", { status: 200 });
       }
 
-      // Sinon, démarrer le parcours sécurité
-      await sendMessage(chatId, welcomeMessage(firstName), welcomeKeyboard);
+      // Parcours rythmé : accueil → typing → étape 1
+      await sendMessage(chatId, welcomeMessage(escapeHtml(firstName)));
+      await sendHuman(chatId, step1Message(), step1Keyboard, TYPING_DELAY_LONG_MS);
       return new Response("ok", { status: 200 });
     }
 
@@ -260,37 +424,99 @@ serve(async (req) => {
       const chatId = cb.message.chat.id;
       const messageId = cb.message.message_id;
       const tgUserId = cb.from.id;
+      const tgUsernameLive = cb.from.username || null;
+      const tgFirstNameLive = cb.from.first_name || "Partenaire";
       const data = cb.data;
 
-      // Retrouver le pack lié à ce Telegram user
-      const { data: pack } = await supabase
-        .from("partner_packs")
-        .select("*")
-        .eq("telegram_user_id", tgUserId)
-        .order("bot_started_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      const pack = await getPackByTgUser(tgUserId);
 
       if (!pack) {
         await answerCallback(cb.id, "Session expirée, faites /start à nouveau");
         return new Response("ok", { status: 200 });
       }
 
+      // ── Callback : 2FA confirmée → ÉTAPE 2 (extraction auto) ────────
       if (data === "done_2fa") {
         await supabase
           .from("partner_packs")
-          .update({ secured_2fa_at: new Date().toISOString() })
+          .update({
+            secured_2fa_at: new Date().toISOString(),
+            // Refresh username/firstName au cas où l'utilisateur les ait changés
+            telegram_username: tgUsernameLive ?? pack.telegram_username,
+            telegram_first_name: tgFirstNameLive ?? pack.telegram_first_name,
+          })
           .eq("id", pack.id);
 
-        const { data: linkRow } = await supabase
-          .from("app_settings").select("value").eq("key", "partner_link").maybeSingle();
-        const partnerLink = (linkRow as any)?.value || FALLBACK_1WIN;
-
-        await editMessage(chatId, messageId, partnerMessage(), partnerKeyboard(partnerLink));
         await answerCallback(cb.id, "✅ 2FA confirmée");
+
+        // Bulle de transition (édit) + 2 nouveaux messages au rythme humain
+        await editMessage(chatId, messageId, [
+          `✅ <b>2FA activée — bravo !</b>`,
+          ``,
+          `Ton compte est maintenant blindé. Passons à la suite.`,
+        ].join("\n"));
+
+        await sendHuman(chatId, step2Intro(), undefined, TYPING_DELAY_MS);
+
+        const usernameForStep2 = tgUsernameLive ?? pack.telegram_username ?? null;
+        const firstNameForStep2 = tgFirstNameLive ?? pack.telegram_first_name ?? "Partenaire";
+
+        await sendHuman(
+          chatId,
+          step2Infos(firstNameForStep2, usernameForStep2),
+          step2Keyboard(!!usernameForStep2),
+          TYPING_DELAY_LONG_MS,
+        );
         return new Response("ok", { status: 200 });
       }
 
+      // ── Callback : recheck username (utilisateur a créé son @username) ──
+      if (data === "recheck_username") {
+        const username = tgUsernameLive ?? null;
+        const firstName = tgFirstNameLive ?? pack.telegram_first_name ?? "Partenaire";
+
+        if (!username) {
+          await answerCallback(cb.id, "Toujours pas d'@username détecté…");
+          await sendHuman(
+            chatId,
+            [
+              `🤔 Je ne vois toujours pas d'@username sur ton compte.`,
+              ``,
+              `Vérifie : <b>Réglages Telegram</b> → <b>Modifier le profil</b> →`,
+              `<b>Nom d'utilisateur</b>. Choisis-en un puis réessaie.`,
+            ].join("\n"),
+            step2Keyboard(false),
+            TYPING_DELAY_MS,
+          );
+          return new Response("ok", { status: 200 });
+        }
+
+        await supabase
+          .from("partner_packs")
+          .update({ telegram_username: username })
+          .eq("id", pack.id);
+
+        await answerCallback(cb.id, "✅ Username détecté !");
+        await sendHuman(chatId, step2Infos(firstName, username), step2Keyboard(true), TYPING_DELAY_MS);
+        return new Response("ok", { status: 200 });
+      }
+
+      // ── Callback : passage à l'étape 1win ────────────────────────────
+      if (data === "goto_1win") {
+        const username = tgUsernameLive ?? pack.telegram_username ?? null;
+
+        if (!username) {
+          await answerCallback(cb.id, "Crée d'abord ton @username");
+          return new Response("ok", { status: 200 });
+        }
+
+        const partnerLink = await getPartnerLink();
+        await answerCallback(cb.id);
+        await sendHuman(chatId, step3Message(username, partnerLink), step3Keyboard(partnerLink), TYPING_DELAY_LONG_MS);
+        return new Response("ok", { status: 200 });
+      }
+
+      // ── Callback : 1win confirmée → DÉBLOCAGE ────────────────────────
       if (data === "done_1win") {
         const now = new Date().toISOString();
         await supabase
@@ -302,8 +528,15 @@ serve(async (req) => {
           .eq("id", pack.id);
 
         const softwareUrl = await buildSoftwareUrl(pack.id);
-        await editMessage(chatId, messageId, unlockedMessage(softwareUrl), unlockedKeyboard(softwareUrl));
+        const firstName = tgFirstNameLive ?? pack.telegram_first_name ?? "Partenaire";
+
         await answerCallback(cb.id, "🚀 Accès débloqué !");
+        await editMessage(chatId, messageId, [
+          `✅ <b>Inscription 1win enregistrée.</b>`,
+          ``,
+          `Je débloque ton accès maintenant…`,
+        ].join("\n"));
+        await sendHuman(chatId, unlockedMessage(firstName, softwareUrl), unlockedKeyboard(softwareUrl), TYPING_DELAY_LONG_MS);
         return new Response("ok", { status: 200 });
       }
 

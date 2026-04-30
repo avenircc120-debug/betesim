@@ -20,6 +20,7 @@
  */
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -155,6 +156,35 @@ serve(async (req) => {
     console.warn("[ai-guide-2fa] GROQ_API_KEY missing — serving fallback");
     return new Response(
       JSON.stringify({ source: "fallback", message: FALLBACK }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    );
+  }
+
+  // Rate limiter partagé : on protège Groq AVANT toute requête.
+  // Si la table/RPC n'existe pas encore, on laisse passer (fail-open).
+  let rateOk = true;
+  try {
+    const sb = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+    );
+    const { data, error } = await sb.rpc("consume_groq_rate_limit", {
+      p_caller: "ai-guide-2fa",
+      p_max_per_min: 25,
+    });
+    if (error) {
+      console.warn("[ai-guide-2fa] rate limit RPC error (fail-open):", error.message);
+    } else {
+      rateOk = data === true;
+    }
+  } catch (err: any) {
+    console.warn("[ai-guide-2fa] rate limit RPC threw (fail-open):", err?.message ?? err);
+  }
+
+  if (!rateOk) {
+    console.warn("[ai-guide-2fa] rate limit hit — serving fallback");
+    return new Response(
+      JSON.stringify({ source: "fallback", rateLimited: true, message: FALLBACK }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   }
