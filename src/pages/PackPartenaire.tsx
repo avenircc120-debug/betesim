@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import BottomNav from "@/components/BottomNav";
 import { useAuth } from "@/hooks/useAuth";
+import { useProfile } from "@/hooks/useProfile";
 import { supabase } from "@/integrations/supabase/client";
 import { createFedaPayTransaction } from "@/lib/fedapay";
 import { openExternal, openTelegramLink } from "@/lib/telegramWebApp";
@@ -129,7 +130,8 @@ const FALLBACK_1WIN = "https://1w.run/?p=YvTH";
 
 const PackPartenaire = () => {
   const { user, requireAuth, loading: authLoading } = useAuth();
-  const [searchParams] = useSearchParams();
+  const { data: profile } = useProfile();
+  const [searchParams, setSearchParams] = useSearchParams();
   const packId = searchParams.get("id");
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -177,18 +179,37 @@ const PackPartenaire = () => {
   const { data: pack, isLoading: loadingPack, refetch } = useQuery<PartnerPack | null>({
     queryKey: ["partner-pack", packId, user?.id],
     queryFn: async () => {
-      if (!packId || !user) return null;
-      const { data, error } = await supabase
+      if (!user) return null;
+      // 1) Si un id explicite est dans l'URL, on l'utilise
+      if (packId) {
+        const { data, error } = await supabase
+          .from("partner_packs" as any)
+          .select("*")
+          .eq("id", packId)
+          .maybeSingle();
+        if (error) throw error;
+        if (!data) return null;
+        if ((data as any).user_id !== user.id) throw new Error("Accès refusé");
+        return data as any;
+      }
+      // 2) Sinon, on cherche un pack non-terminé de l'utilisateur (continuité)
+      const { data: rows } = await supabase
         .from("partner_packs" as any)
         .select("*")
-        .eq("id", packId)
-        .maybeSingle();
-      if (error) throw error;
-      if (!data) return null;
-      if ((data as any).user_id !== user.id) throw new Error("Accès refusé");
-      return data as any;
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false })
+        .limit(1);
+      const found: any = rows?.[0];
+      if (!found) return null;
+      // Aligner l'URL pour éviter de re-chercher au prochain rafraîchissement
+      if (typeof window !== "undefined") {
+        const sp = new URLSearchParams(searchParams);
+        sp.set("id", found.id);
+        setSearchParams(sp, { replace: true });
+      }
+      return found;
     },
-    enabled: !!packId && !!user,
+    enabled: !!user,
     refetchInterval: (q) => {
       const d = q.state.data as PartnerPack | null;
       return d && d.status !== "delivered" ? 6000 : false;
@@ -228,6 +249,26 @@ const PackPartenaire = () => {
       sessionStorage.setItem("pending_country", selectedCountry);
       sessionStorage.setItem(PARTNER_COUNTRY_KEY, selectedCountry);
 
+      // ── Mode TEST admin : crée le pack instantanément, sans FedaPay ──
+      if ((profile as any)?.is_admin) {
+        const fakeTxId = "TEST-" + Date.now();
+        const { data, error } = await supabase.functions.invoke("partner-pack", {
+          body: { action: "init", user_id: user.id, fedapay_transaction_id: fakeTxId },
+        });
+        if (error) throw error;
+        if (!data?.success) throw new Error(data?.error || "Init échouée");
+        toast.success("Pack créé en mode test (sans paiement) ✓");
+        const newPackId = data?.pack?.id;
+        if (newPackId) {
+          const sp = new URLSearchParams(searchParams);
+          sp.set("id", newPackId);
+          setSearchParams(sp, { replace: true });
+        }
+        await refetch();
+        setIsPaying(false);
+        return;
+      }
+
       const result = await createFedaPayTransaction({
         amount: 2500,
         description: "Pack Partenaire WINPACK — Telegram",
@@ -244,7 +285,7 @@ const PackPartenaire = () => {
       sessionStorage.removeItem("pending_country");
       toast.error(e.message || "Erreur paiement. Réessayez.");
     }
-  }, [user, selectedCountry]);
+  }, [user, selectedCountry, profile, refetch]);
 
   const deliverNumber = async () => {
     if (!user || !pack) return;
