@@ -128,8 +128,8 @@ const PackPartenaire = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
-  const [selectedCountry, setSelectedCountry] = useState<string>("0");
-  const [selectedCountryName, setSelectedCountryName] = useState<string>("N'importe quel pays");
+  const [selectedCountry, setSelectedCountry] = useState<string>("");
+  const [selectedCountryName, setSelectedCountryName] = useState<string>("");
   const [selectedCountryShort, setSelectedCountryShort] = useState<string | null>(null);
   const [isPaying, setIsPaying] = useState(false);
   const [delivering, setDelivering] = useState(false);
@@ -311,12 +311,18 @@ const PackPartenaire = () => {
                 onChange={(e) => {
                   const id = e.target.value;
                   setSelectedCountry(id);
-                  const found = catalogCountries.find((c) => c.id === id);
-                  setSelectedCountryName(found?.name || "N'importe quel pays");
-                  setSelectedCountryShort(found?.short_name || null);
+                  if (id === "0") {
+                    setSelectedCountryName("N'importe quel pays");
+                    setSelectedCountryShort(null);
+                  } else {
+                    const found = catalogCountries.find((c) => c.id === id);
+                    setSelectedCountryName(found?.name || "");
+                    setSelectedCountryShort(found?.short_name || null);
+                  }
                 }}
                 className="w-full h-12 rounded-xl border border-border bg-background px-3 pr-10 text-sm text-foreground appearance-none focus:outline-none focus:ring-2 focus:ring-primary"
               >
+                <option value="" disabled>Sélectionnez votre pays</option>
                 <option value="0">N'importe quel pays</option>
                 {catalogCountries.map((c) => (
                   <option key={c.id} value={c.id}>{c.name}</option>
@@ -332,7 +338,9 @@ const PackPartenaire = () => {
             )}
           </motion.div>
 
-          {/* Teaser — même design que Achat Direct */}
+          {/* Teaser + paiement : visibles uniquement après sélection du pays */}
+          {selectedCountry && (
+          <>
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -402,6 +410,8 @@ const PackPartenaire = () => {
               Paiement 100% sécurisé — FedaPay (Mobile Money, carte…)
             </p>
           </motion.div>
+          </>
+          )}
 
         </div>
         <BottomNav />
