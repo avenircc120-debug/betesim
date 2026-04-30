@@ -1,29 +1,61 @@
 import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Sparkles, ShieldCheck, Mail, KeyRound, CheckCircle2, XCircle, ArrowRight } from "lucide-react";
+import {
+  Sparkles, ShieldCheck, Mail, KeyRound,
+  CheckCircle2, XCircle, ArrowRight, Loader2,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { supabase } from "@/integrations/supabase/client";
+import { useProfile } from "@/hooks/useProfile";
 
 const FORM_OPENED_KEY = (packId: string) => `gmail_2fa_form_opened_${packId}`;
 const VALIDATION_KEY = (packId: string) => `gmail_2fa_validation_${packId}`;
+const AI_MSG_CACHE_KEY = (packId: string) => `gmail_2fa_ai_msg_${packId}`;
 
 type Validation = "yes" | "no" | null;
+
+interface AiMessage {
+  intro: string;
+  explanation: string;
+  callToAction: string;
+  mirrorTip: string;
+  securityReminder: string;
+}
+
+const FALLBACK: AiMessage = {
+  intro:
+    "Pour sécuriser ton compte, utilise simplement l'adresse Gmail qui est déjà dans ton téléphone.",
+  explanation:
+    "📱 C'est ton Gmail principal, celui que tu utilises pour tout. En mettant celui-là, tu es sûr de ne jamais perdre l'accès à tes gains, même si tu changes de téléphone ou si tu réinitialises ton Samsung.",
+  callToAction:
+    "👇 Clique sur le bouton pour ouvrir le formulaire, tape tes 8 caractères et ton Gmail habituel pour valider définitivement ton compte de récupération.",
+  mirrorTip:
+    "Astuce miroir : utilise le même Gmail que celui de ton Play Store / téléphone. N'en crée surtout pas un nouveau, tu risquerais de l'oublier.",
+  securityReminder:
+    "Ton Gmail et ton code de 8 caractères sont tes deux clés secrètes. Garde-les bien.",
+};
 
 /**
  * Guidage IA pour la mise en place du Gmail de récupération 2FA.
  *
- * Pédagogie :
- * - L'IA conseille à l'utilisateur d'utiliser le Gmail déjà configuré sur
- *   son smartphone (principe « miroir » : même Gmail que le Play Store).
- * - Bouton « Ouvrir le formulaire » → tg://settings/2fa
- * - Au retour, l'utilisateur valide définitivement avec OUI / NON.
- * - L'état est persisté en localStorage, donc le guide n'apparaît qu'une fois
- *   et la validation reste mémorisée.
+ * Le contenu est généré côté serveur par Groq via l'edge function
+ * `ai-guide-2fa`. La réponse est mise en cache en localStorage pour rester
+ * stable et instantanée aux ré-affichages (même hors-ligne / Groq down).
+ *
+ * Pédagogie miroir : utiliser le Gmail déjà configuré sur le téléphone
+ * (Play Store) pour ne jamais perdre l'accès à son compte.
+ *
+ * Action : bouton « Ouvrir le formulaire » → tg://settings/2fa
+ * Validation : OUI / NON après retour, persistés en localStorage.
  */
 interface Gmail2FAGuideProps {
   packId: string;
 }
 
 const Gmail2FAGuide = ({ packId }: Gmail2FAGuideProps) => {
+  const { data: profile } = useProfile();
+  const [aiMsg, setAiMsg] = useState<AiMessage | null>(null);
+  const [aiLoading, setAiLoading] = useState<boolean>(true);
   const [formOpened, setFormOpened] = useState<boolean>(false);
   const [validation, setValidation] = useState<Validation>(null);
   const awaitingFormReturnRef = useRef<boolean>(false);
@@ -39,8 +71,48 @@ const Gmail2FAGuide = ({ packId }: Gmail2FAGuideProps) => {
       if (stored === "yes" || stored === "no") {
         setValidation(stored);
       }
+      const cached = localStorage.getItem(AI_MSG_CACHE_KEY(packId));
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed && typeof parsed.intro === "string") {
+          setAiMsg(parsed);
+          setAiLoading(false);
+        }
+      }
     } catch { /* noop */ }
   }, [packId]);
+
+  // Récupération du message IA via l'edge function (une seule fois par pack)
+  useEffect(() => {
+    let cancelled = false;
+    if (aiMsg) return; // déjà en cache → rien à faire
+
+    const firstName =
+      ((profile as any)?.first_name as string | undefined) ||
+      ((profile as any)?.full_name as string | undefined)?.split(" ")[0] ||
+      undefined;
+
+    (async () => {
+      try {
+        const { data, error } = await supabase.functions.invoke("ai-guide-2fa", {
+          body: { firstName },
+        });
+        if (cancelled) return;
+        if (error) throw error;
+        const msg = (data?.message as AiMessage) || FALLBACK;
+        setAiMsg(msg);
+        try { localStorage.setItem(AI_MSG_CACHE_KEY(packId), JSON.stringify(msg)); } catch { /* noop */ }
+      } catch (e) {
+        if (cancelled) return;
+        // En cas d'erreur réseau, on affiche le fallback sans bloquer l'UX
+        setAiMsg(FALLBACK);
+      } finally {
+        if (!cancelled) setAiLoading(false);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [packId, aiMsg, profile]);
 
   // Détection du retour depuis le formulaire Telegram (visibilitychange)
   useEffect(() => {
@@ -72,6 +144,8 @@ const Gmail2FAGuide = ({ packId }: Gmail2FAGuideProps) => {
     setValidation(v);
   };
 
+  const msg = aiMsg ?? FALLBACK;
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
@@ -97,36 +171,28 @@ const Gmail2FAGuide = ({ packId }: Gmail2FAGuideProps) => {
         </div>
       </div>
 
-      {/* Bulle de message de l'IA */}
-      <div className="rounded-xl bg-background/80 backdrop-blur p-4 border border-indigo-200/40 dark:border-indigo-900/40 space-y-3">
-        <p className="text-sm text-foreground leading-relaxed">
-          Pour sécuriser ton compte, utilise simplement <strong>l'adresse Gmail qui est déjà dans ton téléphone</strong>.
-        </p>
-
-        <div className="flex items-start gap-2 text-sm text-foreground leading-relaxed">
-          <span className="text-base shrink-0">📱</span>
-          <p>
-            C'est ton <strong>Gmail principal</strong>, celui que tu utilises pour tout. En mettant celui-là, tu es
-            sûr de <strong>ne jamais perdre l'accès à tes gains</strong>, même si tu changes de téléphone ou si
-            tu réinitialises ton Samsung.
-          </p>
-        </div>
-
-        <div className="flex items-start gap-2 text-sm text-foreground leading-relaxed">
-          <span className="text-base shrink-0">👇</span>
-          <p>
-            Clique sur le bouton pour <strong>ouvrir le formulaire</strong>, tape tes <strong>8 caractères</strong> et
-            ton <strong>Gmail habituel</strong> pour valider définitivement ton compte de récupération.
-          </p>
-        </div>
+      {/* Bulle de message IA */}
+      <div className="rounded-xl bg-background/80 backdrop-blur p-4 border border-indigo-200/40 dark:border-indigo-900/40 space-y-3 min-h-[120px]">
+        {aiLoading ? (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground py-6">
+            <Loader2 className="h-4 w-4 animate-spin text-indigo-500" />
+            <span>L'assistant IA prépare ton message…</span>
+          </div>
+        ) : (
+          <>
+            <p className="text-sm text-foreground leading-relaxed">{msg.intro}</p>
+            <p className="text-sm text-foreground leading-relaxed">{msg.explanation}</p>
+            <p className="text-sm text-foreground leading-relaxed">{msg.callToAction}</p>
+          </>
+        )}
       </div>
 
       {/* Astuce « miroir » */}
       <div className="rounded-xl bg-amber-500/10 border border-amber-400/30 p-3 flex items-start gap-2">
         <Mail className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
         <p className="text-xs text-amber-800 dark:text-amber-300 leading-relaxed">
-          <strong>Astuce miroir&nbsp;:</strong> utilise le <strong>même Gmail</strong> que celui de ton Play Store /
-          téléphone. N'en crée surtout pas un nouveau&nbsp;: tu risquerais de l'oublier.
+          <strong>Astuce miroir&nbsp;:</strong>{" "}
+          {aiLoading ? FALLBACK.mirrorTip : msg.mirrorTip}
         </p>
       </div>
 
@@ -144,8 +210,8 @@ const Gmail2FAGuide = ({ packId }: Gmail2FAGuideProps) => {
       <div className="rounded-xl bg-background/60 border border-border p-3 flex items-start gap-2">
         <ShieldCheck className="h-4 w-4 text-emerald-600 shrink-0 mt-0.5" />
         <p className="text-xs text-muted-foreground leading-relaxed">
-          <strong className="text-foreground">Rappel&nbsp;:</strong> ton Gmail et ton code de 8 caractères sont tes
-          deux <strong>clés secrètes</strong>. Garde-les bien.
+          <strong className="text-foreground">Rappel&nbsp;:</strong>{" "}
+          {aiLoading ? FALLBACK.securityReminder : msg.securityReminder}
         </p>
       </div>
 
