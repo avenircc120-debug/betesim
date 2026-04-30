@@ -1,6 +1,7 @@
 import { ShoppingBag, Phone, Users, ArrowLeft, CreditCard, Check, Search, MapPin, Loader2, Wallet, Lock, Unlock, Sparkles, Copy, MessageCircle, ExternalLink, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import BottomNav from "@/components/BottomNav";
+import ContinueActivationBanner from "@/components/ContinueActivationBanner";
 import { useAuth } from "@/hooks/useAuth";
 import { useProfile } from "@/hooks/useProfile";
 import { useQueryClient, useQuery } from "@tanstack/react-query";
@@ -608,9 +609,12 @@ const Boutique = () => {
                   ))}
 
                 {profile?.is_partner && (
-                  <div className="flex items-center gap-2 rounded-xl border border-green-200 bg-green-50 px-4 py-2.5">
-                    <Check className="h-4 w-4 text-green-600 shrink-0" />
-                    <p className="text-xs text-green-700 font-medium">Vous êtes déjà Partenaire — Numéro à 2 000 FCFA.</p>
+                  <div className="space-y-2">
+                    <ContinueActivationBanner />
+                    <div className="flex items-center gap-2 rounded-xl border border-green-200 bg-green-50 px-4 py-2.5">
+                      <Check className="h-4 w-4 text-green-600 shrink-0" />
+                      <p className="text-xs text-green-700 font-medium">Pack Officiel acheté — Numéro à 2 000 FCFA pour les prochains.</p>
+                    </div>
                   </div>
                 )}
               </div>
