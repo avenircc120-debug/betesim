@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -94,24 +94,9 @@ const Pronostics = () => {
   const [selectedResult, setSelectedResult] = useState<Result>("en_attente");
   const [showCouponForm, setShowCouponForm] = useState(false);
 
-  // ─── Mode Telegram WebApp : plein écran immersif ──────────────────────
-  // Quand la page est ouverte depuis le bot via le bouton Web App, on demande
-  // à Telegram d'agrandir la fenêtre au maximum (expanded + fullscreen).
-  useEffect(() => {
-    const tg = (window as any).Telegram?.WebApp;
-    if (!tg) return;
-    try {
-      tg.ready();
-      tg.expand();
-      // Fullscreen API (Bot API 8.0+) — ignoré silencieusement sur anciens clients
-      if (typeof tg.requestFullscreen === "function") tg.requestFullscreen();
-      // Empêche la fermeture accidentelle par swipe-down
-      if (typeof tg.disableVerticalSwipes === "function") tg.disableVerticalSwipes();
-      if (typeof tg.enableClosingConfirmation === "function") tg.enableClosingConfirmation();
-    } catch (e) {
-      console.warn("Telegram WebApp init:", e);
-    }
-  }, []);
+  // Note : l'init Telegram WebApp (expand + fullscreen) est désormais
+  // global au démarrage de l'app (voir src/main.tsx → initTelegramWebApp).
+  // Toutes les pages bénéficient automatiquement du plein écran.
 
   const [form, setForm] = useState({
     title: "", team_home: "", team_away: "", league: "", country: "",
