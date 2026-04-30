@@ -157,11 +157,29 @@ serve(async (req) => {
         return ok({ success: true, already_delivered: true, pack, subscription: sub });
       }
 
-      const smspoolKey = Deno.env.get("SMSPOOL_API_KEY");
-      if (!smspoolKey) throw new Error("SMSPOOL_API_KEY non configurée");
+      // ── Mode Simulation : pour les admins, bypass SMSPool (test gratuit) ──
+      const { data: profileRow } = await supabase
+        .from("profiles").select("email, is_admin").eq("id", user_id).maybeSingle();
+      const userEmail = (profileRow as any)?.email ?? null;
+      const adminBypass = await isAdmin(supabase, user_id, userEmail);
 
       const orderCountry = String(country ?? "0");
-      const delivery = await orderTelegram(smspoolKey, orderCountry);
+      let delivery: { orderId: string; number: string; country: string };
+
+      if (adminBypass) {
+        // Numéro fictif unique, étape validée automatiquement
+        const fakeNum = "+33" + String(Math.floor(600000000 + Math.random() * 99999999)).slice(0, 9);
+        delivery = {
+          orderId: "TEST-" + Date.now(),
+          number: fakeNum,
+          country: orderCountry,
+        };
+      } else {
+        const smspoolKey = Deno.env.get("SMSPOOL_API_KEY");
+        if (!smspoolKey) throw new Error("SMSPOOL_API_KEY non configurée");
+        delivery = await orderTelegram(smspoolKey, orderCountry);
+      }
+
       const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
 
       const { data: sub, error: subErr } = await supabase.from("subscriptions").insert({
