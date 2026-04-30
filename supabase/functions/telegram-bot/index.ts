@@ -6,7 +6,7 @@
  * Parcours utilisateur (cahier des charges) :
  *   /start <pack_id>  → Accueil + bouton 2FA (tg://settings/security)
  *   callback done_2fa → Étape 1win : bouton lien partenaire + "J'ai cliqué"
- *   callback done_1win → Déblocage logiciel + lien vers /pronostics
+ *   callback done_1win → Déblocage logiciel + bouton Web App PLEIN ÉCRAN
  *
  * Données auto récupérées : telegram_user_id, username, first_name.
  */
@@ -101,14 +101,23 @@ function unlockedMessage(softwareUrl: string | null) {
     `Félicitations, votre Pack Officiel est maintenant actif.`,
     ``,
     softwareUrl
-      ? `Cliquez ci-dessous pour ouvrir le logiciel et voir les pronostics du jour.`
+      ? `Cliquez ci-dessous pour ouvrir le logiciel <b>en plein écran directement dans Telegram</b>.`
       : `Votre accès est validé. Le lien du logiciel vous sera communiqué dans un instant.`,
   ].join("\n");
 }
 
+/**
+ * Bouton WebApp plein écran (mode immersion).
+ * Telegram ouvre l'URL dans une web app intégrée — la page React appelle
+ * `Telegram.WebApp.expand()` et `requestFullscreen()` pour passer en grand.
+ */
 const unlockedKeyboard = (softwareUrl: string | null) =>
   softwareUrl
-    ? { inline_keyboard: [[{ text: "📊 Ouvrir le Pack Officiel", url: softwareUrl }]] }
+    ? {
+        inline_keyboard: [[
+          { text: "📊 Ouvrir le Pack Officiel", web_app: { url: softwareUrl } },
+        ]],
+      }
     : undefined;
 
 // ─── Webhook handler ────────────────────────────────────────────────────────
@@ -127,6 +136,17 @@ serve(async (req) => {
     update = await req.json();
   } catch {
     return new Response("ok", { status: 200 });
+  }
+
+  // Helper pour construire l'URL de la WebApp avec le pack_id
+  async function buildSoftwareUrl(packId: string): Promise<string | null> {
+    const { data: appUrlRow } = await supabase
+      .from("app_settings").select("value").eq("key", "app_base_url").maybeSingle();
+    let base = ((appUrlRow as any)?.value || "").trim();
+    if (!base) return null;
+    if (!/^https?:\/\//i.test(base)) base = "https://" + base;
+    base = base.replace(/\/+$/, "");
+    return `${base}/pronostics?pack_id=${packId}&tg=1`;
   }
 
   try {
@@ -178,10 +198,7 @@ serve(async (req) => {
 
       // Si déjà débloqué, renvoyer directement vers le logiciel
       if (pack.software_unlocked_at) {
-        const { data: appUrlRow } = await supabase
-          .from("app_settings").select("value").eq("key", "app_base_url").maybeSingle();
-        const appBaseUrl = (appUrlRow as any)?.value || "";
-        const softwareUrl = appBaseUrl ? `${appBaseUrl}/pronostics?pack_id=${pack.id}` : null;
+        const softwareUrl = await buildSoftwareUrl(pack.id);
         await sendMessage(chatId, unlockedMessage(softwareUrl), unlockedKeyboard(softwareUrl));
         return new Response("ok", { status: 200 });
       }
@@ -238,11 +255,7 @@ serve(async (req) => {
           })
           .eq("id", pack.id);
 
-        const { data: appUrlRow } = await supabase
-          .from("app_settings").select("value").eq("key", "app_base_url").maybeSingle();
-        const appBaseUrl = (appUrlRow as any)?.value || "";
-        const softwareUrl = appBaseUrl ? `${appBaseUrl}/pronostics?pack_id=${pack.id}` : null;
-
+        const softwareUrl = await buildSoftwareUrl(pack.id);
         await editMessage(chatId, messageId, unlockedMessage(softwareUrl), unlockedKeyboard(softwareUrl));
         await answerCallback(cb.id, "🚀 Accès débloqué !");
         return new Response("ok", { status: 200 });
