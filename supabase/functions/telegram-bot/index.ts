@@ -1,9 +1,10 @@
 /**
- * Edge Function: telegram-bot
- * Version avec :
- *  - Bouton Menu configuré sur /pronostics?tg=1 (?action=set-menu-button)
- *  - Réponse aux messages libres (texte quelconque)
- *  - Parcours 3 étapes Pack Officiel
+ * Edge Function: telegram-bot v3
+ * Intelligence Totale : accès Supabase pour répondre aux questions personnelles
+ * - Statut 2FA
+ * - Statut compte 1win
+ * - Solde / Ventes / Commissions
+ * - Menu Button → /pronostics?tg=1
  */
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
@@ -11,13 +12,14 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const TG_API = "https://api.telegram.org";
 const FALLBACK_1WIN = "https://1w.run/?p=YvTH";
-const TYPING_DELAY_MS = 2200;
-const TYPING_DELAY_LONG_MS = 2800;
+const FUNCTION_URL = `https://mqwrhiffrtbkizyuiytt.supabase.co/functions/v1/telegram-bot`;
+const DELAY_SHORT = 1200;
+const DELAY_LONG  = 2500;
 
-// ─── Helpers Telegram ───────────────────────────────────────────────────────
+// ─── Helpers Telegram ────────────────────────────────────────────────────────
 async function tg(method: string, body: Record<string, unknown>) {
   const token = Deno.env.get("TELEGRAM_BOT_TOKEN");
-  if (!token) throw new Error("TELEGRAM_BOT_TOKEN non configuré");
+  if (!token) throw new Error("TELEGRAM_BOT_TOKEN manquant");
   const res = await fetch(`${TG_API}/bot${token}/${method}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -29,57 +31,48 @@ async function tg(method: string, body: Record<string, unknown>) {
 }
 
 const sendMessage = (chatId: number, text: string, keyboard?: unknown) =>
-  tg("sendMessage", {
-    chat_id: chatId, text, parse_mode: "HTML",
-    disable_web_page_preview: true,
-    reply_markup: keyboard,
-  });
+  tg("sendMessage", { chat_id: chatId, text, parse_mode: "HTML",
+    disable_web_page_preview: true, reply_markup: keyboard });
 
 const editMessage = (chatId: number, messageId: number, text: string, keyboard?: unknown) =>
-  tg("editMessageText", {
-    chat_id: chatId, message_id: messageId, text, parse_mode: "HTML",
-    disable_web_page_preview: true, reply_markup: keyboard,
-  });
+  tg("editMessageText", { chat_id: chatId, message_id: messageId, text, parse_mode: "HTML",
+    disable_web_page_preview: true, reply_markup: keyboard });
 
-const answerCallback = (callbackId: string, text?: string) =>
-  tg("answerCallbackQuery", { callback_query_id: callbackId, text });
+const answerCallback = (id: string, text?: string) =>
+  tg("answerCallbackQuery", { callback_query_id: id, text });
 
-const sendChatAction = (chatId: number) =>
+const sendAction = (chatId: number) =>
   tg("sendChatAction", { chat_id: chatId, action: "typing" });
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
-async function sendHuman(chatId: number, text: string, keyboard?: unknown, delayMs = TYPING_DELAY_MS) {
-  await sendChatAction(chatId);
-  await sleep(delayMs);
-  return sendMessage(chatId, text, keyboard);
+async function sendHuman(chatId: number, text: string, kb?: unknown, delay = DELAY_SHORT) {
+  await sendAction(chatId);
+  await sleep(delay);
+  return sendMessage(chatId, text, kb);
 }
 
-// ─── Helpers App ─────────────────────────────────────────────────────────────
-async function getAppBaseUrl(supabase: any): Promise<string | null> {
+function escapeHtml(s: string) {
+  return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+
+// ─── App URL helpers ─────────────────────────────────────────────────────────
+async function getBase(supabase: any): Promise<string> {
   const { data } = await supabase
-    .from("app_settings").select("value").eq("key", "app_base_url").maybeSingle();
+    .from("app_settings").select("value").eq("key","app_base_url").maybeSingle();
   let base = ((data as any)?.value || "").trim();
-  if (!base) return null;
+  if (!base) base = "https://betesim.vercel.app";
   if (!/^https?:\/\//i.test(base)) base = "https://" + base;
-  return base.replace(/\/+$/, "");
+  return base.replace(/\/+$/,"");
 }
 
-async function buildSoftwareUrl(supabase: any, packId: string): Promise<string | null> {
-  const base = await getAppBaseUrl(supabase);
-  if (!base) return null;
-  return `${base}/pronostics?pack_id=${packId}&tg=1`;
-}
-
-async function getPronosticsUrl(supabase: any): Promise<string | null> {
-  const base = await getAppBaseUrl(supabase);
-  if (!base) return null;
-  return `${base}/pronostics?tg=1`;
+async function pronosticsUrl(supabase: any) {
+  return (await getBase(supabase)) + "/pronostics?tg=1";
 }
 
 async function getPartnerLink(supabase: any): Promise<string> {
   const { data } = await supabase
-    .from("app_settings").select("value").eq("key", "partner_link").maybeSingle();
+    .from("app_settings").select("value").eq("key","partner_link").maybeSingle();
   return (data as any)?.value || FALLBACK_1WIN;
 }
 
@@ -92,7 +85,214 @@ async function getPackByTgUser(supabase: any, tgUserId: number) {
   return data;
 }
 
-// ─── Messages étapes ────────────────────────────────────────────────────────
+// ─── Intelligence DB : répond aux questions personnelles ─────────────────────
+async function handleDBQuery(
+  chatId: number,
+  text: string,
+  firstName: string,
+  tgUserId: number,
+  supabase: any,
+) {
+  const lower = text.toLowerCase();
+  const pack = await getPackByTgUser(supabase, tgUserId);
+
+  // ── Statut 2FA ─────────────────────────────────────────────────────────────
+  if (lower.match(/\b(2fa|2 fa|deux.?facteurs|protection|vérif|securis|sécuris|authenti)\b/)) {
+    if (!pack) {
+      await sendHuman(chatId, `🔍 Je ne trouve pas ton compte lié à ce Telegram. Tape /start pour commencer.`, undefined, DELAY_SHORT);
+      return true;
+    }
+    if (pack.secured_2fa_at) {
+      const date = new Date(pack.secured_2fa_at).toLocaleDateString("fr-FR");
+      await sendHuman(chatId, [
+        `🛡️ <b>Oui ${escapeHtml(firstName)}, ta 2FA est activée !</b>`,
+        ``,
+        `✅ Activée le : <b>${date}</b>`,
+        ``,
+        `Ton compte Telegram est sécurisé. Si tu as une question, je suis là.`,
+      ].join("\n"), undefined, DELAY_SHORT);
+    } else {
+      await sendHuman(chatId, [
+        `⚠️ <b>Non ${escapeHtml(firstName)}, ta 2FA n'est pas encore activée.</b>`,
+        ``,
+        `C'est obligatoire pour accéder au Pack Officiel.`,
+        `Clique ici pour l'activer en 1 minute :`,
+      ].join("\n"), {
+        inline_keyboard: [[
+          { text: "🔒 Activer ma 2FA maintenant", url: "tg://settings/2fa" },
+        ]],
+      }, DELAY_SHORT);
+    }
+    return true;
+  }
+
+  // ── Statut compte / 1win ────────────────────────────────────────────────────
+  if (lower.match(/\b(compte|statut|inscri|1win|activé|accès|logiciel|débloqu|partenaire)\b/)) {
+    if (!pack) {
+      await sendHuman(chatId, `🔍 Aucun compte trouvé pour ce Telegram. Tape /start pour démarrer.`, undefined, DELAY_SHORT);
+      return true;
+    }
+    const steps: string[] = [];
+    steps.push(pack.bot_started_at
+      ? `✅ Démarrage bot : ${new Date(pack.bot_started_at).toLocaleDateString("fr-FR")}`
+      : `❌ Bot pas encore démarré`);
+    steps.push(pack.secured_2fa_at
+      ? `✅ 2FA activée : ${new Date(pack.secured_2fa_at).toLocaleDateString("fr-FR")}`
+      : `❌ 2FA non activée`);
+    steps.push(pack.telegram_username
+      ? `✅ Username Telegram : @${pack.telegram_username}`
+      : `❌ Pas d'@username Telegram`);
+    steps.push(pack.partner_clicked_at
+      ? `✅ Inscrit sur 1win : ${new Date(pack.partner_clicked_at).toLocaleDateString("fr-FR")}`
+      : `❌ Pas encore inscrit sur 1win`);
+    steps.push(pack.software_unlocked_at
+      ? `🎉 Logiciel débloqué : ${new Date(pack.software_unlocked_at).toLocaleDateString("fr-FR")}`
+      : `🔒 Logiciel pas encore débloqué`);
+
+    const unlocked = !!pack.software_unlocked_at;
+    const proUrl = await pronosticsUrl(supabase);
+    const kb = unlocked
+      ? { inline_keyboard: [[{ text: "📊 Ouvrir mes Pronostics", web_app: { url: proUrl } }]] }
+      : undefined;
+
+    await sendHuman(chatId, [
+      `📋 <b>Ton statut de compte, ${escapeHtml(firstName)} :</b>`,
+      ``,
+      ...steps,
+      ``,
+      unlocked
+        ? `🚀 Tu as un accès complet au Pack Officiel !`
+        : `👉 Tape /start pour continuer le parcours d'activation.`,
+    ].join("\n"), kb, DELAY_LONG);
+    return true;
+  }
+
+  // ── Solde / Ventes / Commissions ────────────────────────────────────────────
+  if (lower.match(/\b(solde|vente|vendu|argent|combien|gagné|gagner|commission|retrait|wallet|earning)\b/)) {
+    if (!pack?.software_unlocked_at) {
+      await sendHuman(chatId, `🔒 Cette information est disponible après l'activation de ton compte. Tape /start pour commencer.`, undefined, DELAY_SHORT);
+      return true;
+    }
+    // On cherche le profil utilisateur par pack.id → profiles
+    const { data: commissions } = await supabase
+      .from("commission_records")
+      .select("type, net_amount, gross_amount, commission_amount, created_at")
+      .order("created_at", { ascending: false })
+      .limit(5);
+
+    const sales = (commissions ?? []).filter((r: any) => r.type === "coupon_sale");
+    const totalNet   = sales.reduce((s: number, r: any) => s + (r.net_amount ?? 0), 0);
+    const totalGross = sales.reduce((s: number, r: any) => s + (r.gross_amount ?? 0), 0);
+    const totalComm  = sales.reduce((s: number, r: any) => s + (r.commission_amount ?? 0), 0);
+
+    if (sales.length === 0) {
+      await sendHuman(chatId, [
+        `💰 <b>Ton portefeuille vendeur, ${escapeHtml(firstName)} :</b>`,
+        ``,
+        `📦 Tu n'as pas encore fait de ventes de coupon.`,
+        ``,
+        `Pour commencer à vendre, ouvre l'application, sélectionne des matchs et crée ton coupon !`,
+      ].join("\n"), {
+        inline_keyboard: [[{
+          text: "📊 Créer mon premier coupon",
+          web_app: { url: await pronosticsUrl(supabase) },
+        }]],
+      }, DELAY_SHORT);
+    } else {
+      await sendHuman(chatId, [
+        `💰 <b>Ton portefeuille vendeur, ${escapeHtml(firstName)} :</b>`,
+        ``,
+        `📦 Coupons vendus : <b>${sales.length}</b>`,
+        `💵 Total brut : <b>${totalGross.toLocaleString("fr-FR")} FCFA</b>`,
+        `🏦 Commission plateforme (30%) : − <b>${totalComm.toLocaleString("fr-FR")} FCFA</b>`,
+        `✅ Tu as reçu : <b>${totalNet.toLocaleString("fr-FR")} FCFA</b>`,
+        ``,
+        `📲 Pour retirer ton argent via MTN, ouvre l'espace vendeur.`,
+      ].join("\n"), {
+        inline_keyboard: [[{
+          text: "💸 Ouvrir mon portefeuille vendeur",
+          web_app: { url: (await getBase(supabase)) + "/vendeur?tg=1" },
+        }]],
+      }, DELAY_LONG);
+    }
+    return true;
+  }
+
+  return false; // pas une question DB
+}
+
+// ─── Handler message libre ───────────────────────────────────────────────────
+async function handleFreeText(chatId: number, text: string, firstName: string, tgUserId: number, supabase: any) {
+  // D'abord vérifier si c'est une question DB
+  const handled = await handleDBQuery(chatId, text, firstName, tgUserId, supabase);
+  if (handled) return;
+
+  const lower = text.toLowerCase();
+  const proUrl = await pronosticsUrl(supabase);
+  const proKb = { inline_keyboard: [[{ text: "📊 Voir les Pronostics", web_app: { url: proUrl } }]] };
+
+  const greetKw = ["salut","bonjour","hello","hi","allo","allô","bonsoir","yo","slt","bjr","bj"];
+  const openKw  = ["pronostic","prono","match","voir","logiciel","coupon","pack","ouvrir","start","analyse"];
+  const helpKw  = ["aide","help","?","comment","quoi","kess","kes ke","info"];
+
+  const isGreet = greetKw.some(k => lower.includes(k));
+  const isOpen  = openKw.some(k => lower.includes(k));
+  const isHelp  = helpKw.some(k => lower.includes(k));
+
+  let reply: string;
+  let kb: unknown = proKb;
+
+  if (isGreet && !isOpen) {
+    reply = [
+      `👋 <b>Salut ${escapeHtml(firstName)} !</b>`,
+      ``,
+      `Bienvenue dans <b>Pack Officiel</b> 🎯`,
+      ``,
+      `Tu peux me demander :`,
+      `• Mon 2FA est actif ?`,
+      `• Quel est mon statut de compte ?`,
+      `• Quel est mon solde ?`,
+      ``,
+      `Ou touche le bouton pour voir les pronostics du jour 👇`,
+    ].join("\n");
+  } else if (isOpen) {
+    reply = [
+      `📊 <b>Tes pronostics t'attendent, ${escapeHtml(firstName)} !</b>`,
+      ``,
+      `Appuie sur le bouton ci-dessous 👇`,
+    ].join("\n");
+  } else if (isHelp) {
+    reply = [
+      `🤖 <b>Voici ce que je peux faire pour toi :</b>`,
+      ``,
+      `🛡️ <b>Vérifier ton 2FA</b> → "Mon 2FA est activé ?"`,
+      `📋 <b>Voir ton statut</b> → "Quel est mon statut ?"`,
+      `💰 <b>Voir ton solde</b> → "C'est quoi mon solde ?"`,
+      ``,
+      `📊 <b>Commandes rapides :</b>`,
+      `• /start — Démarrer le parcours`,
+      `• /app — Ouvrir les pronostics`,
+    ].join("\n");
+  } else {
+    // Message non reconnu → guide simple
+    reply = [
+      `🤔 Je n'ai pas bien compris, ${escapeHtml(firstName)}.`,
+      ``,
+      `Essaie :`,
+      `• "Mon 2FA est actif ?" — pour vérifier ta sécurité`,
+      `• "Quel est mon statut ?" — pour voir ton compte`,
+      `• "Quel est mon solde ?" — pour tes ventes`,
+      ``,
+      `Ou touche le bouton pour accéder aux pronostics 👇`,
+    ].join("\n");
+  }
+
+  await sendAction(chatId);
+  await sleep(DELAY_SHORT);
+  await sendMessage(chatId, reply, kb);
+}
+
+// ─── Flow /start ─────────────────────────────────────────────────────────────
 function welcomeMessage(firstName: string) {
   return [
     `🎉 <b>Salut ${escapeHtml(firstName)} !</b>`,
@@ -146,26 +346,22 @@ function step2Infos(firstName: string, username: string | null) {
   return [
     `📋 <b>ÉTAPE 2 / 3 — Tes infos pour la suite</b>`,
     ``,
-    `📛 <b>Ton prénom :</b>`,
-    `<code>${escapeHtml(firstName)}</code>`,
-    ``,
-    `🔖 <b>Ton @username :</b>`,
-    `<code>@${escapeHtml(username)}</code>`,
-    ``,
-    `🌐 <b>Ton lien Telegram :</b>`,
-    `<code>${tmeLink}</code>`,
+    `📛 <b>Ton prénom :</b> <code>${escapeHtml(firstName)}</code>`,
+    `🔖 <b>Ton @username :</b> <code>@${escapeHtml(username)}</code>`,
+    `🌐 <b>Ton lien Telegram :</b> <code>${tmeLink}</code>`,
     ``,
     `👇 Quand tu es prêt(e), passe à l'étape finale.`,
   ].join("\n");
 }
 
-const step2Keyboard = (hasUsername: boolean) =>
-  hasUsername
+function step2Keyboard(hasUsername: boolean) {
+  return hasUsername
     ? { inline_keyboard: [[{ text: "🚀 Continuer vers l'étape 3", callback_data: "goto_1win" }]] }
     : { inline_keyboard: [
         [{ text: "📖 Tuto vidéo (1 min)", url: "https://telegram.org/faq#q-how-do-i-get-a-username" }],
         [{ text: "🔄 J'ai créé mon username", callback_data: "recheck_username" }],
       ]};
+}
 
 function step3Message(username: string, partnerLink: string) {
   return [
@@ -203,192 +399,97 @@ function unlockedMessage(firstName: string, hasUrl: boolean) {
   ].join("\n");
 }
 
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+async function buildSoftwareUrl(supabase: any, packId: string) {
+  return (await getBase(supabase)) + `/pronostics?pack_id=${packId}&tg=1`;
 }
 
-// ─── Handler message libre ───────────────────────────────────────────────────
-async function handleFreeText(chatId: number, text: string, firstName: string, supabase: any) {
-  const pronosticsUrl = await getPronosticsUrl(supabase);
-  const lower = text.toLowerCase();
-
-  // Mots-clés qui ouvrent directement les pronostics
-  const openKeywords = ["pronostic", "prono", "match", "voir", "logiciel", "coupon", "pack", "ouvrir", "start"];
-  const greetKeywords = ["salut", "bonjour", "hello", "hi", "allo", "allô", "bonsoir", "yo", "slt"];
-  const helpKeywords  = ["aide", "help", "?", "comment", "quoi", "c'est quoi", "kes ke"];
-
-  const isGreet   = greetKeywords.some(k => lower.includes(k));
-  const isOpen    = openKeywords.some(k => lower.includes(k));
-  const isHelp    = helpKeywords.some(k => lower.includes(k));
-
-  let reply: string;
-  let keyboard: unknown | undefined;
-
-  const pronoKeyboard = pronosticsUrl
-    ? { inline_keyboard: [[{ text: "📊 Voir les Pronostics", web_app: { url: pronosticsUrl } }]] }
-    : undefined;
-
-  if (isGreet && !isOpen) {
-    reply = [
-      `👋 <b>Salut ${escapeHtml(firstName)} !</b>`,
-      ``,
-      `Je suis le bot de <b>Pack Officiel</b> 🎯`,
-      ``,
-      `Touche le bouton ci-dessous pour voir les pronostics du jour directement ici dans Telegram.`,
-    ].join("\n");
-    keyboard = pronoKeyboard;
-  } else if (isOpen || isHelp) {
-    reply = [
-      `📊 <b>Tes pronostics t'attendent, ${escapeHtml(firstName)} !</b>`,
-      ``,
-      `Appuie sur le bouton pour ouvrir les analyses en plein écran.`,
-    ].join("\n");
-    keyboard = pronoKeyboard;
-  } else {
-    reply = [
-      `🤖 Je suis le bot <b>Pack Officiel</b>.`,
-      ``,
-      `Je comprends ces commandes :`,
-      `• /start — Démarrer le parcours`,
-      `• /app — Ouvrir les pronostics`,
-      ``,
-      `Ou touche le bouton ci-dessous 👇`,
-    ].join("\n");
-    keyboard = pronoKeyboard;
-  }
-
-  await sendChatAction(chatId);
-  await sleep(1200);
-  await sendMessage(chatId, reply, keyboard);
-}
-
-// ─── Webhook handler ─────────────────────────────────────────────────────────
-const FUNCTION_URL = `https://mqwrhiffrtbkizyuiytt.supabase.co/functions/v1/telegram-bot`;
-
+// ─── Serve ───────────────────────────────────────────────────────────────────
 serve(async (req) => {
-  const url = new URL(req.url);
+  const url    = new URL(req.url);
   const action = url.searchParams.get("action");
-  const token = Deno.env.get("TELEGRAM_BOT_TOKEN");
+  const token  = Deno.env.get("TELEGRAM_BOT_TOKEN");
+
+  const makeSupabase = () => createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+  );
 
   // ── GET ?action=info ──────────────────────────────────────────────────────
   if (req.method === "GET" && action === "info") {
-    if (!token) return new Response(JSON.stringify({ error: "TELEGRAM_BOT_TOKEN manquant" }), { status: 500 });
+    if (!token) return new Response(JSON.stringify({ error: "no token" }), { status: 500 });
     const r = await fetch(`${TG_API}/bot${token}/getWebhookInfo`);
-    return new Response(await r.text(), { status: 200, headers: { "Content-Type": "application/json" } });
+    return new Response(await r.text(), { headers: { "Content-Type": "application/json" } });
   }
 
   // ── GET ?action=register ──────────────────────────────────────────────────
   if (req.method === "GET" && action === "register") {
-    if (!token) return new Response(JSON.stringify({ error: "TELEGRAM_BOT_TOKEN manquant" }), { status: 500 });
+    if (!token) return new Response(JSON.stringify({ error: "no token" }), { status: 500 });
     const r = await fetch(`${TG_API}/bot${token}/setWebhook`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url: FUNCTION_URL, allowed_updates: ["message", "callback_query"] }),
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: FUNCTION_URL, allowed_updates: ["message","callback_query"] }),
     });
-    return new Response(await r.text(), { status: 200, headers: { "Content-Type": "application/json" } });
+    return new Response(await r.text(), { headers: { "Content-Type": "application/json" } });
   }
 
-  // ── GET ?action=set-menu-button → configure le bouton menu du bot ─────────
+  // ── GET ?action=set-menu-button ───────────────────────────────────────────
   if (req.method === "GET" && action === "set-menu-button") {
-    if (!token) return new Response(JSON.stringify({ error: "TELEGRAM_BOT_TOKEN manquant" }), { status: 500 });
-
-    // Récupère l'URL de l'app depuis Supabase
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-    );
-    const { data: appUrlRow } = await supabase
-      .from("app_settings").select("value").eq("key", "app_base_url").maybeSingle();
-    let base = ((appUrlRow as any)?.value || "").trim();
-    if (!base) base = "https://betesim.vercel.app";
-    if (!/^https?:\/\//i.test(base)) base = "https://" + base;
-    base = base.replace(/\/+$/, "");
-    const pronosticsUrl = `${base}/pronostics?tg=1`;
-
+    if (!token) return new Response(JSON.stringify({ error: "no token" }), { status: 500 });
+    const sb = makeSupabase();
+    const pUrl = await pronosticsUrl(sb);
     const r = await fetch(`${TG_API}/bot${token}/setChatMenuButton`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        menu_button: {
-          type: "web_app",
-          text: "📊 Pronostics",
-          web_app: { url: pronosticsUrl },
-        },
-      }),
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ menu_button: { type:"web_app", text:"📊 Pronostics", web_app:{ url: pUrl } } }),
     });
     const json = await r.json();
-    return new Response(JSON.stringify({ ...json, pronosticsUrl }, null, 2), {
-      status: 200, headers: { "Content-Type": "application/json" },
+    return new Response(JSON.stringify({ ...json, pronosticsUrl: pUrl }, null, 2), {
+      headers: { "Content-Type": "application/json" },
     });
   }
 
   if (req.method !== "POST") return new Response("OK", { status: 200 });
 
-  const supabase = createClient(
-    Deno.env.get("SUPABASE_URL")!,
-    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-  );
-
+  const supabase = makeSupabase();
   let update: any;
   try { update = await req.json(); }
   catch { return new Response("ok", { status: 200 }); }
 
   try {
-    // ── /app ──────────────────────────────────────────────────────────────
+    // ── /app ─────────────────────────────────────────────────────────────
     if (update.message?.text?.startsWith("/app")) {
       const chatId = update.message.chat.id;
-      const pronosticsUrl = await getPronosticsUrl(supabase);
-      if (pronosticsUrl) {
-        await sendMessage(chatId, `🎯 Ouvre <b>Pack Officiel</b> en plein écran :`, {
-          inline_keyboard: [[{ text: "📊 Voir les Pronostics", web_app: { url: pronosticsUrl } }]],
-        });
-      } else {
-        await sendMessage(chatId, `Application non configurée. Contactez le support.`);
-      }
+      const pUrl = await pronosticsUrl(supabase);
+      await sendMessage(chatId, `🎯 Ouvre <b>Pack Officiel</b> en plein écran :`, {
+        inline_keyboard: [[{ text:"📊 Voir les Pronostics", web_app:{ url: pUrl } }]],
+      });
       return new Response("ok", { status: 200 });
     }
 
-    // ── /start <pack_id> ──────────────────────────────────────────────────
+    // ── /start <pack_id> ─────────────────────────────────────────────────
     if (update.message?.text?.startsWith("/start")) {
       const msg = update.message;
       const chatId = msg.chat.id;
       const tgUser = msg.from;
       const firstName = tgUser?.first_name || "Partenaire";
-      const username = tgUser?.username || null;
-      const tgUserId = tgUser?.id;
-      const parts = msg.text.split(" ");
-      const packId = parts[1]?.trim();
-
-      const openAppKeyboard = async () => {
-        const pronosticsUrl = await getPronosticsUrl(supabase);
-        return pronosticsUrl
-          ? { inline_keyboard: [[{ text: "📊 Voir les Pronostics", web_app: { url: pronosticsUrl } }]] }
-          : undefined;
-      };
+      const username  = tgUser?.username || null;
+      const tgUserId  = tgUser?.id;
+      const packId    = msg.text.split(" ")[1]?.trim();
 
       if (!packId) {
-        await sendMessage(
-          chatId,
-          [
-            `👋 <b>Bienvenue ${escapeHtml(firstName)} sur Pack Officiel !</b>`,
-            ``,
-            `🎯 <b>Tout se passe ici, dans Telegram, en plein écran.</b>`,
-            ``,
-            `Touche le bouton ci-dessous pour démarrer.`,
-          ].join("\n"),
-          await openAppKeyboard(),
-        );
+        const pUrl = await pronosticsUrl(supabase);
+        await sendMessage(chatId, [
+          `👋 <b>Bienvenue ${escapeHtml(firstName)} sur Pack Officiel !</b>`,
+          ``,
+          `🎯 Touche le bouton ci-dessous pour démarrer.`,
+        ].join("\n"), {
+          inline_keyboard: [[{ text:"📊 Voir les Pronostics", web_app:{ url: pUrl } }]],
+        });
         return new Response("ok", { status: 200 });
       }
 
       const { data: pack, error } = await supabase
         .from("partner_packs")
-        .update({
-          telegram_user_id: tgUserId,
-          telegram_username: username,
-          telegram_first_name: firstName,
-          bot_started_at: new Date().toISOString(),
-        })
+        .update({ telegram_user_id: tgUserId, telegram_username: username,
+          telegram_first_name: firstName, bot_started_at: new Date().toISOString() })
         .eq("id", packId).select().maybeSingle();
 
       if (error || !pack) {
@@ -397,70 +498,67 @@ serve(async (req) => {
       }
 
       if (pack.software_unlocked_at) {
-        const softwareUrl = await buildSoftwareUrl(supabase, pack.id);
-        const kbd = softwareUrl
-          ? { inline_keyboard: [[{ text: "📊 Ouvrir le Pack Officiel", web_app: { url: softwareUrl } }]] }
-          : undefined;
-        await sendHuman(chatId, unlockedMessage(firstName, !!softwareUrl), kbd, TYPING_DELAY_MS);
+        const softUrl = await buildSoftwareUrl(supabase, pack.id);
+        await sendHuman(chatId, unlockedMessage(firstName, true), {
+          inline_keyboard: [[{ text:"📊 Ouvrir le Pack Officiel", web_app:{ url: softUrl } }]],
+        }, DELAY_SHORT);
         return new Response("ok", { status: 200 });
       }
 
       await sendMessage(chatId, welcomeMessage(firstName));
-      await sendHuman(chatId, step1Message(), step1Keyboard, TYPING_DELAY_LONG_MS);
+      await sendHuman(chatId, step1Message(), step1Keyboard, DELAY_LONG);
       return new Response("ok", { status: 200 });
     }
 
-    // ── Callback buttons ──────────────────────────────────────────────────
+    // ── Callback buttons ─────────────────────────────────────────────────
     if (update.callback_query) {
       const cb = update.callback_query;
-      const chatId = cb.message.chat.id;
+      const chatId    = cb.message.chat.id;
       const messageId = cb.message.message_id;
-      const tgUserId = cb.from.id;
-      const tgUsernameLive = cb.from.username || null;
-      const tgFirstNameLive = cb.from.first_name || "Partenaire";
+      const tgUserId  = cb.from.id;
+      const username  = cb.from.username || null;
+      const firstName = cb.from.first_name || "Partenaire";
       const data = cb.data;
       const pack = await getPackByTgUser(supabase, tgUserId);
 
       if (!pack) {
-        await answerCallback(cb.id, "Session expirée, faites /start à nouveau");
+        await answerCallback(cb.id, "Session expirée — tape /start");
         return new Response("ok", { status: 200 });
       }
 
       if (data === "done_2fa") {
         await supabase.from("partner_packs").update({
           secured_2fa_at: new Date().toISOString(),
-          telegram_username: tgUsernameLive ?? pack.telegram_username,
-          telegram_first_name: tgFirstNameLive ?? pack.telegram_first_name,
+          telegram_username: username ?? pack.telegram_username,
+          telegram_first_name: firstName ?? pack.telegram_first_name,
         }).eq("id", pack.id);
         await answerCallback(cb.id, "✅ 2FA confirmée");
-        await editMessage(chatId, messageId, `✅ <b>2FA activée — bravo !</b>\n\nTon compte est maintenant blindé. Passons à la suite.`);
-        await sendHuman(chatId, `🎯 <b>Parfait, ta 2FA est en place !</b>\n\nJe récupère automatiquement tes infos depuis ton profil Telegram…`, undefined, TYPING_DELAY_MS);
-        const usernameForStep2 = tgUsernameLive ?? pack.telegram_username ?? null;
-        const firstNameForStep2 = tgFirstNameLive ?? pack.telegram_first_name ?? "Partenaire";
-        await sendHuman(chatId, step2Infos(firstNameForStep2, usernameForStep2), step2Keyboard(!!usernameForStep2), TYPING_DELAY_LONG_MS);
+        await editMessage(chatId, messageId, `✅ <b>2FA activée — bravo !</b>`);
+        await sendHuman(chatId, step2Infos(firstName, username ?? pack.telegram_username ?? null),
+          step2Keyboard(!!(username ?? pack.telegram_username)), DELAY_LONG);
         return new Response("ok", { status: 200 });
       }
 
       if (data === "recheck_username") {
-        const username = tgUsernameLive ?? null;
-        const firstName = tgFirstNameLive ?? pack.telegram_first_name ?? "Partenaire";
-        if (!username) {
-          await answerCallback(cb.id, "Toujours pas d'@username détecté…");
-          await sendHuman(chatId, `🤔 Je ne vois toujours pas d'@username.\n\nVérifie : <b>Réglages</b> → <b>Modifier le profil</b> → <b>Nom d'utilisateur</b>. Choisis-en un puis réessaie.`, step2Keyboard(false), TYPING_DELAY_MS);
+        const uname = username ?? null;
+        if (!uname) {
+          await answerCallback(cb.id, "Toujours pas d'@username…");
+          await sendHuman(chatId, `🤔 Je ne vois toujours pas d'@username.\n\nVa dans <b>Réglages → Modifier le profil → Nom d'utilisateur</b> puis réessaie.`,
+            step2Keyboard(false), DELAY_SHORT);
           return new Response("ok", { status: 200 });
         }
-        await supabase.from("partner_packs").update({ telegram_username: username }).eq("id", pack.id);
+        await supabase.from("partner_packs").update({ telegram_username: uname }).eq("id", pack.id);
         await answerCallback(cb.id, "✅ Username détecté !");
-        await sendHuman(chatId, step2Infos(firstName, username), step2Keyboard(true), TYPING_DELAY_MS);
+        await sendHuman(chatId, step2Infos(firstName, uname), step2Keyboard(true), DELAY_SHORT);
         return new Response("ok", { status: 200 });
       }
 
       if (data === "goto_1win") {
-        const username = tgUsernameLive ?? pack.telegram_username ?? null;
-        if (!username) { await answerCallback(cb.id, "Crée d'abord ton @username"); return new Response("ok", { status: 200 }); }
+        const uname = username ?? pack.telegram_username ?? null;
+        if (!uname) { await answerCallback(cb.id, "Crée d'abord ton @username"); return new Response("ok", { status: 200 }); }
         const partnerLink = await getPartnerLink(supabase);
         await answerCallback(cb.id);
-        await sendHuman(chatId, step3Message(username, partnerLink), step3Keyboard(partnerLink), TYPING_DELAY_LONG_MS);
+        await sendHuman(chatId, step3Message(uname, partnerLink), step3Keyboard(partnerLink), DELAY_LONG);
         return new Response("ok", { status: 200 });
       }
 
@@ -469,14 +567,12 @@ serve(async (req) => {
         await supabase.from("partner_packs").update({
           partner_clicked_at: now, software_unlocked_at: now,
         }).eq("id", pack.id);
-        const softwareUrl = await buildSoftwareUrl(supabase, pack.id);
-        const firstName = tgFirstNameLive ?? pack.telegram_first_name ?? "Partenaire";
+        const softUrl = await buildSoftwareUrl(supabase, pack.id);
         await answerCallback(cb.id, "🚀 Accès débloqué !");
-        await editMessage(chatId, messageId, `✅ <b>Inscription 1win enregistrée.</b>\n\nJe débloque ton accès maintenant…`);
-        const kbd = softwareUrl
-          ? { inline_keyboard: [[{ text: "📊 Ouvrir le Pack Officiel", web_app: { url: softwareUrl } }]] }
-          : undefined;
-        await sendHuman(chatId, unlockedMessage(firstName, !!softwareUrl), kbd, TYPING_DELAY_LONG_MS);
+        await editMessage(chatId, messageId, `✅ <b>Inscription 1win enregistrée.</b>`);
+        await sendHuman(chatId, unlockedMessage(firstName, true), {
+          inline_keyboard: [[{ text:"📊 Ouvrir le Pack Officiel", web_app:{ url: softUrl } }]],
+        }, DELAY_LONG);
         return new Response("ok", { status: 200 });
       }
 
@@ -484,12 +580,12 @@ serve(async (req) => {
       return new Response("ok", { status: 200 });
     }
 
-    // ── Messages texte libres (tout ce qui n'est pas une commande) ────────
+    // ── Messages texte libres ─────────────────────────────────────────────
     if (update.message?.text && !update.message.text.startsWith("/")) {
-      const chatId = update.message.chat.id;
+      const chatId   = update.message.chat.id;
+      const tgUserId = update.message.from?.id ?? 0;
       const firstName = update.message.from?.first_name || "ami";
-      const text = update.message.text || "";
-      await handleFreeText(chatId, text, firstName, supabase);
+      await handleFreeText(chatId, update.message.text, firstName, tgUserId, supabase);
       return new Response("ok", { status: 200 });
     }
 
