@@ -56,7 +56,8 @@ interface CommissionRecord {
 }
 
 const COMMISSION_RATE = 0.30;
-const PARTNER_LINK = "https://1w.run/?p=YvTH";
+const PARTNER_LINK = "https://1w.run/?p=YvTH"; // Lien affiliation (inscription)
+const WIN_BETTING_URL = "https://1win.com/betting"; // Site paris 1win (booking code)
 
 const CONFIDENCE_COLORS: Record<Confidence, string> = {
   faible: "bg-red-500/15 text-red-600 border-red-400/30",
@@ -314,7 +315,7 @@ const Pronostics = () => {
 
   const handleOpenOn1win = () => {
     setShowOnboardingPanel(true);
-    setTimeout(() => openLink(PARTNER_LINK), 400);
+    setTimeout(() => openLink(WIN_BETTING_URL), 400);
   };
 
   const navTabs = [
@@ -668,7 +669,7 @@ const Pronostics = () => {
               ))}
             </div>
             <div className="grid grid-cols-2 gap-2 pt-1">
-              <Button variant="outline" onClick={() => openLink(PARTNER_LINK)} className="h-11 rounded-xl text-sm font-bold">
+              <Button variant="outline" onClick={() => openLink(WIN_BETTING_URL)} className="h-11 rounded-xl text-sm font-bold">
                 <ExternalLink className="h-4 w-4 mr-1.5" /> Rouvrir 1win
               </Button>
               <Button onClick={() => { setShowOnboardingPanel(false); setShowCouponRegister(true); }}
