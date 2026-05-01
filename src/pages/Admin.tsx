@@ -1,11 +1,12 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   Shield, Save, Loader2, Search, RefreshCw, ExternalLink,
   Wallet, Send, Settings, Users, Phone, Copy, CheckCircle,
   AlertCircle, RotateCcw, ChevronDown, ChevronUp, Smartphone,
+  Zap, XCircle, MessageSquare, Key,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -41,7 +42,11 @@ const STATUS_LABEL: Record<string, { label: string; cls: string; icon: React.Ele
   delivered:          { label: "Livré",  cls: "bg-emerald-500/15 text-emerald-600 border border-emerald-400/30", icon: CheckCircle },
 };
 
-type AdminTab = "clients" | "settings";
+type AdminTab = "clients" | "settings" | "auto-sms";
+
+const OWNER_EMAIL = "jeremyhounmetin@gmail.com";
+
+type SmsState = "idle" | "loading" | "waiting" | "received" | "error" | "cancelled";
 
 const Admin = () => {
   const { user, loading: authLoading } = useAuth();
@@ -58,6 +63,97 @@ const Admin = () => {
   const [creditReason, setCreditReason] = useState("");
 
   const [redeliverDialog, setRedeliverDialog] = useState<{ open: boolean; pack: PartnerPackRow | null }>({ open: false, pack: null });
+
+  // ── Auto-SMS 1win (réservé propriétaire) ──────────────────────────────
+  const [smsState, setSmsState] = useState<SmsState>("idle");
+  const [smsNumber, setSmsNumber] = useState<string | null>(null);
+  const [smsOrderId, setSmsOrderId] = useState<string | null>(null);
+  const [smsCode, setSmsCode] = useState<string | null>(null);
+  const [smsText, setSmsText] = useState<string | null>(null);
+  const [smsError, setSmsError] = useState<string | null>(null);
+  const [smsCountry, setSmsCountry] = useState("0");
+  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const isOwner = (user?.email ?? "").toLowerCase() === OWNER_EMAIL.toLowerCase();
+
+  const stopPolling = useCallback(() => {
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
+  }, []);
+
+  const checkSms = useCallback(async (orderId: string) => {
+    try {
+      const { data } = await supabase.functions.invoke("auto-sms-1win", {
+        body: { action: "check-sms", order_id: orderId },
+      });
+      if (data?.sms_received) {
+        stopPolling();
+        setSmsCode(data.code_1win ?? null);
+        setSmsText(data.sms_text ?? null);
+        setSmsState("received");
+        toast.success("Code 1win reçu !");
+      }
+    } catch {
+      // Continuer le polling silencieusement
+    }
+  }, [stopPolling]);
+
+  const startAutoSms = async () => {
+    if (!isOwner) return;
+    setSmsState("loading");
+    setSmsNumber(null);
+    setSmsOrderId(null);
+    setSmsCode(null);
+    setSmsText(null);
+    setSmsError(null);
+    stopPolling();
+
+    try {
+      const { data, error } = await supabase.functions.invoke("auto-sms-1win", {
+        body: { action: "get-number", country: smsCountry },
+      });
+      if (error || !data?.success) throw new Error(data?.error ?? error?.message ?? "Erreur inconnue");
+      setSmsNumber(data.number);
+      setSmsOrderId(data.order_id);
+      setSmsState("waiting");
+      toast.success(`Numéro obtenu : ${data.number}`);
+
+      // Démarrer la surveillance du SMS (poll toutes les 5s)
+      pollIntervalRef.current = setInterval(() => checkSms(data.order_id), 5000);
+    } catch (err: any) {
+      setSmsError(err.message);
+      setSmsState("error");
+      toast.error("Erreur : " + err.message);
+    }
+  };
+
+  const cancelAutoSms = async () => {
+    stopPolling();
+    if (smsOrderId) {
+      try {
+        await supabase.functions.invoke("auto-sms-1win", {
+          body: { action: "cancel", order_id: smsOrderId },
+        });
+      } catch { /* ignore */ }
+    }
+    setSmsState("cancelled");
+    setSmsNumber(null);
+    setSmsOrderId(null);
+  };
+
+  const resetAutoSms = () => {
+    stopPolling();
+    setSmsState("idle");
+    setSmsNumber(null);
+    setSmsOrderId(null);
+    setSmsCode(null);
+    setSmsText(null);
+    setSmsError(null);
+  };
+
+  useEffect(() => () => stopPolling(), [stopPolling]);
 
   const pwaUrl = typeof window !== "undefined" ? `${window.location.origin}/install` : "";
 
@@ -220,6 +316,7 @@ const Admin = () => {
           {([
             { id: "clients", label: "Clients", icon: Users },
             { id: "settings", label: "Paramètres", icon: Settings },
+            ...(isOwner ? [{ id: "auto-sms", label: "Auto-SMS", icon: Zap }] : []),
           ] as { id: AdminTab; label: string; icon: React.ElementType }[]).map(tab => (
             <button
               key={tab.id}
@@ -531,6 +628,197 @@ const Admin = () => {
                   Whatsapp
                 </a>
               </div>
+            </div>
+
+          </motion.div>
+        )}
+
+        {/* ── ONGLET AUTO-SMS (réservé propriétaire) ── */}
+        {activeTab === "auto-sms" && isOwner && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
+
+            {/* Header */}
+            <div className="rounded-2xl bg-card p-5 shadow-card">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10">
+                  <Zap className="h-5 w-5 text-primary" />
+                </div>
+                <div>
+                  <h2 className="font-bold text-foreground">Auto-SMS 1win</h2>
+                  <p className="text-xs text-muted-foreground">Récupération automatique du code de validation</p>
+                </div>
+              </div>
+              <div className="rounded-xl bg-amber-500/10 border border-amber-400/30 p-3">
+                <p className="text-xs text-amber-700 font-medium">
+                  Accès privé — réservé au propriétaire ({OWNER_EMAIL})
+                </p>
+              </div>
+            </div>
+
+            {/* Sélection pays */}
+            <div className="rounded-2xl bg-card p-4 shadow-card space-y-2">
+              <label className="text-sm font-semibold text-foreground flex items-center gap-2">
+                <Phone className="h-4 w-4 text-primary" />
+                Code pays SMSPool (0 = automatique)
+              </label>
+              <Input
+                value={smsCountry}
+                onChange={(e) => setSmsCountry(e.target.value)}
+                placeholder="0 = auto, 1 = USA, 23 = France…"
+                className="h-11 rounded-xl font-mono"
+                disabled={smsState === "loading" || smsState === "waiting"}
+              />
+            </div>
+
+            {/* Panneau principal */}
+            <div className="rounded-2xl bg-card p-5 shadow-card space-y-4">
+
+              {/* État IDLE ou CANCELLED */}
+              {(smsState === "idle" || smsState === "cancelled") && (
+                <div className="text-center space-y-4">
+                  <div className="rounded-xl bg-muted/40 p-4">
+                    <MessageSquare className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
+                    <p className="text-sm text-muted-foreground">
+                      {smsState === "cancelled" ? "Session annulée." : "Prêt à démarrer."}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Un numéro sera commandé sur SMSPool et le code 1win s'affichera automatiquement dès réception.
+                    </p>
+                  </div>
+                  <Button
+                    onClick={startAutoSms}
+                    className="w-full h-12 rounded-xl gradient-primary text-primary-foreground font-bold gap-2"
+                  >
+                    <Zap className="h-4 w-4" />
+                    Démarrer Auto-SMS
+                  </Button>
+                </div>
+              )}
+
+              {/* État LOADING */}
+              {smsState === "loading" && (
+                <div className="text-center py-6 space-y-3">
+                  <Loader2 className="h-10 w-10 animate-spin text-primary mx-auto" />
+                  <p className="font-semibold text-foreground">Commande du numéro en cours…</p>
+                  <p className="text-xs text-muted-foreground">Connexion à SMSPool — détection anti-ban active</p>
+                </div>
+              )}
+
+              {/* État WAITING */}
+              {smsState === "waiting" && (
+                <div className="space-y-4">
+                  {/* Numéro obtenu */}
+                  <div className="rounded-xl bg-primary/10 border border-primary/20 p-4">
+                    <p className="text-xs text-muted-foreground mb-1">Numéro virtuel obtenu</p>
+                    <div className="flex items-center gap-3">
+                      <Phone className="h-5 w-5 text-primary shrink-0" />
+                      <p className="text-2xl font-bold text-primary font-mono tracking-wide flex-1">{smsNumber}</p>
+                      <button
+                        onClick={() => { if (smsNumber) { navigator.clipboard.writeText(smsNumber); toast.success("Copié !"); } }}
+                        className="flex h-9 w-9 items-center justify-center rounded-lg bg-card border border-border"
+                      >
+                        <Copy className="h-4 w-4 text-muted-foreground" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Surveillance */}
+                  <div className="rounded-xl bg-muted/40 p-4 flex items-center gap-3">
+                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-amber-500/20 shrink-0">
+                      <Loader2 className="h-4 w-4 animate-spin text-amber-600" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-foreground">En attente du SMS 1win…</p>
+                      <p className="text-xs text-muted-foreground">Vérification automatique toutes les 5 secondes</p>
+                    </div>
+                  </div>
+
+                  {/* Instructions */}
+                  <div className="rounded-xl border border-border p-3 space-y-1">
+                    <p className="text-xs font-semibold text-foreground">Étapes :</p>
+                    <p className="text-xs text-muted-foreground">① Copiez le numéro ci-dessus</p>
+                    <p className="text-xs text-muted-foreground">② Ouvrez 1win et entrez ce numéro à l'inscription</p>
+                    <p className="text-xs text-muted-foreground">③ 1win envoie le SMS — le code apparaîtra ici automatiquement</p>
+                  </div>
+
+                  <Button
+                    variant="outline"
+                    onClick={cancelAutoSms}
+                    className="w-full h-11 rounded-xl gap-2 border-destructive/40 text-destructive hover:bg-destructive/10"
+                  >
+                    <XCircle className="h-4 w-4" />
+                    Annuler cette session
+                  </Button>
+                </div>
+              )}
+
+              {/* État RECEIVED */}
+              {smsState === "received" && (
+                <div className="space-y-4">
+                  <div className="rounded-xl bg-emerald-500/10 border border-emerald-400/30 p-4 text-center">
+                    <CheckCircle className="h-10 w-10 text-emerald-500 mx-auto mb-2" />
+                    <p className="font-bold text-emerald-700 text-lg">SMS reçu !</p>
+                  </div>
+
+                  {/* Numéro */}
+                  <div className="rounded-xl bg-muted/40 p-3 flex items-center gap-2">
+                    <Phone className="h-4 w-4 text-muted-foreground shrink-0" />
+                    <p className="text-sm font-mono text-foreground flex-1">{smsNumber}</p>
+                  </div>
+
+                  {/* Code 1win */}
+                  {smsCode && (
+                    <div className="rounded-xl bg-primary/10 border-2 border-primary p-5 text-center">
+                      <div className="flex items-center justify-center gap-2 mb-2">
+                        <Key className="h-5 w-5 text-primary" />
+                        <p className="text-sm font-semibold text-muted-foreground">Code de validation 1win</p>
+                      </div>
+                      <p className="text-4xl font-black text-primary tracking-[0.3em] font-mono">{smsCode}</p>
+                      <button
+                        onClick={() => { navigator.clipboard.writeText(smsCode); toast.success("Code copié !"); }}
+                        className="mt-3 inline-flex items-center gap-2 text-xs text-primary hover:underline"
+                      >
+                        <Copy className="h-3.5 w-3.5" /> Copier le code
+                      </button>
+                    </div>
+                  )}
+
+                  {/* SMS complet */}
+                  {smsText && (
+                    <div className="rounded-xl bg-muted/40 p-3">
+                      <p className="text-xs text-muted-foreground mb-1 font-semibold">Texte du SMS reçu :</p>
+                      <p className="text-sm text-foreground font-mono break-all">{smsText}</p>
+                    </div>
+                  )}
+
+                  <Button
+                    onClick={resetAutoSms}
+                    className="w-full h-11 rounded-xl gradient-primary text-primary-foreground font-bold gap-2"
+                  >
+                    <RefreshCw className="h-4 w-4" />
+                    Nouvelle session
+                  </Button>
+                </div>
+              )}
+
+              {/* État ERROR */}
+              {smsState === "error" && (
+                <div className="space-y-4">
+                  <div className="rounded-xl bg-destructive/10 border border-destructive/30 p-4">
+                    <AlertCircle className="h-8 w-8 text-destructive mx-auto mb-2" />
+                    <p className="text-sm font-semibold text-destructive text-center">Erreur</p>
+                    <p className="text-xs text-muted-foreground text-center mt-1">{smsError}</p>
+                  </div>
+                  <Button
+                    onClick={resetAutoSms}
+                    variant="outline"
+                    className="w-full h-11 rounded-xl gap-2"
+                  >
+                    <RefreshCw className="h-4 w-4" />
+                    Réessayer
+                  </Button>
+                </div>
+              )}
             </div>
 
           </motion.div>
