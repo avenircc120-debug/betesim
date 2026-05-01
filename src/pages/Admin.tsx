@@ -6,7 +6,7 @@ import {
   Shield, Save, Loader2, Search, RefreshCw, ExternalLink,
   Wallet, Send, Settings, Users, Phone, Copy, CheckCircle,
   AlertCircle, RotateCcw, ChevronDown, ChevronUp, Smartphone,
-  Zap, XCircle, MessageSquare, Key,
+  Zap, XCircle, MessageSquare, Key, Ticket, Bot, Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -42,7 +42,32 @@ const STATUS_LABEL: Record<string, { label: string; cls: string; icon: React.Ele
   delivered:          { label: "Livré",  cls: "bg-emerald-500/15 text-emerald-600 border border-emerald-400/30", icon: CheckCircle },
 };
 
-type AdminTab = "clients" | "settings" | "auto-sms";
+type AdminTab = "clients" | "settings" | "auto-sms" | "chat";
+
+interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+  booking?: BookingResult;
+  ts: number;
+}
+interface BookingSelection {
+  analysis_id: string;
+  team_home: string;
+  team_away: string;
+  league: string;
+  match_date: string;
+  prediction: string;
+  confidence: number;
+  odds: number;
+  onewin_url: string;
+}
+interface BookingResult {
+  code: string;
+  total_odds: string;
+  match_count: number;
+  selections: BookingSelection[];
+  expires_at: string;
+}
 
 const OWNER_EMAIL = "jeremyhounmetin@gmail.com";
 
@@ -63,6 +88,52 @@ const Admin = () => {
   const [creditReason, setCreditReason] = useState("");
 
   const [redeliverDialog, setRedeliverDialog] = useState<{ open: boolean; pack: PartnerPackRow | null }>({ open: false, pack: null });
+
+  // ── Chat Booking Code (réservé propriétaire) ──────────────────────────
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([{
+    role: "assistant",
+    content: "👋 Bonjour ! Dis-moi ce que tu veux générer.\nEx: *\"3 matchs forts cet après-midi\"* ou *\"un coupon 4 sélections ligue 1\"*",
+    ts: Date.now(),
+  }]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
+  const sendChatMessage = async () => {
+    const msg = chatInput.trim();
+    if (!msg || chatLoading) return;
+    setChatInput("");
+    const userMsg: ChatMessage = { role: "user", content: msg, ts: Date.now() };
+    setChatMessages(prev => [...prev, userMsg]);
+    setChatLoading(true);
+    try {
+      // Extraire le nombre de matchs demandé (ex: "3 matchs" → 3)
+      const countMatch = msg.match(/(\d+)\s*(?:match|sélection|coupon)/i);
+      const count = countMatch ? parseInt(countMatch[1]) : 3;
+
+      const { data, error } = await supabase.functions.invoke("generate-booking-code", {
+        body: { action: "generate", request: msg, count: Math.min(Math.max(count, 2), 8) },
+      });
+      if (error || !data?.success) throw new Error(data?.error ?? error?.message ?? "Erreur inconnue");
+
+      const assistantMsg: ChatMessage = {
+        role: "assistant",
+        content: `✅ Code **${data.code}** généré — ${data.match_count} matchs, cote totale ×${data.total_odds}`,
+        booking: data,
+        ts: Date.now(),
+      };
+      setChatMessages(prev => [...prev, assistantMsg]);
+    } catch (e: any) {
+      setChatMessages(prev => [...prev, {
+        role: "assistant",
+        content: `❌ ${e.message}`,
+        ts: Date.now(),
+      }]);
+    } finally {
+      setChatLoading(false);
+      setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
+    }
+  };
 
   // ── Auto-SMS 1win (réservé propriétaire) ──────────────────────────────
   const [smsState, setSmsState] = useState<SmsState>("idle");
@@ -316,7 +387,10 @@ const Admin = () => {
           {([
             { id: "clients", label: "Clients", icon: Users },
             { id: "settings", label: "Paramètres", icon: Settings },
-            ...(isOwner ? [{ id: "auto-sms", label: "Auto-SMS", icon: Zap }] : []),
+            ...(isOwner ? [
+              { id: "auto-sms", label: "Auto-SMS", icon: Zap },
+              { id: "chat",     label: "Coupons IA", icon: Sparkles },
+            ] : []),
           ] as { id: AdminTab; label: string; icon: React.ElementType }[]).map(tab => (
             <button
               key={tab.id}
@@ -819,6 +893,153 @@ const Admin = () => {
                   </Button>
                 </div>
               )}
+            </div>
+
+          </motion.div>
+        )}
+
+        {/* ── ONGLET CHAT COUPONS IA (réservé propriétaire) ── */}
+        {activeTab === "chat" && isOwner && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4 flex flex-col">
+
+            {/* Header */}
+            <div className="rounded-2xl bg-card p-5 shadow-card">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10">
+                  <Sparkles className="h-5 w-5 text-primary" />
+                </div>
+                <div>
+                  <h2 className="font-bold text-foreground">Coupons IA 1win</h2>
+                  <p className="text-xs text-muted-foreground">Génère des codes de sélection via intelligence artificielle</p>
+                </div>
+              </div>
+              <div className="rounded-xl bg-primary/8 border border-primary/20 p-3 text-xs text-primary/80 leading-relaxed">
+                <strong>Comment ça marche :</strong> L'IA choisit les meilleures analyses → tu reçois le code + les liens 1win de chaque match → tu crées le booking 1win en 30 sec et tu distribues les deux codes.
+              </div>
+            </div>
+
+            {/* Fenêtre de chat */}
+            <div className="rounded-2xl bg-card shadow-card overflow-hidden flex flex-col" style={{ minHeight: "400px" }}>
+              <div className="flex-1 overflow-y-auto p-4 space-y-4" style={{ maxHeight: "420px" }}>
+                {chatMessages.map((msg, i) => (
+                  <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+                    <div className={`max-w-[85%] space-y-2 ${msg.role === "user" ? "" : ""}`}>
+                      {/* Bulle texte */}
+                      <div className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+                        msg.role === "user"
+                          ? "bg-primary text-primary-foreground rounded-br-md"
+                          : "bg-muted text-foreground rounded-bl-md"
+                      }`}>
+                        {msg.role === "assistant" && (
+                          <Bot className="h-3.5 w-3.5 inline mr-1.5 text-primary opacity-70" />
+                        )}
+                        {msg.content.split("**").map((part, j) =>
+                          j % 2 === 1 ? <strong key={j}>{part}</strong> : <span key={j}>{part}</span>
+                        )}
+                      </div>
+
+                      {/* Carte booking code */}
+                      {msg.booking && (
+                        <div className="rounded-2xl border border-primary/30 bg-primary/5 p-4 space-y-3">
+                          {/* Code à copier */}
+                          <div className="flex items-center justify-between gap-2">
+                            <div>
+                              <p className="text-xs text-muted-foreground">Code betesim</p>
+                              <p className="text-2xl font-black tracking-widest text-primary font-mono">{msg.booking.code}</p>
+                            </div>
+                            <button
+                              onClick={() => { navigator.clipboard.writeText(msg.booking!.code); toast.success("Code copié !"); }}
+                              className="flex items-center gap-1.5 rounded-xl bg-primary/10 hover:bg-primary/20 px-3 py-2 text-xs font-semibold text-primary transition-colors"
+                            >
+                              <Copy className="h-3.5 w-3.5" /> Copier
+                            </button>
+                          </div>
+
+                          {/* Stats */}
+                          <div className="flex gap-3 text-center">
+                            <div className="flex-1 rounded-xl bg-background/60 p-2">
+                              <p className="text-xs text-muted-foreground">Matchs</p>
+                              <p className="font-bold text-foreground">{msg.booking.match_count}</p>
+                            </div>
+                            <div className="flex-1 rounded-xl bg-background/60 p-2">
+                              <p className="text-xs text-muted-foreground">Cote totale</p>
+                              <p className="font-bold text-emerald-600">×{msg.booking.total_odds}</p>
+                            </div>
+                          </div>
+
+                          {/* Liste des sélections */}
+                          <div className="space-y-2">
+                            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Sélections</p>
+                            {msg.booking.selections.map((sel, si) => (
+                              <div key={si} className="rounded-xl bg-background/70 p-3 space-y-1.5">
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-sm font-bold text-foreground truncate">{sel.team_home} vs {sel.team_away}</p>
+                                    <p className="text-xs text-muted-foreground">{sel.league} · Conf. {sel.confidence}%</p>
+                                  </div>
+                                  <span className="shrink-0 rounded-lg bg-emerald-500/15 px-2 py-0.5 text-xs font-bold text-emerald-700">×{sel.odds}</span>
+                                </div>
+                                <div className="flex items-center justify-between">
+                                  <span className="inline-block rounded-md bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">{sel.prediction}</span>
+                                  <a
+                                    href={sel.onewin_url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="flex items-center gap-1 text-xs text-primary underline underline-offset-2"
+                                  >
+                                    <ExternalLink className="h-3 w-3" /> Voir sur 1win
+                                  </a>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+
+                          {/* Instruction pour booking 1win */}
+                          <div className="rounded-xl bg-amber-500/10 border border-amber-400/30 p-3">
+                            <p className="text-xs text-amber-700 font-semibold mb-1">📋 Créer le code 1win manuellement :</p>
+                            <ol className="text-xs text-amber-700 space-y-0.5 list-decimal list-inside">
+                              <li>Clique "Voir sur 1win" pour chaque match</li>
+                              <li>Ajoute chaque sélection au coupon</li>
+                              <li>Clique "Partager le coupon" sur 1win</li>
+                              <li>Copie le code 1win et partage avec les clients</li>
+                            </ol>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+
+                {/* Loading indicator */}
+                {chatLoading && (
+                  <div className="flex justify-start">
+                    <div className="rounded-2xl rounded-bl-md bg-muted px-4 py-3 flex items-center gap-2">
+                      <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                      <span className="text-sm text-muted-foreground">L'IA sélectionne les meilleurs matchs…</span>
+                    </div>
+                  </div>
+                )}
+                <div ref={chatEndRef} />
+              </div>
+
+              {/* Input */}
+              <div className="border-t border-border p-3 flex gap-2">
+                <Input
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChatMessage(); }}}
+                  placeholder="Ex: 3 matchs forts ce soir…"
+                  className="flex-1 h-11 rounded-xl"
+                  disabled={chatLoading}
+                />
+                <Button
+                  onClick={sendChatMessage}
+                  disabled={chatLoading || !chatInput.trim()}
+                  className="h-11 w-11 rounded-xl gradient-primary text-primary-foreground p-0 shrink-0"
+                >
+                  {chatLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                </Button>
+              </div>
             </div>
 
           </motion.div>
