@@ -363,7 +363,7 @@ const Pronostics = () => {
                 tab === t.id ? "bg-card shadow text-foreground" : "text-muted-foreground"
               }`}>{t.label}</button>
           ))}
-        </div>
+        </div>}
 
         {tab === "analyses" && analyses.length > 0 && selectedIds.size === 0 && (
           <motion.div initial={{ opacity:0, y:8 }} animate={{ opacity:1, y:0 }}
