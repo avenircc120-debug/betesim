@@ -77,11 +77,13 @@ const VendeurPage = () => {
     return data.session?.access_token ?? "";
   };
 
-  const invoke = (action: string, extra?: Record<string, unknown>) =>
-    supabase.functions.invoke("pronostics", {
+  const invoke = async (action: string, extra?: Record<string, unknown>) => {
+    const t = await getToken();
+    return supabase.functions.invoke("pronostics", {
       body: { action, ...extra },
-      headers: { Authorization: `Bearer ${getToken()}` },
+      headers: { Authorization: `Bearer ${t}` },
     });
+  };
 
   // Balance : sum des net_amount de commission_records
   const { data: balanceData, isLoading: loadingBalance } = useQuery({
@@ -204,7 +206,7 @@ const VendeurPage = () => {
         <p className="text-sm text-muted-foreground mb-4">
           Cet espace est réservé aux partenaires Pack Officiel.
         </p>
-        <Button onClick={() => requireAuth()}>Se connecter</Button>
+        <Button onClick={() => requireAuth(() => {})}>Se connecter</Button>
         <BottomNav />
       </div>
     );
