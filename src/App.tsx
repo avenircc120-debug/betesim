@@ -68,6 +68,7 @@ const AppContent = () => {
             <Route path="/admin" element={<Admin />} />
             <Route path="/onboarding" element={<Onboarding />} />
             <Route path="/pronostics" element={<Pronostics />} />
+            <Route path="/vendeur" element={<VendeurPage />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </ProfileGate>
