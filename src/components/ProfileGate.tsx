@@ -1,20 +1,26 @@
-import { ReactNode, useEffect } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
-import { useAuth } from "@/hooks/useAuth";
-import { useProfile } from "@/hooks/useProfile";
+import { ReactNode, useEffect } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { useAuth } from '@/hooks/useAuth';
+import { useProfile } from '@/hooks/useProfile';
 
 // Routes accessibles SANS profil complet
 const PUBLIC_PATHS = [
-  "/login",
-  "/auth",
-  "/auth/callback",
-  "/reset-password",
-  "/onboarding",
-  "/install",
+  '/login',
+  '/auth',
+  '/auth/callback',
+  '/reset-password',
+  '/onboarding',
+  '/install',
+  '/pronostics',
+  '/vendeur',
 ];
 
 const isPublic = (pathname: string) =>
-  PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(p + "/"));
+  PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(p + '/'));
+
+const isTelegramMode = () =>
+  new URLSearchParams(window.location.search).get('tg') === '1' ||
+  !!(window as any).Telegram?.WebApp?.initData;
 
 interface Props { children: ReactNode }
 
@@ -25,8 +31,10 @@ const ProfileGate = ({ children }: Props) => {
   const navigate = useNavigate();
 
   useEffect(() => {
+    // Ne jamais rediriger en mode Telegram WebApp
+    if (isTelegramMode()) return;
     if (authLoading) return;
-    if (!user) return; // utilisateur invité : la page gérera elle-même la redirection
+    if (!user) return;
     if (profileLoading) return;
     if (!profile) return;
 
