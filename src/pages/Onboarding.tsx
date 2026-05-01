@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Loader2, ShieldCheck, User, ArrowDownToLine, ArrowUpFromLine } from "lucide-react";
+import { Loader2, ShieldCheck, User } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,55 +17,38 @@ const Onboarding = () => {
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const queryClient = useQueryClient();
-
-  const [fullName, setFullName] = useState("");
-  const [deposit, setDeposit] = useState("");
-  const [withdrawal, setWithdrawal] = useState("");
+  const [username, setUsername] = useState("");
   const [submitting, setSubmitting] = useState(false);
-
   const redirectTo = params.get("redirect") || "/";
 
-  // Pas connecté → login
   useEffect(() => {
     if (!authLoading && !user) {
       navigate(`/login?redirect=${encodeURIComponent(`/onboarding?redirect=${encodeURIComponent(redirectTo)}`)}`);
     }
   }, [authLoading, user, navigate, redirectTo]);
 
-  // Profil déjà complet → on dégage
   useEffect(() => {
     if (!profileLoading && profile) {
       const p: any = profile;
-      if (p.full_name && p.deposit_number && p.withdrawal_number) {
+      // Si l'utilisateur a déjà un username, on le redirige
+      if (p.username) {
         navigate(redirectTo, { replace: true });
-      } else {
-        // Pré-remplit ce qui existe
-        if (p.full_name && !fullName) setFullName(p.full_name);
-        if (p.deposit_number && !deposit) setDeposit(p.deposit_number);
-        if (p.withdrawal_number && !withdrawal) setWithdrawal(p.withdrawal_number);
-        if (!fullName && p.display_name) setFullName(p.display_name);
+      } else if (p.display_name && !username) {
+        setUsername(p.display_name);
       }
     }
-  }, [profile, profileLoading]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [profile, profileLoading]); // eslint-disable-line
 
   const submit = async () => {
     if (!user) return;
-    if (fullName.trim().length < 2) return toast.error("Indiquez votre Nom & Prénom");
-    if (deposit.replace(/\D/g, "").length < 6) return toast.error("Numéro de dépôt invalide");
-    if (withdrawal.replace(/\D/g, "").length < 6) return toast.error("Numéro de retrait invalide");
-
+    if (username.trim().length < 2) return toast.error("Choisissez un nom d'utilisateur (min. 2 caractères)");
     setSubmitting(true);
     try {
-      const { data, error } = await supabase.functions.invoke("profile-update", {
-        body: {
-          user_id: user.id,
-          full_name: fullName.trim(),
-          deposit_number: deposit.trim(),
-          withdrawal_number: withdrawal.trim(),
-        },
-      });
+      const { error } = await supabase
+        .from("profiles")
+        .update({ username: username.trim() })
+        .eq("id", user.id);
       if (error) throw error;
-      if (!data?.success) throw new Error(data?.error || "Erreur");
       toast.success("Profil enregistré ✅");
       await queryClient.invalidateQueries({ queryKey: ["profile"] });
       navigate(redirectTo, { replace: true });
@@ -92,76 +75,43 @@ const Onboarding = () => {
         className="w-full max-w-md space-y-6"
       >
         <div className="text-center space-y-2">
-          <div className="mx-auto h-14 w-14 rounded-2xl gradient-primary shadow-glow flex items-center justify-center">
+          <div className="mx-auto h-14 w-14 rounded-2xl bg-primary flex items-center justify-center">
             <ShieldCheck className="h-7 w-7 text-primary-foreground" />
           </div>
-          <h1 className="text-2xl font-bold text-foreground">Complétez votre profil</h1>
+          <h1 className="text-2xl font-bold text-foreground">Bienvenue sur Betesim</h1>
           <p className="text-sm text-muted-foreground px-4">
-            Une seule fois — ces informations nous permettent de vous payer rapidement vos retraits.
+            Choisissez un nom d'utilisateur pour continuer.
           </p>
         </div>
 
-        <div className="rounded-2xl bg-card p-5 shadow-card space-y-4">
+        <div className="rounded-2xl bg-card border border-border p-5 space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="full_name" className="flex items-center gap-2 text-sm font-semibold">
-              <User className="h-4 w-4 text-primary" /> Nom & Prénom
+            <Label htmlFor="username" className="flex items-center gap-2 text-sm font-semibold">
+              <User className="h-4 w-4 text-primary" /> Nom d'utilisateur
             </Label>
             <Input
-              id="full_name"
-              value={fullName}
-              onChange={(e) => setFullName(e.target.value)}
-              placeholder="Ex : Koffi Jean"
+              id="username"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder="Ex : Koffi123"
               className="h-12 rounded-xl text-base"
-              autoComplete="name"
+              autoComplete="username"
+              onKeyDown={(e) => e.key === "Enter" && submit()}
             />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="deposit" className="flex items-center gap-2 text-sm font-semibold">
-              <ArrowDownToLine className="h-4 w-4 text-accent" /> Numéro de Dépôt
-            </Label>
-            <Input
-              id="deposit"
-              type="tel"
-              value={deposit}
-              onChange={(e) => setDeposit(e.target.value)}
-              placeholder="Ex : 90 00 00 00"
-              className="h-12 rounded-xl text-base"
-              autoComplete="tel"
-              inputMode="tel"
-            />
-            <p className="text-xs text-muted-foreground">Le numéro Mobile Money depuis lequel vous payez.</p>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="withdrawal" className="flex items-center gap-2 text-sm font-semibold">
-              <ArrowUpFromLine className="h-4 w-4 text-gold" /> Numéro de Retrait
-            </Label>
-            <Input
-              id="withdrawal"
-              type="tel"
-              value={withdrawal}
-              onChange={(e) => setWithdrawal(e.target.value)}
-              placeholder="Ex : 90 00 00 00"
-              className="h-12 rounded-xl text-base"
-              autoComplete="tel"
-              inputMode="tel"
-            />
-            <p className="text-xs text-muted-foreground">Le numéro où vous recevrez vos commissions.</p>
           </div>
 
           <Button
             onClick={submit}
-            disabled={submitting}
-            className="h-12 w-full rounded-xl gradient-primary text-primary-foreground font-bold shadow-glow"
+            disabled={submitting || username.trim().length < 2}
+            className="h-12 w-full rounded-xl font-bold"
           >
             {submitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-            {submitting ? "Enregistrement…" : "Continuer"}
+            {submitting ? "Enregistrement…" : "Continuer →"}
           </Button>
         </div>
 
         <p className="text-center text-xs text-muted-foreground px-6">
-          🔒 Vos informations restent privées et ne servent qu'au paiement de vos commissions.
+          🔒 Vos données restent privées et sécurisées.
         </p>
       </motion.div>
     </div>
