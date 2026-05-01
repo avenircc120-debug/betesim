@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, Component, ReactNode } from 'react';
 import { Toaster } from '@/components/ui/toaster';
 import { Toaster as Sonner } from '@/components/ui/sonner';
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -28,25 +28,59 @@ import Onboarding from './pages/Onboarding';
 import Pronostics from './pages/Pronostics';
 import VendeurPage from './pages/VendeurPage';
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: { retry: 1, staleTime: 30_000 },
+  },
+});
 
-// Détecte si l'app est ouverte dans Telegram WebApp (?tg=1)
-const isTelegramWebApp = () =>
-  new URLSearchParams(window.location.search).get('tg') === '1' ||
-  !!(window as any).Telegram?.WebApp?.initData;
+// Détecte si l'app est ouverte dans Telegram WebApp (?tg=1 ou initData présent)
+const isTelegramWebApp = () => {
+  try {
+    if (new URLSearchParams(window.location.search).get('tg') === '1') return true;
+    const tg = (window as any).Telegram?.WebApp;
+    return !!(tg && tg.initData && tg.initData.length > 0);
+  } catch {
+    return false;
+  }
+};
+
+// ── Error Boundary ── affiche l'erreur au lieu d'une page blanche
+interface EBState { error: Error | null }
+class ErrorBoundary extends Component<{ children: ReactNode }, EBState> {
+  state: EBState = { error: null };
+  static getDerivedStateFromError(error: Error): EBState { return { error }; }
+  render() {
+    if (this.state.error) {
+      return (
+        <div style={{ padding: 24, fontFamily: 'monospace', background: '#111', color: '#f87171', minHeight: '100vh' }}>
+          <h2 style={{ color: '#fbbf24', marginBottom: 12 }}>⚠️ Erreur Betesim</h2>
+          <p style={{ marginBottom: 8, color: '#fff' }}>{this.state.error.message}</p>
+          <pre style={{ fontSize: 11, color: '#9ca3af', whiteSpace: 'pre-wrap' }}>{this.state.error.stack}</pre>
+          <button onClick={() => window.location.reload()}
+            style={{ marginTop: 16, padding: '8px 16px', background: '#6366f1', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer' }}>
+            Recharger
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 const AppContent = () => {
   const isTG = isTelegramWebApp();
 
   const [showSplash, setShowSplash] = useState(() => {
-    // Jamais de SplashScreen en mode Telegram — interfère avec le WebApp
     if (isTelegramWebApp()) return false;
-    const seen = sessionStorage.getItem('betesim-splash-seen');
-    return !seen;
+    try {
+      const seen = sessionStorage.getItem('betesim-splash-seen');
+      return !seen;
+    } catch { return false; }
   });
 
   const handleSplashComplete = () => {
-    sessionStorage.setItem('betesim-splash-seen', '1');
+    try { sessionStorage.setItem('betesim-splash-seen', '1'); } catch {}
     setShowSplash(false);
   };
 
@@ -55,7 +89,6 @@ const AppContent = () => {
       <AuthProvider>
         <ProfileGate>
           {showSplash && <SplashScreen onComplete={handleSplashComplete} />}
-          {/* Banners cachés en mode Telegram pour éviter l'effet page-dans-la-page */}
           <InAppNotificationBanner />
           {!isTG && <NotificationPermissionBanner />}
           {!isTG && <InstallBanner />}
@@ -63,24 +96,24 @@ const AppContent = () => {
           <Sonner />
 
           <Routes>
-            <Route path=/ element={<Index />} />
-            <Route path=/boutique element={<Boutique />} />
-            <Route path=/wallet element={<WalletPage />} />
-            <Route path=/historique element={<Historique />} />
-            <Route path=/compte element={<Compte />} />
-            <Route path=/leaderboard element={<Leaderboard />} />
-            <Route path=/faq element={<FAQ />} />
-            <Route path=/install element={<Install />} />
-            <Route path=/auth/callback element={<AuthCallback />} />
-            <Route path=/login element={<LoginPage />} />
-            <Route path=/auth element={<LoginPage />} />
-            <Route path=/reset-password element={<ResetPassword />} />
-            <Route path=/pack-partenaire element={<PackPartenaire />} />
-            <Route path=/admin element={<Admin />} />
-            <Route path=/onboarding element={<Onboarding />} />
-            <Route path=/pronostics element={<Pronostics />} />
-            <Route path=/vendeur element={<VendeurPage />} />
-            <Route path=* element={<NotFound />} />
+            <Route path="/" element={<Index />} />
+            <Route path="/boutique" element={<Boutique />} />
+            <Route path="/wallet" element={<WalletPage />} />
+            <Route path="/historique" element={<Historique />} />
+            <Route path="/compte" element={<Compte />} />
+            <Route path="/leaderboard" element={<Leaderboard />} />
+            <Route path="/faq" element={<FAQ />} />
+            <Route path="/install" element={<Install />} />
+            <Route path="/auth/callback" element={<AuthCallback />} />
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/auth" element={<LoginPage />} />
+            <Route path="/reset-password" element={<ResetPassword />} />
+            <Route path="/pack-partenaire" element={<PackPartenaire />} />
+            <Route path="/admin" element={<Admin />} />
+            <Route path="/onboarding" element={<Onboarding />} />
+            <Route path="/pronostics" element={<Pronostics />} />
+            <Route path="/vendeur" element={<VendeurPage />} />
+            <Route path="*" element={<NotFound />} />
           </Routes>
         </ProfileGate>
       </AuthProvider>
@@ -89,11 +122,15 @@ const AppContent = () => {
 };
 
 const App = () => (
-  <QueryClientProvider client={queryClient}>
-    <TooltipProvider>
-      <AppContent />
-    </TooltipProvider>
-  </QueryClientProvider>
+  <ErrorBoundary>
+    <QueryClientProvider client={queryClient}>
+      <TooltipProvider>
+        <ErrorBoundary>
+          <AppContent />
+        </ErrorBoundary>
+      </TooltipProvider>
+    </QueryClientProvider>
+  </ErrorBoundary>
 );
 
 export default App;
