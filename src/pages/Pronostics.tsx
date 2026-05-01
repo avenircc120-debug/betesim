@@ -324,8 +324,8 @@ const Pronostics = () => {
   ] as { id: string; label: string }[];
 
   return (
-    <div className={`min-h-screen bg-background ${isTelegramMode ? "pb-24" : "pb-24"}`}>
-      <div className="mx-auto max-w-lg space-y-4 px-4 pt-6">
+    <div className={`min-h-screen bg-background ${isTelegramMode ? "pb-20" : "pb-24"}`}>
+      <div className={`space-y-4 px-4 ${isTelegramMode ? "pt-4" : "pt-6 mx-auto max-w-lg"}`}>
 
         <motion.div initial={{ opacity:0, y:10 }} animate={{ opacity:1, y:0 }}>
           <div className="flex items-center justify-between">
@@ -598,7 +598,7 @@ const Pronostics = () => {
           <motion.div
             initial={{ y: 100, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 100, opacity: 0 }}
             transition={{ type: "spring", stiffness: 400, damping: 30 }}
-            className={`fixed left-0 right-0 z-50 px-4 ${isTelegramMode ? "bottom-4" : "bottom-20"}`}>
+            className={`fixed left-0 right-0 z-50 px-4 ${isTelegramMode ? "bottom-6" : "bottom-20"}`}>
             <div className="mx-auto max-w-lg rounded-2xl bg-foreground shadow-2xl p-4">
               <div className="flex items-center gap-3">
                 <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary shrink-0">
