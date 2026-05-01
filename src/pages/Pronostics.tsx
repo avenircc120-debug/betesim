@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -101,6 +101,18 @@ const Pronostics = () => {
   const isAdmin   = !!(profile as any)?.is_admin;
   const isPartner = !!(profile as any)?.is_partner;
   const isTelegramMode = new URLSearchParams(window.location.search).get("tg") === "1";
+
+  // Initialise Telegram WebApp en mode plein écran
+  useEffect(() => {
+    if (isTelegramMode) {
+      const tg = (window as any).Telegram?.WebApp;
+      if (tg) {
+        tg.expand();
+        tg.ready();
+        tg.setHeaderColor('#0d0d0d');
+      }
+    }
+  }, [isTelegramMode]);
 
   const [tab, setTab] = useState<"analyses" | "publier" | "coupons">("analyses");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -312,14 +324,14 @@ const Pronostics = () => {
   ] as { id: string; label: string }[];
 
   return (
-    <div className={`min-h-screen bg-background ${isTelegramMode ? "pb-6" : "pb-24"}`}>
+    <div className={`min-h-screen bg-background ${isTelegramMode ? "pb-24" : "pb-24"}`}>
       <div className="mx-auto max-w-lg space-y-4 px-4 pt-6">
 
         <motion.div initial={{ opacity:0, y:10 }} animate={{ opacity:1, y:0 }}>
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-2xl font-bold text-foreground">Pronostics</h1>
-              <p className="text-sm text-muted-foreground">Sélectionnez vos matchs · Vendez sur 1win</p>
+              {!isTelegramMode && <p className="text-sm text-muted-foreground">Sélectionnez vos matchs · Vendez sur 1win</p>}
             </div>
             {isPartner && (
               <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-amber-500/15">
@@ -344,7 +356,7 @@ const Pronostics = () => {
           ))}
         </motion.div>
 
-        <div className="flex gap-1 rounded-2xl bg-muted p-1">
+        {!isTelegramMode && <div className="flex gap-1 rounded-2xl bg-muted p-1">
           {navTabs.map(t => (
             <button key={t.id} onClick={() => setTab(t.id as any)}
               className={`flex-1 rounded-xl py-2 text-xs font-semibold transition-all ${
