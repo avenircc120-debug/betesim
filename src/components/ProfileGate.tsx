@@ -16,7 +16,7 @@ const PUBLIC_PATHS = [
 ];
 
 const isPublic = (pathname: string) =>
-  PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(p + '/'));
+  PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(p + '/')); 
 
 const isTelegramMode = () =>
   new URLSearchParams(window.location.search).get('tg') === '1' ||
@@ -38,8 +38,9 @@ const ProfileGate = ({ children }: Props) => {
     if (profileLoading) return;
     if (!profile) return;
 
+    // Seul "username" existe vraiment dans la table profiles
     const p: any = profile;
-    const incomplete = !p.full_name || !p.deposit_number || !p.withdrawal_number;
+    const incomplete = !p.username;
 
     if (incomplete && !isPublic(location.pathname)) {
       const redirect = location.pathname + location.search;
@@ -51,3 +52,4 @@ const ProfileGate = ({ children }: Props) => {
 };
 
 export default ProfileGate;
+
