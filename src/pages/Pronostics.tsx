@@ -6,6 +6,7 @@ import {
   ChevronDown, Calendar, Target, TrendingUp, Tag, Coins,
   AlertTriangle, CheckSquare, Square, ExternalLink, ArrowRight,
   ShoppingCart, Ticket, X, Check, Star, Zap,
+  Copy, Share2, Send, Store, Link2, MessageCircle, Package,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -53,6 +54,12 @@ interface CommissionRecord {
   net_amount: number;
   description: string | null;
   created_at: string;
+}
+
+interface PoolCoupon {
+  id: string; code: string; label: string | null; price_fcfa: number;
+  status: string; creator_id: string | null; platform?: string;
+  analyses?: { team_home: string; team_away: string; league: string | null; confidence: string; result: string } | null;
 }
 
 const COMMISSION_RATE = 0.30;
@@ -132,7 +139,7 @@ const Pronostics = () => {
     }
   }, [isTelegramMode]);
 
-  const [tab, setTab] = useState<"analyses" | "publier" | "coupons">("analyses");
+  const [tab, setTab] = useState<"analyses" | "publier" | "coupons" | "pool">("analyses");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showBetSlip, setShowBetSlip] = useState(false);
   const [betBookmaker, setBetBookmaker] = useState<"1win" | "1xbet">("1win");
@@ -146,6 +153,8 @@ const Pronostics = () => {
   const [resultTarget, setResultTarget] = useState<Analysis | null>(null);
   const [selectedResult, setSelectedResult] = useState<Result>("en_attente");
   const [showCouponForm, setShowCouponForm] = useState(false);
+  const [showInjectForm, setShowInjectForm] = useState(false);
+  const [injectForm, setInjectForm] = useState({ coupon_code: "", price_fcfa: "1000", label: "", analysis_id: "", platform: "1xbet" as "1xbet" | "1win" });
   const [form, setForm] = useState({
     title: "", team_home: "", team_away: "", league: "", country: "",
     match_date: "", prediction: "", confidence: "moyen" as Confidence, odds: "", notes: "",
@@ -190,6 +199,21 @@ const Pronostics = () => {
     },
     enabled: isPartner && tab === "coupons",
     staleTime: 30_000,
+  });
+
+  const { data: poolCoupons = [], isLoading: loadingPool, refetch: refetchPool } = useQuery<PoolCoupon[]>({
+    queryKey: ["pool-coupons"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("coupons")
+        .select("id, code, label, price_fcfa, status, creator_id, platform, analyses:analysis_id(team_home, team_away, league, confidence, result)")
+        .eq("status", "active")
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      return (data ?? []) as PoolCoupon[];
+    },
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
   });
 
   const { data: footballMatches = [], refetch: refetchMatches } = useQuery({
@@ -312,6 +336,29 @@ const Pronostics = () => {
     onError: (e: any) => toast.error(e.message),
   });
 
+  const injectToPoolMutation = useMutation({
+    mutationFn: async () => {
+      if (!injectForm.coupon_code.trim()) throw new Error("Code coupon requis");
+      const price = Number(injectForm.price_fcfa);
+      if (isNaN(price) || price < 100) throw new Error("Prix minimum 100 FCFA");
+      const token = await getToken();
+      const { data, error } = await supabase.functions.invoke("inject-to-pool", {
+        body: { coupon_code: injectForm.coupon_code.trim().toUpperCase(), price_fcfa: price, label: injectForm.label || undefined, analysis_id: injectForm.analysis_id || null, platform: injectForm.platform },
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (error) throw new Error(error.message);
+      if (!data?.success) throw new Error(data?.error || "Erreur injection");
+    },
+    onSuccess: () => {
+      toast.success("✅ Coupon publié dans le Pool Commun !");
+      setShowInjectForm(false);
+      setInjectForm({ coupon_code:"", price_fcfa:"1000", label:"", analysis_id:"", platform:"1xbet" });
+      queryClient.invalidateQueries({ queryKey: ["pool-coupons"] });
+      queryClient.invalidateQueries({ queryKey: ["coupons"] });
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+
   const registerCouponMutation = useMutation({
     mutationFn: async () => {
       if (!couponCode.trim()) throw new Error("Code coupon requis");
@@ -395,7 +442,8 @@ const Pronostics = () => {
 
   const navTabs = [
     { id: "analyses", label: "Pronostics" },
-    ...(isPartner ? [{ id: "coupons", label: "Mes Coupons" }] : []),
+    { id: "pool", label: "🛒 Pool" },
+    ...(isPartner ? [{ id: "coupons", label: "Revendeur" }] : []),
     ...(isAdmin   ? [{ id: "publier", label: "Publier" }] : []),
   ] as { id: string; label: string }[];
 
@@ -623,6 +671,35 @@ const Pronostics = () => {
                 <Tag className="h-4 w-4 mr-2" /> Créer un coupon manuellement
               </Button>
 
+              {/* Outils de partage */}
+              <div className="rounded-2xl bg-gradient-to-r from-sky-500/10 to-indigo-500/10 border border-sky-400/30 p-4 space-y-2">
+                <div className="flex items-center gap-2 mb-1">
+                  <Share2 className="h-4 w-4 text-sky-600" />
+                  <p className="font-bold text-foreground text-sm">Outils de partage</p>
+                </div>
+                {[
+                  { icon: Send, color:"text-sky-500", label:"Lien Bot clients", sub:"t.me/pack_officiel_expert_bot", value:"https://t.me/pack_officiel_expert_bot", toast:"Lien Bot copié !" },
+                  { icon: Link2, color:"text-emerald-500", label:"Lien affiliation 1win", sub:"1w.run/?p=YvTH", value:"https://1w.run/?p=YvTH", toast:"Lien affiliation copié !" },
+                  { icon: MessageCircle, color:"text-amber-500", label:"Message prêt (WhatsApp/Status)", sub:"Promo bot + lien", value:"🏆 Pronostics du jour dispo !\nAchète ton coupon 1xBet/1Win 👇\n🤖 https://t.me/pack_officiel_expert_bot", toast:"Message copié !" },
+                ].map(item => (
+                  <button key={item.label} onClick={() => { navigator.clipboard?.writeText(item.value); toast.success(item.toast); }}
+                    className="w-full flex items-center gap-3 rounded-xl bg-background border border-border p-3 hover:bg-muted/50 transition-colors">
+                    <item.icon className={`h-4 w-4 ${item.color} shrink-0`} />
+                    <div className="text-left flex-1 min-w-0">
+                      <p className="text-xs font-semibold text-foreground">{item.label}</p>
+                      <p className="text-[10px] text-muted-foreground truncate">{item.sub}</p>
+                    </div>
+                    <Copy className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                  </button>
+                ))}
+              </div>
+              {/* Publier dans le Pool */}
+              <Button onClick={() => setShowInjectForm(true)}
+                className="h-12 w-full rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold">
+                <Store className="h-4 w-4 mr-2" /> Publier dans le Pool Commun
+              </Button>
+
+
               {coupons.length === 0 ? (
                 <div className="rounded-2xl bg-card p-6 text-center shadow-card">
                   <Tag className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
@@ -672,6 +749,79 @@ const Pronostics = () => {
               )}
             </motion.div>
           )}
+
+          {tab === "pool" && (
+            <motion.div key="pool" initial={{ opacity:0 }} animate={{ opacity:1 }} exit={{ opacity:0 }} className="space-y-4">
+              <div className="rounded-2xl bg-gradient-to-r from-emerald-500/10 to-teal-500/10 border border-emerald-400/30 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-start gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-600 shrink-0">
+                      <Store className="h-5 w-5 text-white" />
+                    </div>
+                    <div>
+                      <p className="font-bold text-foreground text-sm">Pool Commun</p>
+                      <p className="text-xs text-muted-foreground">{poolCoupons.length} coupon{poolCoupons.length!==1?"s":""} disponible{poolCoupons.length!==1?"s":""}</p>
+                    </div>
+                  </div>
+                  <button onClick={() => refetchPool()} className="flex h-8 w-8 items-center justify-center rounded-xl bg-muted hover:bg-muted/70">
+                    <RefreshCw className={`h-4 w-4 text-muted-foreground ${loadingPool?"animate-spin":""}`} />
+                  </button>
+                </div>
+              </div>
+              <button onClick={() => openLink("https://t.me/pack_officiel_expert_bot")}
+                className="w-full flex items-center gap-3 rounded-2xl bg-sky-500/10 border border-sky-400/30 p-4 hover:bg-sky-500/20 transition-colors">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-sky-500 shrink-0">
+                  <Send className="h-5 w-5 text-white" />
+                </div>
+                <div className="text-left flex-1 min-w-0">
+                  <p className="font-bold text-foreground text-sm">Bot Telegram Client</p>
+                  <p className="text-xs text-muted-foreground">@pack_officiel_expert_bot · Achat automatique</p>
+                </div>
+                <ExternalLink className="h-4 w-4 text-muted-foreground shrink-0" />
+              </button>
+              {loadingPool ? (
+                <div className="flex items-center justify-center py-10"><RefreshCw className="h-6 w-6 animate-spin text-primary" /></div>
+              ) : poolCoupons.length === 0 ? (
+                <div className="rounded-2xl bg-card p-8 text-center shadow-card">
+                  <Package className="h-10 w-10 mx-auto text-muted-foreground mb-3" />
+                  <p className="font-semibold text-foreground">Pool vide pour l'instant</p>
+                  <p className="text-xs text-muted-foreground mt-1">{isPartner ? "Publiez votre premier coupon depuis l'onglet Revendeur." : "Les revendeurs publieront bientôt des coupons ici."}</p>
+                  {isPartner && (
+                    <Button onClick={() => setTab("coupons")} className="mt-4 h-10 rounded-xl gradient-primary text-primary-foreground text-sm font-bold">
+                      <Tag className="h-4 w-4 mr-2" /> Publier un coupon
+                    </Button>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {poolCoupons.map((c, i) => (
+                    <motion.div key={c.id} initial={{ opacity:0, y:8 }} animate={{ opacity:1, y:0 }} transition={{ delay:i*0.04 }}
+                      className="rounded-2xl bg-card shadow-card p-4 space-y-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex-1 min-w-0">
+                          <p className="font-bold text-foreground text-sm">{c.label || `Coupon ${(c.platform??'').toUpperCase()}`}</p>
+                          {c.analyses && <p className="text-[11px] text-muted-foreground mt-0.5">{c.analyses.team_home} vs {c.analyses.team_away}{c.analyses.league ? ` · ${c.analyses.league}` : ""}</p>}
+                        </div>
+                        <p className="font-bold text-xl text-primary shrink-0">{c.price_fcfa.toLocaleString("fr-FR")} F</p>
+                      </div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {c.analyses && <>
+                          <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold border ${CONFIDENCE_COLORS[c.analyses.confidence as Confidence] ?? "bg-muted text-muted-foreground border-border"}`}>{CONFIDENCE_LABELS[c.analyses.confidence as Confidence] ?? c.analyses.confidence}</span>
+                          <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${RESULT_COLORS[c.analyses.result as Result] ?? "bg-muted text-muted-foreground"}`}>{RESULT_LABELS[c.analyses.result as Result] ?? c.analyses.result}</span>
+                        </>}
+                        {c.platform && <span className="rounded-full px-2 py-0.5 text-[10px] font-bold bg-blue-500/15 text-blue-600">{c.platform.toUpperCase()}</span>}
+                      </div>
+                      <Button onClick={() => openLink("https://t.me/pack_officiel_expert_bot")}
+                        className="h-10 w-full rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-sm font-bold">
+                        <Send className="h-4 w-4 mr-2" /> Acheter via le Bot Telegram
+                      </Button>
+                    </motion.div>
+                  ))}
+                </div>
+              )}
+            </motion.div>
+          )}
+
         </AnimatePresence>
       </div>
 
@@ -1073,6 +1223,64 @@ const Pronostics = () => {
             <Button onClick={() => couponMutation.mutate()} disabled={couponMutation.isPending || !couponForm.code}
               className="h-11 w-full rounded-xl gradient-primary text-primary-foreground font-bold">
               {couponMutation.isPending ? "Création..." : "Créer le coupon"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog : Publier dans le Pool Commun */}
+      <Dialog open={showInjectForm} onOpenChange={setShowInjectForm}>
+        <DialogContent className="max-w-sm rounded-2xl">
+          <DialogHeader><DialogTitle className="flex items-center gap-2"><Store className="h-5 w-5 text-emerald-600" /> Publier dans le Pool</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div className="rounded-xl bg-emerald-500/10 border border-emerald-400/30 p-3">
+              <p className="text-xs text-emerald-700">Répartition : 70% vous · 10% parrain · 20% plateforme</p>
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-muted-foreground">Plateforme</label>
+              <div className="flex gap-2">
+                {(["1xbet","1win"] as const).map(p => (
+                  <button key={p} onClick={() => setInjectForm(f=>({...f,platform:p}))}
+                    className={`flex-1 rounded-xl py-2.5 text-xs font-bold border transition-all ${injectForm.platform===p ? "bg-primary text-white border-primary" : "border-border bg-muted text-muted-foreground"}`}>
+                    {p.toUpperCase()}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {[
+              { key:"coupon_code", label:"Code booking *", placeholder:"Ex: ABC12345", mono:true },
+              { key:"label", label:"Description", placeholder:"Ex: Combo 3 matchs sûrs", mono:false },
+              { key:"price_fcfa", label:"Prix (FCFA) *", placeholder:"1000", mono:false },
+            ].map(f => (
+              <div key={f.key} className="space-y-1">
+                <label className="text-xs font-semibold text-muted-foreground">{f.label}</label>
+                <Input value={(injectForm as any)[f.key]} onChange={e=>setInjectForm(p=>({...p,[f.key]:f.key==="coupon_code"?e.target.value.toUpperCase():e.target.value}))}
+                  placeholder={f.placeholder} type={f.key==="price_fcfa"?"number":"text"}
+                  className={`rounded-xl h-10 ${f.mono?"font-mono font-bold tracking-widest text-center text-base":""}`} />
+              </div>
+            ))}
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-muted-foreground">Lier à une analyse (optionnel)</label>
+              <div className="relative">
+                <select value={injectForm.analysis_id} onChange={e=>setInjectForm(p=>({...p,analysis_id:e.target.value}))}
+                  className="w-full h-10 rounded-xl border border-border bg-background px-3 text-sm appearance-none focus:outline-none focus:ring-2 focus:ring-primary">
+                  <option value="">Aucune</option>
+                  {analyses.filter(a=>a.result==="en_attente").map(a=>(<option key={a.id} value={a.id}>{a.team_home} vs {a.team_away}</option>))}
+                </select>
+                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none"/>
+              </div>
+            </div>
+            {Number(injectForm.price_fcfa) >= 100 && (
+              <div className="rounded-xl bg-muted p-3 space-y-1 text-xs">
+                {[["Votre part (70%)", Math.round(Number(injectForm.price_fcfa)*0.70), "text-green-600"],["Parrain (10%)", Math.round(Number(injectForm.price_fcfa)*0.10), "text-amber-600"],["Plateforme (20%)", Math.round(Number(injectForm.price_fcfa)*0.20), "text-muted-foreground"]].map(([l,v,c])=>(
+                  <div key={l as string} className="flex justify-between"><span className="text-muted-foreground">{l}</span><span className={`font-bold ${c}`}>{(v as number).toLocaleString("fr-FR")} F</span></div>
+                ))}
+              </div>
+            )}
+            <Button onClick={() => injectToPoolMutation.mutate()}
+              disabled={injectToPoolMutation.isPending || !injectForm.coupon_code.trim() || Number(injectForm.price_fcfa) < 100}
+              className="h-12 w-full rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold">
+              {injectToPoolMutation.isPending ? "Publication..." : "Publier dans le Pool"}
             </Button>
           </div>
         </DialogContent>
