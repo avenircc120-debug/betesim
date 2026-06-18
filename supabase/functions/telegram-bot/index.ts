@@ -168,6 +168,22 @@ async function handleDBQuery(
   }
 
   // ── Solde / Ventes / Commissions ────────────────────────────────────────────
+  // Catalogue coupons
+  if (lower.match(/\b(coupon|coupons|catalogue|acheter|achat|prono|pronostic|disponible|pool)\b/)) {
+    const coupons = await fetchPoolCoupons(supabase);
+    const keyboard = coupons.length > 0 ? {
+      inline_keyboard: [
+        ...coupons.slice(0,5).map(c => [{
+          text: `${c.analyses ? `${c.analyses.team_home} vs ${c.analyses.team_away}` : c.label || "Coupon"} — ${c.price_fcfa.toLocaleString("fr-FR")} F`,
+          callback_data: `acheter_${c.id}`,
+        }]),
+        ...(coupons.length > 5 ? [[{ text:`+ ${coupons.length - 5} autres → /coupons`, callback_data:"voir_pool" }]] : []),
+      ],
+    } : undefined;
+    await sendHuman(chatId, formatCouponList(coupons), keyboard, DELAY_SHORT);
+    return true;
+  }
+
   if (lower.match(/\b(solde|vente|vendu|argent|combien|gagné|gagner|commission|retrait|wallet|earning)\b/)) {
     if (!pack?.software_unlocked_at) {
       await sendHuman(chatId, `🔒 Cette information est disponible après l'activation de ton compte. Tape /start pour commencer.`, undefined, DELAY_SHORT);
@@ -399,6 +415,46 @@ function unlockedMessage(firstName: string, hasUrl: boolean) {
   ].join("\n");
 }
 
+
+// ─── Pool Commun helpers ──────────────────────────────────────────────────────
+async function fetchPoolCoupons(supabase: any) {
+  const { data } = await supabase
+    .from("coupons")
+    .select("id, code, label, price_fcfa, platform, creator_id, analyses:analysis_id(team_home, team_away, league, result)")
+    .eq("status", "active")
+    .order("created_at", { ascending: false })
+    .limit(20);
+  return (data ?? []) as Array<{
+    id: string; code: string; label: string | null; price_fcfa: number;
+    platform: string | null; creator_id: string | null;
+    analyses: { team_home: string; team_away: string; league: string | null; result: string } | null;
+  }>;
+}
+
+function formatCouponList(coupons: ReturnType<typeof fetchPoolCoupons> extends Promise<infer T> ? T : never): string {
+  if (!coupons.length) return "📭 <b>Aucun coupon disponible en ce moment.</b>\n\nRevenez dans quelques heures !";
+  const lines = coupons.map((c, i) => {
+    const match = c.analyses ? `${c.analyses.team_home} vs ${c.analyses.team_away}` : c.label || "Coupon";
+    const platform = c.platform ? ` [${c.platform.toUpperCase()}]` : "";
+    return `${i+1}. <b>${match}${platform}</b> — <code>${c.price_fcfa.toLocaleString("fr-FR")} FCFA</code>`;
+  });
+  return [`🎟 <b>Coupons disponibles (${coupons.length})</b>\n`, ...lines, `\n👇 Clique sur un coupon pour l'acheter`].join("\n");
+}
+
+async function deliverCoupon(chatId: number, couponCode: string, platform: string | null, price: number) {
+  const platformLabel = platform ? platform.toUpperCase() : "1xBet/1Win";
+  await sendMessage(chatId, [
+    `✅ <b>Paiement confirmé — Voici ton code !</b>\n`,
+    `🎟 <b>Ton code booking ${platformLabel} :</b>\n<code>${couponCode}</code>\n`,
+    `<b>Comment l'utiliser :</b>\n`,
+    `1️⃣ Ouvre ${platformLabel}\n`,
+    `2️⃣ Va dans <b>Paris → Entrer un code</b>\n`,
+    `3️⃣ Colle : <code>${couponCode}</code>\n`,
+    `4️⃣ Confirme et mise !`,
+    `\n💰 <i>Prix payé : ${price.toLocaleString("fr-FR")} FCFA</i>`,
+  ].join(""));
+}
+
 async function buildSoftwareUrl(supabase: any, packId: string) {
   return (await getBase(supabase)) + `/pronostics?pack_id=${packId}&tg=1`;
 }
@@ -464,6 +520,39 @@ serve(async (req) => {
       return new Response("ok", { status: 200 });
     }
 
+    // ── /coupons /catalogue ───────────────────────────────────────────────
+    if (update.message?.text?.match(/^\/coupons|^\/catalogue|^\/pool/)) {
+      const chatId = update.message.chat.id;
+      const coupons = await fetchPoolCoupons(supabase);
+      const keyboard = coupons.length > 0 ? {
+        inline_keyboard: coupons.map(c => [{
+          text: `${c.analyses ? `${c.analyses.team_home} vs ${c.analyses.team_away}` : c.label || "Coupon"} — ${c.price_fcfa.toLocaleString("fr-FR")} F`,
+          callback_data: `acheter_${c.id}`,
+        }]),
+      } : undefined;
+      await sendMessage(chatId, formatCouponList(coupons), keyboard);
+      return new Response("ok", { status: 200 });
+    }
+
+    // ── /confirmer (admin) ────────────────────────────────────────────────
+    if (update.message?.text?.startsWith("/confirmer")) {
+      const chatId = update.message.chat.id;
+      const parts = update.message.text.split(" ");
+      const couponId = parts[1];
+      const buyerChatId = Number(parts[2]);
+      if (!couponId || !buyerChatId) {
+        await sendMessage(chatId, "Usage : /confirmer {coupon_id} {buyer_chat_id}");
+        return new Response("ok", { status: 200 });
+      }
+      const { data: coupon } = await supabase.from("coupons").select("id,code,price_fcfa,platform,status").eq("id", couponId).maybeSingle();
+      if (!coupon) { await sendMessage(chatId, "❌ Coupon introuvable"); return new Response("ok", { status: 200 }); }
+      if (coupon.status !== "active") { await sendMessage(chatId, "❌ Coupon déjà vendu ou inactif"); return new Response("ok", { status: 200 }); }
+      await supabase.from("coupons").update({ status:"sold", sold_at: new Date().toISOString(), buyer_id: String(buyerChatId) }).eq("id", couponId);
+      await deliverCoupon(buyerChatId, coupon.code, coupon.platform, coupon.price_fcfa);
+      await sendMessage(chatId, `✅ Paiement confirmé. Code <code>${coupon.code}</code> envoyé au client ${buyerChatId}.`);
+      return new Response("ok", { status: 200 });
+    }
+
     // ── /start <pack_id> ─────────────────────────────────────────────────
     if (update.message?.text?.startsWith("/start")) {
       const msg = update.message;
@@ -500,7 +589,10 @@ serve(async (req) => {
       if (pack.software_unlocked_at) {
         const softUrl = await buildSoftwareUrl(supabase, pack.id);
         await sendHuman(chatId, unlockedMessage(firstName, true), {
-          inline_keyboard: [[{ text:"📊 Ouvrir le Pack Officiel", web_app:{ url: softUrl } }]],
+          inline_keyboard: [
+          [{ text:"📊 Ouvrir le Pack Officiel", web_app:{ url: softUrl } }],
+          [{ text:"🎟 Voir les coupons disponibles", callback_data:"voir_pool" }],
+        ],
         }, DELAY_SHORT);
         return new Response("ok", { status: 200 });
       }
@@ -571,8 +663,46 @@ serve(async (req) => {
         await answerCallback(cb.id, "🚀 Accès débloqué !");
         await editMessage(chatId, messageId, `✅ <b>Inscription 1win enregistrée.</b>`);
         await sendHuman(chatId, unlockedMessage(firstName, true), {
-          inline_keyboard: [[{ text:"📊 Ouvrir le Pack Officiel", web_app:{ url: softUrl } }]],
+          inline_keyboard: [[{ text:"📊 Ouvrir le Pack Officiel", web_app:{ url: softUrl } }],[{ text:"🎟 Voir les coupons disponibles", callback_data:"voir_pool" }]],
         }, DELAY_LONG);
+        return new Response("ok", { status: 200 });
+      }
+
+      // Voir catalogue coupons
+      if (data === "voir_pool") {
+        const coupons = await fetchPoolCoupons(supabase);
+        const keyboard = coupons.length > 0 ? {
+          inline_keyboard: coupons.map(c => [{
+            text: `${c.analyses ? `${c.analyses.team_home} vs ${c.analyses.team_away}` : c.label || "Coupon"} — ${c.price_fcfa.toLocaleString("fr-FR")} F`,
+            callback_data: `acheter_${c.id}`,
+          }]),
+        } : undefined;
+        await answerCallback(cb.id);
+        await sendMessage(chatId, formatCouponList(coupons), keyboard);
+        return new Response("ok", { status: 200 });
+      }
+
+      // Acheter un coupon
+      if (data.startsWith("acheter_")) {
+        const couponId = data.replace("acheter_","");
+        const { data: coupon } = await supabase.from("coupons")
+          .select("id, code, label, price_fcfa, platform, status, analyses:analysis_id(team_home, team_away)")
+          .eq("id", couponId).maybeSingle();
+        if (!coupon) { await answerCallback(cb.id, "Coupon introuvable"); return new Response("ok", { status: 200 }); }
+        if (coupon.status !== "active") { await answerCallback(cb.id, "Ce coupon n'est plus disponible"); return new Response("ok", { status: 200 }); }
+        const match = coupon.analyses ? `${(coupon.analyses as any).team_home} vs ${(coupon.analyses as any).team_away}` : coupon.label || "Coupon";
+        const platform = coupon.platform?.toUpperCase() || "1xBet/1Win";
+        await answerCallback(cb.id);
+        await sendHuman(chatId, [
+          `🛒 <b>${match} [${platform}]</b>\n`,
+          `💰 Prix : <b>${coupon.price_fcfa.toLocaleString("fr-FR")} FCFA</b>\n`,
+          `Pour acheter ce coupon, effectue un paiement de <b>${coupon.price_fcfa.toLocaleString("fr-FR")} FCFA</b>\n`,
+          `📲 Envoie le paiement par Mobile Money, puis envoie la capture ici.\n`,
+          `⚡ Un admin confirmera et tu recevras ton code automatiquement.\n`,
+          `📌 Référence commande : <code>COUP-${couponId.slice(0,8).toUpperCase()}</code>`,
+        ].join(""), {
+          inline_keyboard: [[{ text:"❌ Annuler", callback_data:"voir_pool" }]],
+        }, DELAY_SHORT);
         return new Response("ok", { status: 200 });
       }
 
