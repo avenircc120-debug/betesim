@@ -151,6 +151,7 @@ const Pronostics = () => {
     match_date: "", prediction: "", confidence: "moyen" as Confidence, odds: "", notes: "",
   });
   const [couponForm, setCouponForm] = useState({ code: "", label: "", price_fcfa: "500", analysis_id: "" });
+  const [adminPackageCode, setAdminPackageCode] = useState("");
 
   const getToken = async () => {
     const { data } = await supabase.auth.getSession();
@@ -200,6 +201,20 @@ const Pronostics = () => {
     enabled: isAdmin && tab === "publier",
     staleTime: 0,
     refetchOnWindowFocus: true,
+  });
+
+  const { data: matchingPackage, refetch: refetchPackage } = useQuery({
+    queryKey: ["bookmaker-package", [...selectedIds].sort().join(","), betBookmaker],
+    queryFn: async () => {
+      if (!selectedIds.size) return null;
+      const { data } = await invoke("package-get", {
+        analysis_ids: [...selectedIds],
+        bookmaker: betBookmaker,
+      });
+      return data?.package ?? null;
+    },
+    enabled: showBetSlip && selectedIds.size > 0,
+    staleTime: 30_000,
   });
 
   const createMutation = useMutation({
@@ -311,6 +326,32 @@ const Pronostics = () => {
       setCouponCode(""); setCouponPrice("1000"); setCouponLabel("");
       queryClient.invalidateQueries({ queryKey: ["coupons"] });
       setTab("coupons");
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+
+  const savePackageMutation = useMutation({
+    mutationFn: async () => {
+      if (!adminPackageCode.trim()) throw new Error("Code requis");
+      const token = await getToken();
+      const totalOdds = selectedAnalyses
+        .filter(a => a.odds)
+        .reduce((acc, a) => acc * (Number(a.odds) || 1), 1)
+        .toFixed(2);
+      const { data } = await invoke("package-save", {
+        bookmaker: betBookmaker,
+        code: adminPackageCode.trim(),
+        analysis_ids: [...selectedIds],
+        total_odds: Number(totalOdds),
+      }, token);
+      if (!data?.success) throw new Error(data?.error || "Erreur");
+      return data;
+    },
+    onSuccess: () => {
+      toast.success("✅ Code sauvegardé ! Tous les utilisateurs le verront automatiquement.");
+      setAdminPackageCode("");
+      queryClient.invalidateQueries({ queryKey: ["bookmaker-package"] });
+      refetchPackage();
     },
     onError: (e: any) => toast.error(e.message),
   });
@@ -706,8 +747,53 @@ const Pronostics = () => {
                         Sélectionnez des matchs à venir pour parier.
                       </p>
                     </div>
+                  ) : matchingPackage ? (
+                    <>
+                      {/* ── Code bookmaker prêt — affichage direct ──────── */}
+                      <div className="rounded-xl bg-green-500/10 border border-green-400/30 p-4 text-center">
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-green-700 mb-1">
+                          ✅ Code coupon prêt à l'emploi
+                        </p>
+                        <p className="text-3xl font-black font-mono tracking-widest text-foreground my-3">
+                          {(matchingPackage as any).code}
+                        </p>
+                        {(matchingPackage as any).total_odds && (
+                          <p className="text-xs text-muted-foreground">
+                            Cote totale estimée : ×{(matchingPackage as any).total_odds}
+                          </p>
+                        )}
+                      </div>
+
+                      <div className="space-y-2">
+                        {[
+                          `Ouvrez ${label} et connectez-vous`,
+                          `Section "Paris" → "Entrer un code coupon"`,
+                          "Collez le code — votre panier se charge",
+                          "Confirmez et misez !",
+                        ].map((step, i) => (
+                          <div key={i} className="flex items-start gap-2.5">
+                            <div className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/15 text-primary text-[10px] font-bold shrink-0 mt-0.5">
+                              {i + 1}
+                            </div>
+                            <p className="text-xs text-muted-foreground leading-relaxed">{step}</p>
+                          </div>
+                        ))}
+                      </div>
+
+                      <Button
+                        onClick={() => { navigator.clipboard?.writeText((matchingPackage as any).code); toast.success("Code copié !"); }}
+                        className="h-11 w-full rounded-xl bg-primary text-white font-bold">
+                        <Ticket className="h-4 w-4 mr-2" /> Copier le code
+                      </Button>
+                      <Button
+                        onClick={() => openLink(betBookmaker === "1win" ? "https://1win.com/betting" : "https://1xbet.com/en")}
+                        className={`h-10 w-full rounded-xl text-white font-bold border-0 ${accentBg}`}>
+                        <ExternalLink className="h-3.5 w-3.5 mr-1.5" /> Ouvrir {label}
+                      </Button>
+                    </>
                   ) : (
                     <>
+                      {/* ── Pas de code sauvegardé — instructions manuelles ─ */}
                       <div className="space-y-2">
                         <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
                           {validMatches.length} match{validMatches.length > 1 ? "s" : ""} sélectionné{validMatches.length > 1 ? "s" : ""}
@@ -725,21 +811,12 @@ const Pronostics = () => {
                             <button
                               onClick={() => openLink(buildMatchUrl(a.team_home, a.team_away, betBookmaker))}
                               title={`Ouvrir sur ${label}`}
-                              className={`flex h-8 w-8 items-center justify-center rounded-lg bg-muted text-muted-foreground hover:text-foreground shrink-0 transition-colors`}>
+                              className="flex h-8 w-8 items-center justify-center rounded-lg bg-muted text-muted-foreground hover:text-foreground shrink-0 transition-colors">
                               <ExternalLink className="h-3.5 w-3.5" />
                             </button>
                           </div>
                         ))}
                       </div>
-
-                      {validMatches.length > 1 && (
-                        <div className="rounded-xl bg-amber-500/10 border border-amber-400/30 p-3">
-                          <p className="text-[10px] font-bold text-amber-700 mb-1">Accumulateur ({validMatches.length} matchs)</p>
-                          <p className="text-xs text-amber-700/80">
-                            Chaque match s'ouvrira avec 0,8 s d'écart. Ajoutez-les un par un à votre panier {label}.
-                          </p>
-                        </div>
-                      )}
 
                       <Button
                         onClick={() => openBetSequence(validMatches, betBookmaker)}
@@ -753,7 +830,7 @@ const Pronostics = () => {
                           <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground pt-1">Ensuite — générez votre code coupon</p>
                           {[
                             "Ajoutez chaque match à votre panier 1Win",
-                            "Tapez \"Générer le code coupon\" dans 1Win",
+                            "Cliquez \"Générer le code coupon\" dans 1Win",
                             "Copiez le code (ex: A3F2K9)",
                             "Revenez ici → \"J'ai mon code\"",
                           ].map((step, i) => (
@@ -772,6 +849,30 @@ const Pronostics = () => {
                         </div>
                       )}
                     </>
+                  )}
+
+                  {/* ── Section admin : enregistrer le code bookmaker UNE FOIS ── */}
+                  {isAdmin && !matchingPackage && validMatches.length > 0 && (
+                    <div className="pt-2 border-t border-border space-y-2">
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                        Admin — Enregistrer le code {label} une fois pour tous
+                      </p>
+                      <p className="text-[10px] text-muted-foreground leading-relaxed">
+                        Créez le coupon sur {label}, copiez le code, collez-le ici. Tous les utilisateurs le verront instantanément.
+                      </p>
+                      <Input
+                        value={adminPackageCode}
+                        onChange={e => setAdminPackageCode(e.target.value.toUpperCase())}
+                        placeholder={betBookmaker === "1win" ? "Ex: A3F2K9" : "Ex: 123456789"}
+                        className="h-10 rounded-xl font-mono text-center tracking-widest font-bold text-lg"
+                      />
+                      <Button
+                        onClick={() => savePackageMutation.mutate()}
+                        disabled={!adminPackageCode.trim() || savePackageMutation.isPending}
+                        className="h-10 w-full rounded-xl text-xs font-bold bg-primary text-white">
+                        {savePackageMutation.isPending ? "Sauvegarde..." : "💾 Sauvegarder pour tous les utilisateurs"}
+                      </Button>
+                    </div>
                   )}
                 </>
               );
