@@ -53,14 +53,15 @@ serve(async (req) => {
       return ok({ success: true, analyses: data ?? [] });
     }
 
-    // ── PUBLIC : liste matchs football ───────────────────────────────────────
+    // ── PUBLIC : liste matchs football (depuis hier pour couvrir les fuseaux) ─
     if (action === "matches-list") {
+      const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
       const { data } = await supabase
         .from("football_matches")
         .select("*")
-        .gte("match_date", new Date().toISOString())
+        .gte("match_date", since)
         .order("match_date", { ascending: true })
-        .limit(30);
+        .limit(50);
       return ok({ success: true, matches: data ?? [] });
     }
 
