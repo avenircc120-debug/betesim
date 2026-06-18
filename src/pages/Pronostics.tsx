@@ -207,9 +207,8 @@ const Pronostics = () => {
     queryKey: ["bookmaker-package", [...selectedIds].sort().join(","), betBookmaker],
     queryFn: async () => {
       if (!selectedIds.size) return null;
-      const { data } = await invoke("package-get", {
-        analysis_ids: [...selectedIds],
-        bookmaker: betBookmaker,
+      const { data } = await supabase.functions.invoke("bookmaker-packages", {
+        body: { action: "get", analysis_ids: [...selectedIds], bookmaker: betBookmaker },
       });
       return data?.package ?? null;
     },
@@ -338,12 +337,16 @@ const Pronostics = () => {
         .filter(a => a.odds)
         .reduce((acc, a) => acc * (Number(a.odds) || 1), 1)
         .toFixed(2);
-      const { data } = await invoke("package-save", {
-        bookmaker: betBookmaker,
-        code: adminPackageCode.trim(),
-        analysis_ids: [...selectedIds],
-        total_odds: Number(totalOdds),
-      }, token);
+      const { data } = await supabase.functions.invoke("bookmaker-packages", {
+        body: {
+          action: "save",
+          bookmaker: betBookmaker,
+          code: adminPackageCode.trim(),
+          analysis_ids: [...selectedIds],
+          total_odds: Number(totalOdds),
+        },
+        headers: { Authorization: `Bearer ${token}` },
+      });
       if (!data?.success) throw new Error(data?.error || "Erreur");
       return data;
     },
