@@ -139,14 +139,16 @@ const Pronostics = () => {
     return data.session?.access_token ?? "";
   };
 
-  const { data: analyses = [], isLoading: loadingAnalyses } = useQuery<Analysis[]>({
+  const { data: analyses = [], isLoading: loadingAnalyses, refetch: refetchAnalyses } = useQuery<Analysis[]>({
     queryKey: ["analyses", isAdmin],
     queryFn: async () => {
       const token = await getToken();
       const { data } = await invoke(isAdmin ? "admin-list" : "list-analyses", {}, token);
       return data?.analyses ?? [];
     },
-    staleTime: 60_000,
+    staleTime: 0,
+    refetchInterval: 60_000,
+    refetchOnWindowFocus: true,
   });
 
   const { data: coupons = [] } = useQuery<Coupon[]>({
@@ -171,14 +173,15 @@ const Pronostics = () => {
     staleTime: 30_000,
   });
 
-  const { data: footballMatches = [] } = useQuery({
+  const { data: footballMatches = [], refetch: refetchMatches } = useQuery({
     queryKey: ["football-matches"],
     queryFn: async () => {
       const { data } = await supabase.functions.invoke("football-data", { body: { action: "list" } });
       return data?.matches ?? [];
     },
     enabled: isAdmin && tab === "publier",
-    staleTime: 5 * 60_000,
+    staleTime: 0,
+    refetchOnWindowFocus: true,
   });
 
   const createMutation = useMutation({
@@ -334,11 +337,18 @@ const Pronostics = () => {
               <h1 className="text-2xl font-bold text-foreground">Pronostics</h1>
               {!isTelegramMode && <p className="text-sm text-muted-foreground">Sélectionnez vos matchs · Vendez sur 1win</p>}
             </div>
-            {isPartner && (
-              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-amber-500/15">
-                <Star className="h-5 w-5 text-amber-500" />
-              </div>
-            )}
+            <div className="flex items-center gap-2">
+              <button onClick={() => refetchAnalyses()}
+                className="flex h-9 w-9 items-center justify-center rounded-xl bg-muted hover:bg-muted/70 transition-colors"
+                title="Actualiser les analyses">
+                <RefreshCw className={`h-4 w-4 text-muted-foreground ${loadingAnalyses ? "animate-spin" : ""}`} />
+              </button>
+              {isPartner && (
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-amber-500/15">
+                  <Star className="h-5 w-5 text-amber-500" />
+                </div>
+              )}
+            </div>
           </div>
         </motion.div>
 
