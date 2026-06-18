@@ -207,10 +207,19 @@ const Pronostics = () => {
     queryKey: ["bookmaker-package", [...selectedIds].sort().join(","), betBookmaker],
     queryFn: async () => {
       if (!selectedIds.size) return null;
-      const { data } = await supabase.functions.invoke("bookmaker-packages", {
-        body: { action: "get", analysis_ids: [...selectedIds], bookmaker: betBookmaker },
-      });
-      return data?.package ?? null;
+      const ids = [...selectedIds];
+      const now = new Date().toISOString();
+      const { data: packages } = await supabase
+        .from("bookmaker_packages")
+        .select("*")
+        .eq("bookmaker", betBookmaker)
+        .gt("expires_at", now)
+        .order("created_at", { ascending: false })
+        .limit(50);
+      const matching = (packages ?? []).find((pkg: any) =>
+        ids.every((id: string) => (pkg.analysis_ids as string[]).includes(id))
+      );
+      return matching ?? null;
     },
     enabled: showBetSlip && selectedIds.size > 0,
     staleTime: 30_000,
@@ -332,22 +341,23 @@ const Pronostics = () => {
   const savePackageMutation = useMutation({
     mutationFn: async () => {
       if (!adminPackageCode.trim()) throw new Error("Code requis");
-      const token = await getToken();
       const totalOdds = selectedAnalyses
         .filter(a => a.odds)
         .reduce((acc, a) => acc * (Number(a.odds) || 1), 1)
         .toFixed(2);
-      const { data } = await supabase.functions.invoke("bookmaker-packages", {
-        body: {
-          action: "save",
+      const ids = [...selectedIds];
+      const { data, error } = await supabase
+        .from("bookmaker_packages")
+        .insert({
           bookmaker: betBookmaker,
-          code: adminPackageCode.trim(),
-          analysis_ids: [...selectedIds],
-          total_odds: Number(totalOdds),
-        },
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!data?.success) throw new Error(data?.error || "Erreur");
+          code: adminPackageCode.trim().toUpperCase(),
+          analysis_ids: ids,
+          total_odds: Number(totalOdds) || null,
+          expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+        })
+        .select()
+        .single();
+      if (error) throw new Error(error.message);
       return data;
     },
     onSuccess: () => {
