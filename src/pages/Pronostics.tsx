@@ -95,6 +95,23 @@ function openLink(url: string) {
   else window.open(url, "_blank");
 }
 
+function buildMatchUrl(home: string, away: string, bookmaker: "1win" | "1xbet"): string {
+  const q = encodeURIComponent(`${home} ${away}`);
+  if (bookmaker === "1win") return `https://1win.com/betting#search=${q}`;
+  return `https://1xbet.com/?search=${q}`;
+}
+
+function isMatchExpired(a: Analysis): boolean {
+  if (!a.match_date) return false;
+  return new Date(a.match_date) < new Date();
+}
+
+function openBetSequence(matches: Analysis[], bookmaker: "1win" | "1xbet") {
+  matches.forEach((m, i) => {
+    setTimeout(() => openLink(buildMatchUrl(m.team_home, m.team_away, bookmaker)), i * 800);
+  });
+}
+
 const Pronostics = () => {
   const { user } = useAuth();
   const { data: profile } = useProfile();
@@ -117,7 +134,8 @@ const Pronostics = () => {
 
   const [tab, setTab] = useState<"analyses" | "publier" | "coupons">("analyses");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [showOnboardingPanel, setShowOnboardingPanel] = useState(false);
+  const [showBetSlip, setShowBetSlip] = useState(false);
+  const [betBookmaker, setBetBookmaker] = useState<"1win" | "1xbet">("1win");
   const [showCouponRegister, setShowCouponRegister] = useState(false);
   const [couponCode, setCouponCode] = useState("");
   const [couponPrice, setCouponPrice] = useState("1000");
@@ -316,9 +334,9 @@ const Pronostics = () => {
   const commissionAmount = Math.round(priceNum * COMMISSION_RATE);
   const netAmount = priceNum - commissionAmount;
 
-  const handleOpenOn1win = () => {
-    setShowOnboardingPanel(true);
-    setTimeout(() => openLink(WIN_BETTING_URL), 400);
+  const handleBetSlip = (bookmaker: "1win" | "1xbet") => {
+    setBetBookmaker(bookmaker);
+    setShowBetSlip(true);
   };
 
   const navTabs = [
@@ -628,14 +646,20 @@ const Pronostics = () => {
                   <X className="h-4 w-4" />
                 </button>
               </div>
-              <div className="mt-3 grid grid-cols-2 gap-2">
+              <div className="mt-3 space-y-2">
+                <div className="grid grid-cols-2 gap-2">
+                  <Button onClick={() => handleBetSlip("1win")}
+                    className="h-11 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold">
+                    <ExternalLink className="h-3.5 w-3.5 mr-1.5" /> Parier 1Win
+                  </Button>
+                  <Button onClick={() => handleBetSlip("1xbet")}
+                    className="h-11 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold">
+                    <ExternalLink className="h-3.5 w-3.5 mr-1.5" /> Parier 1xBet
+                  </Button>
+                </div>
                 <Button onClick={() => setShowCouponRegister(true)} variant="outline"
-                  className="h-11 rounded-xl text-xs font-bold border-background/20 bg-background/10 text-background hover:bg-background/20">
-                  <Ticket className="h-4 w-4 mr-1.5" /> J'ai mon code
-                </Button>
-                <Button onClick={handleOpenOn1win}
-                  className="h-11 rounded-xl bg-primary text-white text-xs font-bold shadow-glow">
-                  <ExternalLink className="h-4 w-4 mr-1.5" /> Ouvrir sur 1win
+                  className="h-9 w-full rounded-xl text-[11px] font-bold border-background/20 bg-background/10 text-background hover:bg-background/20">
+                  <Ticket className="h-3.5 w-3.5 mr-1.5" /> J'ai déjà mon code coupon
                 </Button>
               </div>
             </div>
@@ -645,48 +669,113 @@ const Pronostics = () => {
 
       {!isTelegramMode && <BottomNav />}
 
-      {/* ── Dialog : Instructions 1win ────────────────────────────────────────── */}
-      <Dialog open={showOnboardingPanel} onOpenChange={setShowOnboardingPanel}>
+      {/* ── Dialog : BetSlip — tunnel de conversion bookmaker ─────────────────── */}
+      <Dialog open={showBetSlip} onOpenChange={setShowBetSlip}>
         <DialogContent className="max-w-sm rounded-2xl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <ExternalLink className="h-5 w-5 text-primary" /> Générez votre code sur 1win
+              <ExternalLink className="h-5 w-5 text-primary" />
+              {betBookmaker === "1win" ? "Parier sur 1Win" : "Parier sur 1xBet"}
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
-            <div className="rounded-xl bg-primary/5 border border-primary/20 p-3 space-y-1.5">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-primary">Vos matchs à trouver sur 1win</p>
-              {selectedAnalyses.map(a => (
-                <div key={a.id} className="flex items-center gap-2">
-                  <Check className="h-3.5 w-3.5 text-primary shrink-0" />
-                  <p className="text-xs font-semibold text-foreground">{a.team_home} vs {a.team_away}</p>
-                  {a.odds && <span className="ml-auto text-xs font-bold text-primary">{a.odds}</span>}
-                </div>
-              ))}
-            </div>
-            <div className="space-y-2">
-              {[
-                { n:"1", text:"1win s'ouvre — trouvez chacun de vos matchs listés ci-dessus" },
-                { n:"2", text:"Ajoutez-les à votre panier paris 1win" },
-                { n:"3", text:"Appuyez sur \"Générer le code coupon\" dans 1win" },
-                { n:"4", text:"Copiez votre code (ex: ABC12)" },
-                { n:"5", text:"Revenez ici et cliquez sur \"J'ai mon code\"" },
-              ].map(s => (
-                <div key={s.n} className="flex items-start gap-3">
-                  <div className="flex h-6 w-6 items-center justify-center rounded-full bg-primary text-white text-[11px] font-bold shrink-0 mt-0.5">{s.n}</div>
-                  <p className="text-xs text-foreground leading-relaxed">{s.text}</p>
-                </div>
-              ))}
-            </div>
-            <div className="grid grid-cols-2 gap-2 pt-1">
-              <Button variant="outline" onClick={() => openLink(WIN_BETTING_URL)} className="h-11 rounded-xl text-sm font-bold">
-                <ExternalLink className="h-4 w-4 mr-1.5" /> Rouvrir 1win
-              </Button>
-              <Button onClick={() => { setShowOnboardingPanel(false); setShowCouponRegister(true); }}
-                className="h-11 rounded-xl gradient-primary text-primary-foreground font-bold">
-                <Ticket className="h-4 w-4 mr-1.5" /> J'ai mon code
-              </Button>
-            </div>
+            {(() => {
+              const validMatches   = selectedAnalyses.filter(a => !isMatchExpired(a));
+              const expiredMatches = selectedAnalyses.filter(a => isMatchExpired(a));
+              const label = betBookmaker === "1win" ? "1Win" : "1xBet";
+              const accentBg = betBookmaker === "1win" ? "bg-emerald-600 hover:bg-emerald-700" : "bg-blue-600 hover:bg-blue-700";
+
+              return (
+                <>
+                  {expiredMatches.length > 0 && (
+                    <div className="rounded-xl bg-red-500/10 border border-red-400/30 p-3">
+                      <p className="text-xs font-bold text-red-600 mb-1.5">⚠️ Matchs expirés — ignorés</p>
+                      {expiredMatches.map(a => (
+                        <p key={a.id} className="text-xs text-red-500/60 line-through">
+                          {a.team_home} vs {a.team_away}
+                        </p>
+                      ))}
+                    </div>
+                  )}
+
+                  {validMatches.length === 0 ? (
+                    <div className="rounded-xl bg-muted p-6 text-center">
+                      <AlertTriangle className="h-8 w-8 mx-auto text-amber-500 mb-2" />
+                      <p className="text-sm font-semibold text-foreground">Tous les matchs sont expirés</p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Sélectionnez des matchs à venir pour parier.
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="space-y-2">
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                          {validMatches.length} match{validMatches.length > 1 ? "s" : ""} sélectionné{validMatches.length > 1 ? "s" : ""}
+                        </p>
+                        {validMatches.map(a => (
+                          <div key={a.id} className="flex items-center gap-2.5 rounded-xl bg-muted/50 p-3">
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-semibold text-foreground truncate">
+                                {a.team_home} vs {a.team_away}
+                              </p>
+                              <p className="text-[10px] text-muted-foreground mt-0.5">
+                                {a.league ?? "Football"}{a.odds ? ` · Cote ×${a.odds}` : ""}
+                              </p>
+                            </div>
+                            <button
+                              onClick={() => openLink(buildMatchUrl(a.team_home, a.team_away, betBookmaker))}
+                              title={`Ouvrir sur ${label}`}
+                              className={`flex h-8 w-8 items-center justify-center rounded-lg bg-muted text-muted-foreground hover:text-foreground shrink-0 transition-colors`}>
+                              <ExternalLink className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+
+                      {validMatches.length > 1 && (
+                        <div className="rounded-xl bg-amber-500/10 border border-amber-400/30 p-3">
+                          <p className="text-[10px] font-bold text-amber-700 mb-1">Accumulateur ({validMatches.length} matchs)</p>
+                          <p className="text-xs text-amber-700/80">
+                            Chaque match s'ouvrira avec 0,8 s d'écart. Ajoutez-les un par un à votre panier {label}.
+                          </p>
+                        </div>
+                      )}
+
+                      <Button
+                        onClick={() => openBetSequence(validMatches, betBookmaker)}
+                        className={`h-12 w-full rounded-xl text-white font-bold shadow-glow ${accentBg}`}>
+                        <ExternalLink className="h-4 w-4 mr-2" />
+                        Ouvrir {validMatches.length > 1 ? `les ${validMatches.length} matchs` : "le match"} sur {label}
+                      </Button>
+
+                      {betBookmaker === "1win" && (
+                        <div className="space-y-2 pt-1 border-t border-border">
+                          <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground pt-1">Ensuite — générez votre code coupon</p>
+                          {[
+                            "Ajoutez chaque match à votre panier 1Win",
+                            "Tapez \"Générer le code coupon\" dans 1Win",
+                            "Copiez le code (ex: A3F2K9)",
+                            "Revenez ici → \"J'ai mon code\"",
+                          ].map((step, i) => (
+                            <div key={i} className="flex items-start gap-2.5">
+                              <div className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/15 text-primary text-[10px] font-bold shrink-0 mt-0.5">
+                                {i + 1}
+                              </div>
+                              <p className="text-xs text-muted-foreground leading-relaxed">{step}</p>
+                            </div>
+                          ))}
+                          <Button variant="outline"
+                            onClick={() => { setShowBetSlip(false); setShowCouponRegister(true); }}
+                            className="h-10 w-full rounded-xl text-xs font-semibold mt-1">
+                            <Ticket className="h-3.5 w-3.5 mr-1.5" /> J'ai mon code coupon
+                          </Button>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </>
+              );
+            })()}
           </div>
         </DialogContent>
       </Dialog>
