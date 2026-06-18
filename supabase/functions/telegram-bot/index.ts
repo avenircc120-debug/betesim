@@ -168,6 +168,53 @@ async function handleDBQuery(
   }
 
   // ── Solde / Ventes / Commissions ────────────────────────────────────────────
+
+  // ─── Wizard state machine (booking code) ───────────────────────────────────
+  const session = await getBotState(supabase, chatId);
+  if (session?.state === "awaiting_booking_code") {
+    const { analysis_id, platform, reseller_id } = session.data as any;
+    const code = lower.trim().toUpperCase().replace(/\s+/g, "");
+    if (code.length < 4 || code.length > 30) {
+      await sendHuman(chatId, "⚠️ Code trop court ou invalide. Entre le code exact (4-30 caractères) :", undefined, DELAY_SHORT);
+      return true;
+    }
+    // Get analysis + price
+    const { data: analysis } = await supabase.from("analyses")
+      .select("id, team_home, team_away, confidence_pct").eq("id", analysis_id).maybeSingle();
+    // Default price based on confidence
+    const conf = (analysis as any)?.confidence_pct || 75;
+    const price = conf >= 90 ? 3000 : conf >= 80 ? 2000 : 1500;
+    // Create coupon
+    const { data: newCoupon, error } = await supabase.from("coupons").insert({
+      code,
+      label: analysis ? `${(analysis as any).team_home} vs ${(analysis as any).team_away}` : "Coupon",
+      price_fcfa: price,
+      platform,
+      status: "active",
+      creator_id: reseller_id,
+      analysis_id,
+    }).select("id").single();
+    await clearBotState(supabase, chatId);
+    if (error || !newCoupon) {
+      await sendHuman(chatId, `❌ Erreur lors de la création. Réessaie ou publie depuis le site.\n<code>${error?.message || "unknown"}</code>`, undefined, DELAY_SHORT);
+      return true;
+    }
+    await sendHuman(chatId, [
+      `🎉 <b>Coupon publié dans le Pool Commun !</b>`, ``,
+      `🎟 Code : <code>${code}</code>`,
+      `💰 Prix : <b>${price.toLocaleString("fr-FR")} FCFA</b>`,
+      `📲 Plateforme : <b>${platform.toUpperCase()}</b>`, ``,
+      `Ton coupon est maintenant visible dans le catalogue. Les clients peuvent l'acheter via le bot.`,
+    ].join("\n"), {
+      inline_keyboard: [
+        [{ text: "📋 Voir d'autres analyses", callback_data: "show_analyses" }],
+        [{ text: "📊 Retour au Dashboard", callback_data: "dashboard_home" }],
+      ],
+    }, DELAY_SHORT);
+    return true;
+  }
+
+
   // Catalogue coupons
   if (lower.match(/\b(coupon|coupons|catalogue|acheter|achat|prono|pronostic|disponible|pool|tip|paris|pari|veux|liste|voir|buy)\b/)) {
     const coupons = await fetchPoolCoupons(supabase);
@@ -416,6 +463,60 @@ function unlockedMessage(firstName: string, hasUrl: boolean) {
 }
 
 
+// ─── Reseller helpers ────────────────────────────────────────────────────────
+
+async function getResellerProfile(supabase: any, chatId: number) {
+  const { data } = await supabase
+    .from("profiles")
+    .select("id, full_name, role, email")
+    .eq("telegram_chat_id", chatId)
+    .maybeSingle();
+  return data as { id: string; full_name: string | null; role: string | null; email: string | null } | null;
+}
+
+async function setBotState(supabase: any, chatId: number, state: string, data: Record<string, unknown>) {
+  await supabase.from("bot_sessions").upsert({ telegram_chat_id: chatId, state, data, updated_at: new Date().toISOString() });
+}
+
+async function getBotState(supabase: any, chatId: number): Promise<{ state: string; data: Record<string, unknown> } | null> {
+  const { data } = await supabase.from("bot_sessions").select("state, data").eq("telegram_chat_id", chatId).maybeSingle();
+  return data as { state: string; data: Record<string, unknown> } | null;
+}
+
+async function clearBotState(supabase: any, chatId: number) {
+  await supabase.from("bot_sessions").delete().eq("telegram_chat_id", chatId);
+}
+
+async function getPendingAnalyses(supabase: any, resellerId?: string) {
+  const { data } = await supabase
+    .from("analyses")
+    .select("id, team_home, team_away, league, match_date, result, confidence_pct, platform_suggestion")
+    .eq("published", true)
+    .order("match_date", { ascending: true })
+    .limit(10);
+  if (!data?.length) return [];
+  if (!resellerId) return data;
+  // Filter out analyses already converted by this reseller
+  const { data: existing } = await supabase
+    .from("coupons")
+    .select("analysis_id")
+    .eq("creator_id", resellerId)
+    .in("analysis_id", data.map((a: any) => a.id));
+  const doneIds = new Set((existing ?? []).map((c: any) => c.analysis_id));
+  return (data as any[]).filter((a: any) => !doneIds.has(a.id));
+}
+
+async function getWalletBalance(supabase: any, partnerId: string): Promise<{ total: number; count: number }> {
+  const { data } = await supabase
+    .from("commission_records")
+    .select("net_amount")
+    .eq("partner_id", partnerId)
+    .in("type", ["coupon_sale", "referral_commission"]);
+  const total = (data ?? []).reduce((s: number, r: any) => s + (r.net_amount || 0), 0);
+  return { total, count: (data ?? []).length };
+}
+
+
 // ─── Pool Commun helpers ─────────────────────────────────────────────────────
 
 async function getAdminChatId(supabase: any): Promise<number | null> {
@@ -632,6 +733,189 @@ serve(async (req) => {
     }
 
 
+    // ── /connect {uid} — lier compte revendeur ────────────────────────────────
+    if (update.message?.text?.startsWith("/connect")) {
+      const chatId = update.message.chat.id;
+      const uid = update.message.text.split(" ")[1]?.trim();
+      if (!uid) {
+        await sendMessage(chatId, [
+          `🔗 <b>Lier ton compte revendeur</b>`, ``,
+          `Pour recevoir les alertes et accéder à ton dashboard :`,
+          `1. Va sur <b>betesim.vercel.app</b> → onglet Revendeur`,
+          `2. Copie ton UID affiché`,
+          `3. Envoie : <code>/connect {ton_uid}</code>`,
+        ].join("\n"));
+        return new Response("ok", { status: 200 });
+      }
+      // Verify profile exists
+      const { data: profile, error } = await supabase
+        .from("profiles").select("id, full_name, role").eq("id", uid).maybeSingle();
+      if (!profile) {
+        await sendMessage(chatId, "❌ UID introuvable. Vérifie bien l'identifiant copié depuis le Dashboard.");
+        return new Response("ok", { status: 200 });
+      }
+      if (profile.role !== "partner" && profile.role !== "admin") {
+        await sendMessage(chatId, "❌ Ce compte n'a pas les droits revendeur. Contacte l'administrateur.");
+        return new Response("ok", { status: 200 });
+      }
+      await supabase.from("profiles").update({ telegram_chat_id: chatId }).eq("id", uid);
+      await sendMessage(chatId, [
+        `✅ <b>Compte lié avec succès !</b>`,
+        `Bienvenue, <b>${escapeHtml(profile.full_name || "Revendeur")}</b> !`, ``,
+        `Tu peux maintenant accéder à :`,
+        `📊 /dashboard — Ton espace revendeur`,
+        `💰 /wallet — Ton solde et commissions`,
+        `📋 /analyses — Analyses à traiter`,
+      ].join("\n"));
+      return new Response("ok", { status: 200 });
+    }
+
+    // ── /dashboard — espace revendeur ─────────────────────────────────────────
+    if (update.message?.text?.startsWith("/dashboard") || update.message?.text?.startsWith("/mon_espace")) {
+      const chatId = update.message.chat.id;
+      const reseller = await getResellerProfile(supabase, chatId);
+      if (!reseller) {
+        await sendMessage(chatId, [
+          `🔒 <b>Compte non lié</b>`, ``,
+          `Pour accéder à ton dashboard, lie d'abord ton compte :`,
+          `<code>/connect {ton_uid}</code>`, ``,
+          `Trouve ton UID sur <b>betesim.vercel.app → Revendeur</b>`,
+        ].join("\n"));
+        return new Response("ok", { status: 200 });
+      }
+      const [wallet, analyses, { data: coupons }] = await Promise.all([
+        getWalletBalance(supabase, reseller.id),
+        getPendingAnalyses(supabase, reseller.id),
+        supabase.from("coupons").select("id, status").eq("creator_id", reseller.id),
+      ]);
+      const active = (coupons ?? []).filter((c: any) => c.status === "active").length;
+      const sold = (coupons ?? []).filter((c: any) => c.status === "sold").length;
+      const pendingCount = analyses.length;
+      await sendMessage(chatId, [
+        `📊 <b>Dashboard Revendeur</b>`,
+        `👤 ${escapeHtml(reseller.full_name || "Revendeur")}`, ``,
+        `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+        `💰 Wallet : <b>${wallet.total.toLocaleString("fr-FR")} FCFA</b>`,
+        `   (${wallet.count} vente${wallet.count > 1 ? "s" : ""})`,
+        `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+        `🎟 Coupons actifs : <b>${active}</b>`,
+        `✅ Coupons vendus : <b>${sold}</b>`,
+        `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+        pendingCount > 0
+          ? `🔔 <b>${pendingCount} analyse${pendingCount > 1 ? "s" : ""} en attente de coupon !</b>`
+          : `✅ Toutes les analyses ont un coupon.`,
+      ].join("\n"), {
+        inline_keyboard: [
+          [{ text: "💰 Détail wallet", callback_data: "wallet_detail" }, { text: "📋 Voir analyses", callback_data: "show_analyses" }],
+          pendingCount > 0 ? [{ text: `🔔 Créer coupon maintenant (${pendingCount})`, callback_data: "show_analyses" }] : [],
+          [{ text: "🎟 Voir mes coupons", callback_data: "my_coupons" }],
+        ].filter((row: any[]) => row.length > 0),
+      });
+      return new Response("ok", { status: 200 });
+    }
+
+    // ── /wallet — détail commissions ──────────────────────────────────────────
+    if (update.message?.text?.startsWith("/wallet")) {
+      const chatId = update.message.chat.id;
+      const reseller = await getResellerProfile(supabase, chatId);
+      if (!reseller) { await sendMessage(chatId, "🔒 Lie d'abord ton compte avec <code>/connect {uid}</code>"); return new Response("ok", { status: 200 }); }
+      const { data: records } = await supabase
+        .from("commission_records")
+        .select("net_amount, type, description, created_at")
+        .eq("partner_id", reseller.id)
+        .order("created_at", { ascending: false })
+        .limit(10);
+      const total = (records ?? []).reduce((s: number, r: any) => s + r.net_amount, 0);
+      const lines = (records ?? []).slice(0, 8).map((r: any) => {
+        const date = new Date(r.created_at).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" });
+        return `  💸 <b>+${r.net_amount.toLocaleString("fr-FR")} F</b> — ${escapeHtml(r.description || r.type)} <i>(${date})</i>`;
+      });
+      await sendMessage(chatId, [
+        `💰 <b>Wallet — ${escapeHtml(reseller.full_name || "Revendeur")}</b>`, ``,
+        `🏦 Solde total : <b>${total.toLocaleString("fr-FR")} FCFA</b>`, ``,
+        lines.length ? `📋 <b>Dernières commissions :</b>` : `📋 <i>Aucune commission pour l'instant.</i>`,
+        ...lines,
+      ].join("\n"));
+      return new Response("ok", { status: 200 });
+    }
+
+    // ── /analyses — analyses à traiter ────────────────────────────────────────
+    if (update.message?.text?.startsWith("/analyses")) {
+      const chatId = update.message.chat.id;
+      const reseller = await getResellerProfile(supabase, chatId);
+      if (!reseller) { await sendMessage(chatId, "🔒 Lie d'abord ton compte avec <code>/connect {uid}</code>"); return new Response("ok", { status: 200 }); }
+      const analyses = await getPendingAnalyses(supabase, reseller.id);
+      if (!analyses.length) {
+        await sendMessage(chatId, "✅ <b>Toutes les analyses ont déjà un coupon.</b>\n\nNouvel arrivage bientôt !");
+        return new Response("ok", { status: 200 });
+      }
+      const lines = analyses.map((a: any, i: number) => {
+        const date = a.match_date ? new Date(a.match_date).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" }) : "";
+        const plat = a.platform_suggestion ? ` [${a.platform_suggestion.toUpperCase()}]` : "";
+        return `${i + 1}. <b>${escapeHtml(a.team_home)} vs ${escapeHtml(a.team_away)}</b>${plat}\n   📅 ${date} — 🎯 ${a.confidence_pct || "?"}% de confiance`;
+      });
+      await sendMessage(chatId, [
+        `📋 <b>Analyses à transformer (${analyses.length})</b>`, ``,
+        `<i>Crée un coupon sur 1xBet/1Win pour chaque analyse, puis publie-le :</i>`, ``,
+        ...lines,
+      ].join("\n"), {
+        inline_keyboard: analyses.slice(0, 6).map((a: any) => [{
+          text: `➕ ${a.team_home} vs ${a.team_away}`,
+          callback_data: `create_coupon_${a.id}`,
+        }]),
+      });
+      return new Response("ok", { status: 200 });
+    }
+
+    // ── /relancer — admin : notifier tous les revendeurs ──────────────────────
+    if (update.message?.text?.startsWith("/relancer")) {
+      const chatId = update.message.chat.id;
+      // Get analyses without enough coupons (published and active)
+      const { data: analyses } = await supabase
+        .from("analyses")
+        .select("id, team_home, team_away, league, match_date, platform_suggestion")
+        .eq("published", true)
+        .order("match_date", { ascending: true })
+        .limit(5);
+      if (!analyses?.length) { await sendMessage(chatId, "📭 Aucune analyse publiée à envoyer."); return new Response("ok", { status: 200 }); }
+      // Get all resellers with telegram_chat_id
+      const { data: resellers } = await supabase
+        .from("profiles")
+        .select("id, full_name, telegram_chat_id")
+        .not("telegram_chat_id", "is", null)
+        .in("role", ["partner", "admin"]);
+      if (!resellers?.length) { await sendMessage(chatId, "⚠️ Aucun revendeur n'a encore lié son compte Telegram.\nPartagez la commande /connect."); return new Response("ok", { status: 200 }); }
+      let notified = 0;
+      for (const reseller of resellers as any[]) {
+        if (!reseller.telegram_chat_id || reseller.telegram_chat_id === chatId) continue;
+        // Check which analyses they haven't done
+        const { data: done } = await supabase.from("coupons").select("analysis_id").eq("creator_id", reseller.id).in("analysis_id", analyses.map((a: any) => a.id));
+        const doneIds = new Set((done ?? []).map((c: any) => c.analysis_id));
+        const pending = (analyses as any[]).filter((a: any) => !doneIds.has(a.id));
+        if (!pending.length) continue;
+        const matchLines = pending.map((a: any) => {
+          const date = a.match_date ? new Date(a.match_date).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" }) : "";
+          const plat = a.platform_suggestion ? ` [${a.platform_suggestion.toUpperCase()}]` : "";
+          return `• <b>${escapeHtml(a.team_home)} vs ${escapeHtml(a.team_away)}</b>${plat} — ${date}`;
+        });
+        await sendMessage(reseller.telegram_chat_id, [
+          `🔔 <b>Nouvelles analyses disponibles !</b>`, ``,
+          `<b>${pending.length} match${pending.length > 1 ? "s" : ""}</b> attende${pending.length > 1 ? "nt" : ""} ton coupon :`, ``,
+          ...matchLines, ``,
+          `👇 Crée tes coupons dès maintenant :`,
+        ].join("\n"), {
+          inline_keyboard: [
+            [{ text: "📋 Voir les analyses", callback_data: "show_analyses" }],
+            [{ text: "📊 Mon Dashboard", callback_data: "dashboard_home" }],
+          ],
+        });
+        notified++;
+      }
+      await sendMessage(chatId, `✅ <b>${notified} revendeur${notified > 1 ? "s" : ""} notifié${notified > 1 ? "s" : ""}.</b>\n\nRevendeurs non liés : ${(resellers as any[]).length - notified} (n'ont pas encore fait /connect)`);
+      return new Response("ok", { status: 200 });
+    }
+
+
     // ── /coupons /catalogue ───────────────────────────────────────────────────
     if (update.message?.text?.match(/^\/coupons|^\/catalogue|^\/pool/i)) {
       const chatId = update.message.chat.id;
@@ -792,6 +1076,146 @@ serve(async (req) => {
         await sendHuman(chatId, unlockedMessage(firstName, true), {
           inline_keyboard: [[{ text:"📊 Ouvrir le Pack Officiel", web_app:{ url: softUrl } }],[{ text:"🎟 Voir les coupons disponibles", callback_data:"voir_pool" }]],
         }, DELAY_LONG);
+        return new Response("ok", { status: 200 });
+      }
+
+
+      // ── Dashboard home ────────────────────────────────────────────────────
+      if (data === "dashboard_home" || data === "wallet_detail" || data === "show_analyses" || data === "my_coupons") {
+        const reseller = await getResellerProfile(supabase, chatId);
+        await answerCallback(cb.id);
+        if (!reseller) {
+          await sendMessage(chatId, "🔒 Lie d'abord ton compte avec <code>/connect {uid}</code>\nTrouve ton UID sur betesim.vercel.app → Revendeur");
+          return new Response("ok", { status: 200 });
+        }
+
+        if (data === "wallet_detail") {
+          const { data: records } = await supabase
+            .from("commission_records")
+            .select("net_amount, type, description, created_at")
+            .eq("partner_id", reseller.id)
+            .order("created_at", { ascending: false })
+            .limit(10);
+          const total = (records ?? []).reduce((s: number, r: any) => s + r.net_amount, 0);
+          const lines = (records ?? []).slice(0, 8).map((r: any) => {
+            const date = new Date(r.created_at).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" });
+            return `  💸 <b>+${r.net_amount.toLocaleString("fr-FR")} F</b> — ${escapeHtml(r.description || r.type)} <i>(${date})</i>`;
+          });
+          await sendMessage(chatId, [`💰 <b>Wallet</b> — Total : <b>${total.toLocaleString("fr-FR")} FCFA</b>`, "", ...(lines.length ? lines : ["<i>Aucune commission pour l'instant.</i>"])].join("\n"), {
+            inline_keyboard: [[{ text: "◀ Dashboard", callback_data: "dashboard_home" }]],
+          });
+          return new Response("ok", { status: 200 });
+        }
+
+        if (data === "show_analyses") {
+          const analyses = await getPendingAnalyses(supabase, reseller.id);
+          if (!analyses.length) {
+            await sendMessage(chatId, "✅ <b>Toutes les analyses ont un coupon.</b>\n\nNouvel arrivage bientôt !", { inline_keyboard: [[{ text: "◀ Dashboard", callback_data: "dashboard_home" }]] });
+            return new Response("ok", { status: 200 });
+          }
+          const lines = analyses.map((a: any, i: number) => {
+            const date = a.match_date ? new Date(a.match_date).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" }) : "";
+            const plat = a.platform_suggestion ? ` [${a.platform_suggestion.toUpperCase()}]` : "";
+            return `${i + 1}. <b>${escapeHtml(a.team_home)} vs ${escapeHtml(a.team_away)}</b>${plat} — ${date}`;
+          });
+          await sendMessage(chatId, [`📋 <b>Analyses à traiter (${analyses.length})</b>`, "", ...lines, "", "<i>Sélectionne une analyse pour créer le coupon :</i>"].join("\n"), {
+            inline_keyboard: [
+              ...analyses.slice(0, 6).map((a: any) => [{ text: `➕ ${a.team_home} vs ${a.team_away}`, callback_data: `create_coupon_${a.id}` }]),
+              [{ text: "◀ Dashboard", callback_data: "dashboard_home" }],
+            ],
+          });
+          return new Response("ok", { status: 200 });
+        }
+
+        if (data === "my_coupons") {
+          const { data: coupons } = await supabase
+            .from("coupons")
+            .select("id, label, price_fcfa, status, platform, sold_at, analyses:analysis_id(team_home, team_away)")
+            .eq("creator_id", reseller.id)
+            .order("created_at", { ascending: false })
+            .limit(10);
+          if (!coupons?.length) {
+            await sendMessage(chatId, "📭 <b>Aucun coupon publié pour l'instant.</b>\n\nTape /analyses pour voir les analyses disponibles.", { inline_keyboard: [[{ text: "◀ Dashboard", callback_data: "dashboard_home" }]] });
+            return new Response("ok", { status: 200 });
+          }
+          const lines = (coupons as any[]).map((c, i) => {
+            const name = c.analyses ? `${c.analyses.team_home} vs ${c.analyses.team_away}` : c.label || "Coupon";
+            const statusIcon = c.status === "sold" ? "✅" : c.status === "active" ? "🟢" : "⚫";
+            return `${statusIcon} ${i + 1}. <b>${escapeHtml(name)}</b> — ${c.price_fcfa?.toLocaleString("fr-FR")} F`;
+          });
+          await sendMessage(chatId, [`🎟 <b>Mes coupons (${coupons.length})</b>`, "", ...lines].join("\n"), {
+            inline_keyboard: [[{ text: "◀ Dashboard", callback_data: "dashboard_home" }]],
+          });
+          return new Response("ok", { status: 200 });
+        }
+
+        // dashboard_home
+        const [wallet, analyses, { data: coupons }] = await Promise.all([
+          getWalletBalance(supabase, reseller.id),
+          getPendingAnalyses(supabase, reseller.id),
+          supabase.from("coupons").select("id, status").eq("creator_id", reseller.id),
+        ]);
+        const active = (coupons ?? []).filter((c: any) => c.status === "active").length;
+        const sold = (coupons ?? []).filter((c: any) => c.status === "sold").length;
+        await sendMessage(chatId, [
+          `📊 <b>Dashboard Revendeur</b>`, `👤 ${escapeHtml(reseller.full_name || "Revendeur")}`, ``,
+          `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+          `💰 Wallet : <b>${wallet.total.toLocaleString("fr-FR")} FCFA</b> (${wallet.count} vente${wallet.count > 1 ? "s" : ""})`,
+          `🎟 Actifs : <b>${active}</b> · Vendus : <b>${sold}</b>`,
+          `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+          analyses.length > 0 ? `🔔 <b>${analyses.length} analyse${analyses.length > 1 ? "s" : ""} en attente !</b>` : `✅ Toutes les analyses traitées.`,
+        ].join("\n"), {
+          inline_keyboard: [
+            [{ text: "💰 Mon Wallet", callback_data: "wallet_detail" }, { text: "📋 Analyses", callback_data: "show_analyses" }],
+            [{ text: "🎟 Mes coupons", callback_data: "my_coupons" }],
+            analyses.length > 0 ? [{ text: `🔔 Créer coupon (${analyses.length})`, callback_data: "show_analyses" }] : [],
+          ].filter((r: any[]) => r.length > 0),
+        });
+        return new Response("ok", { status: 200 });
+      }
+
+      // ── Wizard : créer coupon depuis analyse ──────────────────────────────
+      if (data.startsWith("create_coupon_")) {
+        const analysisId = data.replace("create_coupon_", "");
+        const reseller = await getResellerProfile(supabase, chatId);
+        await answerCallback(cb.id);
+        if (!reseller) { await sendMessage(chatId, "🔒 Lie d'abord ton compte : /connect {uid}"); return new Response("ok", { status: 200 }); }
+        const { data: analysis } = await supabase.from("analyses")
+          .select("id, team_home, team_away, league, result, confidence_pct, platform_suggestion")
+          .eq("id", analysisId).maybeSingle();
+        if (!analysis) { await sendMessage(chatId, "❌ Analyse introuvable."); return new Response("ok", { status: 200 }); }
+        await setBotState(supabase, chatId, "awaiting_platform", { analysis_id: analysisId, reseller_id: reseller.id });
+        const plat = (analysis as any).platform_suggestion?.toUpperCase() || null;
+        await sendMessage(chatId, [
+          `➕ <b>Créer un coupon</b>`,
+          `📊 <b>${escapeHtml((analysis as any).team_home)} vs ${escapeHtml((analysis as any).team_away)}</b>`,
+          `🎯 Pronostic : ${(analysis as any).result || "?"}  — Confiance : ${(analysis as any).confidence_pct || "?"}%`, ``,
+          `Sur quelle plateforme as-tu créé ton coupon ?`,
+        ].join("\n"), {
+          inline_keyboard: [
+            [{ text: "1️⃣ 1xBet", callback_data: `plat_1xbet_${analysisId}` }, { text: "2️⃣ 1Win", callback_data: `plat_1win_${analysisId}` }],
+            [{ text: "❌ Annuler", callback_data: "show_analyses" }],
+          ],
+        });
+        return new Response("ok", { status: 200 });
+      }
+
+      if (data.startsWith("plat_1xbet_") || data.startsWith("plat_1win_")) {
+        const platform = data.startsWith("plat_1xbet_") ? "1xbet" : "1win";
+        const analysisId = data.replace(/^plat_(1xbet|1win)_/, "");
+        const reseller = await getResellerProfile(supabase, chatId);
+        await answerCallback(cb.id);
+        if (!reseller) { await sendMessage(chatId, "🔒 Lie d'abord ton compte : /connect {uid}"); return new Response("ok", { status: 200 }); }
+        await setBotState(supabase, chatId, "awaiting_booking_code", {
+          analysis_id: analysisId, platform, reseller_id: reseller.id
+        });
+        await sendMessage(chatId, [
+          `✅ Plateforme : <b>${platform.toUpperCase()}</b>`, ``,
+          `Maintenant, <b>entre ton code booking</b> ${platform.toUpperCase()} :`,
+          `<i>(ex: ABC123456 — copie-colle depuis l'appli)</i>`,
+        ].join("\n"), {
+          inline_keyboard: [[{ text: "❌ Annuler", callback_data: "show_analyses" }]],
+        });
         return new Response("ok", { status: 200 });
       }
 
