@@ -150,14 +150,15 @@ serve(async (req) => {
       return ok({ success: true, source: sourceUsed, fetched: matches.length, saved });
     }
 
-    // ── LIST : lister les matchs stockés ────────────────────────────────────
+    // ── LIST : lister les matchs stockés (depuis hier pour couvrir les fuseaux horaires) ─
     if (action === "list") {
+      const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
       const { data } = await supabase
         .from("football_matches")
         .select("*")
-        .gte("match_date", new Date().toISOString())
+        .gte("match_date", since)
         .order("match_date", { ascending: true })
-        .limit(30);
+        .limit(50);
       return ok({ success: true, matches: data ?? [] });
     }
 
