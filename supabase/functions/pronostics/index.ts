@@ -137,7 +137,7 @@ serve(async (req) => {
     if (action === "coupon-create") {
       const { analysis_id, code, label, price_fcfa } = body;
       if (!code) throw new Error("code requis");
-      const codeClean = String(code).toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 20);
+      const codeClean = String(code).toUpperCase().replace(/[^A-Z0-9\-]/g, "").slice(0, 20);
       if (codeClean.length < 3) throw new Error("Code trop court (min 3 caractères alphanumériques)");
       const { data, error } = await supabase.from("coupons").insert({
         partner_id: userId,
