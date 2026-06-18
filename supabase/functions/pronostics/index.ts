@@ -1,7 +1,8 @@
 /**
  * Edge Function: pronostics
- * Actions publiques  : list-analyses, matches-list
- * Actions admin      : create-analysis, update-analysis, delete-analysis, admin-list, matches-fetch
+ * Actions publiques  : list-analyses, matches-list, package-get
+ * Actions admin      : create-analysis, update-analysis, delete-analysis, admin-list,
+ *                      matches-fetch, package-save, package-list
  * Actions partenaire : coupon-create, coupon-list, commission-list
  */
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
@@ -53,7 +54,7 @@ serve(async (req) => {
       return ok({ success: true, analyses: data ?? [] });
     }
 
-    // ── PUBLIC : liste matchs football (depuis hier pour couvrir les fuseaux) ─
+    // ── PUBLIC : liste matchs football ───────────────────────────────────────
     if (action === "matches-list") {
       const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
       const { data } = await supabase
@@ -63,6 +64,25 @@ serve(async (req) => {
         .order("match_date", { ascending: true })
         .limit(50);
       return ok({ success: true, matches: data ?? [] });
+    }
+
+    // ── PUBLIC : chercher un package bookmaker pour des analyses sélectionnées ──
+    if (action === "package-get") {
+      const { analysis_ids, bookmaker } = body;
+      if (!analysis_ids?.length) return ok({ success: false, error: "analysis_ids requis" });
+      const now = new Date().toISOString();
+      let query = supabase
+        .from("bookmaker_packages")
+        .select("*")
+        .gt("expires_at", now);
+      if (bookmaker) query = query.eq("bookmaker", bookmaker);
+      const { data: packages } = await query.order("created_at", { ascending: false }).limit(50);
+      // Trouver le package qui contient TOUTES les analyses sélectionnées
+      const matching = (packages ?? []).find((pkg: any) =>
+        (analysis_ids as string[]).every((id: string) => (pkg.analysis_ids as string[]).includes(id))
+      );
+      if (matching) return ok({ success: true, found: true, package: matching });
+      return ok({ success: true, found: false });
     }
 
     // ── AUTH requis ──────────────────────────────────────────────────────────
@@ -80,6 +100,37 @@ serve(async (req) => {
       const { data } = await supabase
         .from("analyses").select("*").order("match_date", { ascending: false });
       return ok({ success: true, analyses: data ?? [] });
+    }
+
+    // ── ADMIN : sauvegarder un code bookmaker réel (1win/1xbet) ─────────────
+    if (action === "package-save") {
+      if (!admin) return ok({ success: false, error: "Accès refusé" }, 403);
+      const { bookmaker, code, analysis_ids, total_odds, notes } = body;
+      if (!bookmaker || !code || !analysis_ids?.length)
+        throw new Error("Champs requis : bookmaker, code, analysis_ids");
+      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+      const { data, error } = await supabase.from("bookmaker_packages").insert({
+        bookmaker,
+        code: String(code).trim().toUpperCase(),
+        analysis_ids,
+        total_odds: total_odds ? Number(total_odds) : null,
+        notes: notes ?? null,
+        expires_at: expiresAt,
+        created_by: email,
+      }).select().single();
+      if (error) throw new Error(error.message);
+      return ok({ success: true, package: data });
+    }
+
+    // ── ADMIN : lister les packages bookmaker ────────────────────────────────
+    if (action === "package-list") {
+      if (!admin) return ok({ success: false, error: "Accès refusé" }, 403);
+      const { data } = await supabase
+        .from("bookmaker_packages")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(20);
+      return ok({ success: true, packages: data ?? [] });
     }
 
     // ── ADMIN : créer une analyse ────────────────────────────────────────────
