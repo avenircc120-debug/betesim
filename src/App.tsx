@@ -27,6 +27,8 @@ import Admin from './pages/Admin';
 import Onboarding from './pages/Onboarding';
 import Pronostics from './pages/Pronostics';
 import VendeurPage from './pages/VendeurPage';
+import RevendeurDashboard from './pages/RevendeurDashboard';
+import Marketplace from './pages/Marketplace';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -111,7 +113,9 @@ const AppContent = () => {
             <Route path="/pack-partenaire" element={<PackPartenaire />} />
             <Route path="/admin" element={<Admin />} />
             <Route path="/onboarding" element={<Onboarding />} />
-            <Route path="/pronostics" element={<Pronostics />} />
+            <Route path="/marketplace" element={<Marketplace />} />
+          <Route path="/dashboard-revendeur" element={<RevendeurDashboard />} />
+          <Route path="/pronostics" element={<Pronostics />} />
             <Route path="/vendeur" element={<VendeurPage />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
