@@ -169,7 +169,7 @@ async function handleDBQuery(
 
   // ── Solde / Ventes / Commissions ────────────────────────────────────────────
   // Catalogue coupons
-  if (lower.match(/\b(coupon|coupons|catalogue|acheter|achat|prono|pronostic|disponible|pool)\b/)) {
+  if (lower.match(/\b(coupon|coupons|catalogue|acheter|achat|prono|pronostic|disponible|pool|tip|paris|pari|veux|liste|voir|buy)\b/)) {
     const coupons = await fetchPoolCoupons(supabase);
     const keyboard = coupons.length > 0 ? {
       inline_keyboard: [
@@ -180,7 +180,7 @@ async function handleDBQuery(
         ...(coupons.length > 5 ? [[{ text:`+ ${coupons.length - 5} autres → /coupons`, callback_data:"voir_pool" }]] : []),
       ],
     } : undefined;
-    await sendHuman(chatId, formatCouponList(coupons), keyboard, DELAY_SHORT);
+    await sendHuman(chatId, formatCatalog(coupons), keyboard, DELAY_SHORT);
     return true;
   }
 
@@ -416,14 +416,22 @@ function unlockedMessage(firstName: string, hasUrl: boolean) {
 }
 
 
-// ─── Pool Commun helpers ──────────────────────────────────────────────────────
+// ─── Pool Commun helpers ─────────────────────────────────────────────────────
+
+async function getAdminChatId(supabase: any): Promise<number | null> {
+  const envId = Deno.env.get("ADMIN_CHAT_ID");
+  if (envId) return Number(envId);
+  const { data } = await supabase.from("app_settings").select("value").eq("key","admin_chat_id").maybeSingle();
+  return data?.value ? Number(data.value) : null;
+}
+
 async function fetchPoolCoupons(supabase: any) {
   const { data } = await supabase
     .from("coupons")
     .select("id, code, label, price_fcfa, platform, creator_id, analyses:analysis_id(team_home, team_away, league, result)")
     .eq("status", "active")
     .order("created_at", { ascending: false })
-    .limit(20);
+    .limit(15);
   return (data ?? []) as Array<{
     id: string; code: string; label: string | null; price_fcfa: number;
     platform: string | null; creator_id: string | null;
@@ -431,33 +439,100 @@ async function fetchPoolCoupons(supabase: any) {
   }>;
 }
 
-function formatCouponList(coupons: ReturnType<typeof fetchPoolCoupons> extends Promise<infer T> ? T : never): string {
-  if (!coupons.length) return "📭 <b>Aucun coupon disponible en ce moment.</b>\n\nRevenez dans quelques heures !";
+function partialCode(code: string): string {
+  if (!code || code.length < 3) return "●●●●●●";
+  return code.slice(0, 3) + "●".repeat(Math.max(4, code.length - 3));
+}
+
+function couponDisplayName(c: { label: string | null; analyses: { team_home: string; team_away: string } | null }): string {
+  if (c.analyses) return `${c.analyses.team_home} vs ${c.analyses.team_away}`;
+  return c.label || "Coupon";
+}
+
+function formatCatalog(coupons: Awaited<ReturnType<typeof fetchPoolCoupons>>): string {
+  if (!coupons.length) return [
+    "📭 <b>Aucun coupon disponible pour le moment.</b>",
+    "",
+    "💡 Revenez dans quelques heures !",
+  ].join("\n");
   const lines = coupons.map((c, i) => {
-    const match = c.analyses ? `${c.analyses.team_home} vs ${c.analyses.team_away}` : c.label || "Coupon";
-    const platform = c.platform ? ` [${c.platform.toUpperCase()}]` : "";
-    return `${i+1}. <b>${match}${platform}</b> — <code>${c.price_fcfa.toLocaleString("fr-FR")} FCFA</code>`;
+    const name = couponDisplayName(c);
+    const plat = c.platform ? ` [${c.platform.toUpperCase()}]` : "";
+    return `${i + 1}. 🎟 <b>${name}${plat}</b> — <b>${c.price_fcfa.toLocaleString("fr-FR")} FCFA</b>`;
   });
-  return [`🎟 <b>Coupons disponibles (${coupons.length})</b>\n`, ...lines, `\n👇 Clique sur un coupon pour l'acheter`].join("\n");
+  return [`🎰 <b>Coupons disponibles (${coupons.length})</b>`, `<i>Sélectionne un coupon pour l'acheter.</i>`, "", ...lines].join("\n");
 }
 
-async function deliverCoupon(chatId: number, couponCode: string, platform: string | null, price: number) {
-  const platformLabel = platform ? platform.toUpperCase() : "1xBet/1Win";
+async function getMobileMoneyNumber(supabase: any): Promise<string> {
+  const { data } = await supabase.from("app_settings").select("value").eq("key","mobile_money_number").maybeSingle();
+  return data?.value || Deno.env.get("MOBILE_MONEY_NUMBER") || "XX XX XX XX XX";
+}
+
+async function createBotOrder(supabase: any, couponId: string, buyerChatId: number, buyerName: string, amount: number): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("bot_orders")
+    .insert({ coupon_id: couponId, buyer_chat_id: buyerChatId, buyer_name: buyerName, amount_fcfa: amount, status: "pending" })
+    .select("id").single();
+  if (error) { console.error("createBotOrder:", error.message); return null; }
+  return (data as { id: string }).id;
+}
+
+async function confirmBotOrder(supabase: any, orderId: string) {
+  const { data: order } = await supabase
+    .from("bot_orders")
+    .select("id, buyer_chat_id, amount_fcfa, coupons(id, code, platform, price_fcfa, creator_id, referrer_id)")
+    .eq("id", orderId).maybeSingle();
+  if (!order) return null;
+  const coupon = (order as any).coupons;
+  if (!coupon) return null;
+  await supabase.from("coupons").update({ status: "sold", sold_at: new Date().toISOString(), buyer_id: String(order.buyer_chat_id) }).eq("id", coupon.id);
+  await supabase.from("bot_orders").update({ status: "paid", paid_at: new Date().toISOString() }).eq("id", orderId);
+  const gross = coupon.price_fcfa;
+  const creatorShare = Math.round(gross * 0.70);
+  const referrerShare = Math.round(gross * 0.10);
+  const platformShare = gross - creatorShare - referrerShare;
+  const records: any[] = [
+    { coupon_id: coupon.id, type: "coupon_sale", gross_amount: gross, commission_amount: platformShare, net_amount: creatorShare, description: "Vente coupon (70%)", partner_id: coupon.creator_id },
+  ];
+  if (coupon.referrer_id) records.push({ coupon_id: coupon.id, type: "referral_commission", gross_amount: gross, commission_amount: platformShare, net_amount: referrerShare, description: "Commission parrain (10%)", partner_id: coupon.referrer_id });
+  if (records.length) await supabase.from("commission_records").insert(records);
+  return { couponCode: coupon.code, buyerChatId: order.buyer_chat_id, platform: coupon.platform, amount: gross };
+}
+
+async function notifyAdmin(supabase: any, orderId: string, buyerName: string, buyerChatId: number, name: string, amount: number) {
+  const adminChatId = await getAdminChatId(supabase);
+  if (!adminChatId) return;
+  const shortRef = orderId.slice(0, 8).toUpperCase();
+  await sendMessage(adminChatId, [
+    `💳 <b>Nouveau paiement client</b>`, ``,
+    `👤 Client : <b>${escapeHtml(buyerName)}</b> (ID: ${buyerChatId})`,
+    `🎟 Coupon : <b>${escapeHtml(name)}</b>`,
+    `💰 Montant : <b>${amount.toLocaleString("fr-FR")} FCFA</b>`,
+    `📌 Réf : <code>${shortRef}</code>`, ``,
+    `Confirme ou refuse ce paiement :`,
+  ].join("\n"), {
+    inline_keyboard: [
+      [{ text: "✅ Confirmer le paiement", callback_data: `confirm_${orderId}` }],
+      [{ text: "❌ Refuser", callback_data: `refuse_${orderId}` }],
+    ],
+  });
+}
+
+async function deliverCode(chatId: number, code: string, platform: string | null, amount: number) {
+  const plat = platform ? platform.toUpperCase() : "1xBet/1Win";
   await sendMessage(chatId, [
-    `✅ <b>Paiement confirmé — Voici ton code !</b>\n`,
-    `🎟 <b>Ton code booking ${platformLabel} :</b>\n<code>${couponCode}</code>\n`,
-    `<b>Comment l'utiliser :</b>\n`,
-    `1️⃣ Ouvre ${platformLabel}\n`,
-    `2️⃣ Va dans <b>Paris → Entrer un code</b>\n`,
-    `3️⃣ Colle : <code>${couponCode}</code>\n`,
-    `4️⃣ Confirme et mise !`,
-    `\n💰 <i>Prix payé : ${price.toLocaleString("fr-FR")} FCFA</i>`,
-  ].join(""));
+    `✅ <b>Paiement confirmé — Voici ton code !</b>`, ``,
+    `🎟 <b>Code booking ${plat} :</b>`, ``,
+    `<code>${code}</code>`, ``,
+    `<b>Comment l'utiliser :</b>`,
+    `1️⃣ Ouvre ${plat}`,
+    `2️⃣ Va dans <b>Paris → Entrer un code</b>`,
+    `3️⃣ Colle le code ci-dessus`,
+    `4️⃣ Confirme et mise !`, ``,
+    `💰 <i>Montant payé : ${amount.toLocaleString("fr-FR")} FCFA</i>`,
+  ].join("\n"));
 }
 
-async function buildSoftwareUrl(supabase: any, packId: string) {
-  return (await getBase(supabase)) + `/pronostics?pack_id=${packId}&tg=1`;
-}
 
 // ─── Serve ───────────────────────────────────────────────────────────────────
 serve(async (req) => {
@@ -515,7 +590,10 @@ serve(async (req) => {
       const chatId = update.message.chat.id;
       const pUrl = await pronosticsUrl(supabase);
       await sendMessage(chatId, `🎯 Ouvre <b>Pack Officiel</b> en plein écran :`, {
-        inline_keyboard: [[{ text:"📊 Voir les Pronostics", web_app:{ url: pUrl } }]],
+        inline_keyboard: [
+          [{ text:"📊 Voir les Pronostics", web_app:{ url: pUrl } }],
+          [{ text:"🎟 Voir les coupons disponibles", callback_data:"voir_pool" }],
+        ],
       });
       return new Response("ok", { status: 200 });
     }
@@ -530,7 +608,7 @@ serve(async (req) => {
           callback_data: `acheter_${c.id}`,
         }]),
       } : undefined;
-      await sendMessage(chatId, formatCouponList(coupons), keyboard);
+      await sendMessage(chatId, formatCatalog(coupons), keyboard);
       return new Response("ok", { status: 200 });
     }
 
@@ -550,6 +628,55 @@ serve(async (req) => {
       await supabase.from("coupons").update({ status:"sold", sold_at: new Date().toISOString(), buyer_id: String(buyerChatId) }).eq("id", couponId);
       await deliverCoupon(buyerChatId, coupon.code, coupon.platform, coupon.price_fcfa);
       await sendMessage(chatId, `✅ Paiement confirmé. Code <code>${coupon.code}</code> envoyé au client ${buyerChatId}.`);
+      return new Response("ok", { status: 200 });
+    }
+
+
+    // ── /coupons /catalogue ───────────────────────────────────────────────────
+    if (update.message?.text?.match(/^\/coupons|^\/catalogue|^\/pool/i)) {
+      const chatId = update.message.chat.id;
+      const coupons = await fetchPoolCoupons(supabase);
+      await sendMessage(chatId, formatCatalog(coupons), coupons.length > 0 ? {
+        inline_keyboard: coupons.map(c => [{
+          text: `${couponDisplayName(c)} — ${c.price_fcfa.toLocaleString("fr-FR")} F`,
+          callback_data: `acheter_${c.id}`,
+        }]),
+      } : undefined);
+      return new Response("ok", { status: 200 });
+    }
+
+    // ── /ordres (admin) ───────────────────────────────────────────────────────
+    if (update.message?.text?.startsWith("/ordres")) {
+      const chatId = update.message.chat.id;
+      const { data: orders } = await supabase
+        .from("bot_orders")
+        .select("id, buyer_name, buyer_chat_id, amount_fcfa, status, coupons(label, platform, analyses:analysis_id(team_home, team_away))")
+        .in("status", ["pending","paid"])
+        .order("created_at", { ascending: false })
+        .limit(10);
+      if (!orders?.length) {
+        await sendMessage(chatId, "📭 Aucune commande en attente.");
+        return new Response("ok", { status: 200 });
+      }
+      const lines = (orders as any[]).map((o, i) => {
+        const c = o.coupons;
+        const n = c ? (c.analyses ? `${c.analyses.team_home} vs ${c.analyses.team_away}` : c.label || "Coupon") : "?";
+        const emoji = o.status === "paid" ? "✅" : "⏳";
+        return `${emoji} ${i+1}. <b>${escapeHtml(o.buyer_name||"Client")}</b> — ${n} — ${o.amount_fcfa.toLocaleString("fr-FR")} F\n   Réf: <code>${o.id.slice(0,8).toUpperCase()}</code>`;
+      });
+      await sendMessage(chatId, [`📋 <b>Commandes récentes (${orders.length})</b>`, "", ...lines].join("\n"));
+      return new Response("ok", { status: 200 });
+    }
+
+    // ── /confirmer {order_id} (admin) ─────────────────────────────────────────
+    if (update.message?.text?.startsWith("/confirmer")) {
+      const chatId = update.message.chat.id;
+      const orderId = update.message.text.split(" ")[1]?.trim();
+      if (!orderId) { await sendMessage(chatId, "Usage : <code>/confirmer {order_id}</code>\nVoir les IDs avec /ordres"); return new Response("ok", { status: 200 }); }
+      const result = await confirmBotOrder(supabase, orderId);
+      if (!result) { await sendMessage(chatId, "❌ Commande introuvable ou déjà traitée."); return new Response("ok", { status: 200 }); }
+      await deliverCode(result.buyerChatId, result.couponCode, result.platform, result.amount);
+      await sendMessage(chatId, `✅ Code <code>${result.couponCode}</code> livré au client ${result.buyerChatId}.`);
       return new Response("ok", { status: 200 });
     }
 
@@ -668,47 +795,118 @@ serve(async (req) => {
         return new Response("ok", { status: 200 });
       }
 
-      // Voir catalogue coupons
-      if (data === "voir_pool") {
+
+      // ── Voir catalogue ────────────────────────────────────────────────────
+      if (data === "voir_pool" || data === "catalogue") {
         const coupons = await fetchPoolCoupons(supabase);
-        const keyboard = coupons.length > 0 ? {
+        await answerCallback(cb.id);
+        await sendMessage(chatId, formatCatalog(coupons), coupons.length > 0 ? {
           inline_keyboard: coupons.map(c => [{
-            text: `${c.analyses ? `${c.analyses.team_home} vs ${c.analyses.team_away}` : c.label || "Coupon"} — ${c.price_fcfa.toLocaleString("fr-FR")} F`,
+            text: `${couponDisplayName(c)} — ${c.price_fcfa.toLocaleString("fr-FR")} F`,
             callback_data: `acheter_${c.id}`,
           }]),
-        } : undefined;
-        await answerCallback(cb.id);
-        await sendMessage(chatId, formatCouponList(coupons), keyboard);
+        } : undefined);
         return new Response("ok", { status: 200 });
       }
 
-      // Acheter un coupon
+      // ── Sélection coupon → formulaire paiement ─────────────────────────────
       if (data.startsWith("acheter_")) {
-        const couponId = data.replace("acheter_","");
+        const couponId = data.replace("acheter_", "");
         const { data: coupon } = await supabase.from("coupons")
           .select("id, code, label, price_fcfa, platform, status, analyses:analysis_id(team_home, team_away)")
           .eq("id", couponId).maybeSingle();
-        if (!coupon) { await answerCallback(cb.id, "Coupon introuvable"); return new Response("ok", { status: 200 }); }
-        if (coupon.status !== "active") { await answerCallback(cb.id, "Ce coupon n'est plus disponible"); return new Response("ok", { status: 200 }); }
-        const match = coupon.analyses ? `${(coupon.analyses as any).team_home} vs ${(coupon.analyses as any).team_away}` : coupon.label || "Coupon";
-        const platform = coupon.platform?.toUpperCase() || "1xBet/1Win";
         await answerCallback(cb.id);
+        if (!coupon || coupon.status !== "active") {
+          await sendHuman(chatId, coupon ? "❌ Ce coupon n'est plus disponible. Tape /coupons pour voir les autres." : "❌ Coupon introuvable.", undefined, DELAY_SHORT);
+          return new Response("ok", { status: 200 });
+        }
+        const cName = couponDisplayName(coupon as any);
+        const plat = (coupon as any).platform?.toUpperCase() || "1xBet/1Win";
+        const mobileNum = await getMobileMoneyNumber(supabase);
+        const buyerName = cb.from.first_name || "Client";
+        const orderId = await createBotOrder(supabase, couponId, chatId, buyerName, (coupon as any).price_fcfa);
+        if (!orderId) {
+          await sendHuman(chatId, "❌ Erreur technique. Réessaie dans quelques instants.", undefined, DELAY_SHORT);
+          return new Response("ok", { status: 200 });
+        }
+        const shortRef = orderId.slice(0, 8).toUpperCase();
+        const partial = partialCode((coupon as any).code);
         await sendHuman(chatId, [
-          `🛒 <b>${match} [${platform}]</b>\n`,
-          `💰 Prix : <b>${coupon.price_fcfa.toLocaleString("fr-FR")} FCFA</b>\n`,
-          `Pour acheter ce coupon, effectue un paiement de <b>${coupon.price_fcfa.toLocaleString("fr-FR")} FCFA</b>\n`,
-          `📲 Envoie le paiement par Mobile Money, puis envoie la capture ici.\n`,
-          `⚡ Un admin confirmera et tu recevras ton code automatiquement.\n`,
-          `📌 Référence commande : <code>COUP-${couponId.slice(0,8).toUpperCase()}</code>`,
-        ].join(""), {
-          inline_keyboard: [[{ text:"❌ Annuler", callback_data:"voir_pool" }]],
-        }, DELAY_SHORT);
+          `🎟 <b>${escapeHtml(cName)} [${plat}]</b>`, ``,
+          `🔒 <b>Aperçu du code (incomplet) :</b>`,
+          `<code>${partial}</code>`,
+          `<i>Le code complet sera révélé après confirmation du paiement.</i>`, ``,
+          `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+          `💰 <b>Montant : ${(coupon as any).price_fcfa.toLocaleString("fr-FR")} FCFA</b>`,
+          `📲 <b>Paiement Mobile Money :</b>`,
+          `   Numéro : <code>${mobileNum}</code>`,
+          `   Montant exact : <code>${(coupon as any).price_fcfa} FCFA</code>`,
+          `   Référence (important) : <code>${shortRef}</code>`,
+          `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`, ``,
+          `Après ton paiement, clique sur le bouton ci-dessous :`,
+        ].join("\n"), {
+          inline_keyboard: [
+            [{ text: "✅ J'ai payé — Confirmer mon paiement", callback_data: `paie_${orderId}` }],
+            [{ text: "❌ Annuler", callback_data: "catalogue" }],
+          ],
+        }, DELAY_LONG);
+        return new Response("ok", { status: 200 });
+      }
+
+      // ── Client confirme avoir payé ─────────────────────────────────────────
+      if (data.startsWith("paie_")) {
+        const orderId = data.replace("paie_", "");
+        const { data: order } = await supabase.from("bot_orders")
+          .select("*, coupons(label, platform, price_fcfa, analyses:analysis_id(team_home, team_away))")
+          .eq("id", orderId).maybeSingle();
+        await answerCallback(cb.id, "⏳ Vérification en cours…");
+        if (!order || order.status !== "pending") {
+          await sendHuman(chatId, "⚠️ Cette commande a déjà été traitée.", undefined, DELAY_SHORT);
+          return new Response("ok", { status: 200 });
+        }
+        const c = (order as any).coupons;
+        const name = c ? (c.analyses ? `${c.analyses.team_home} vs ${c.analyses.team_away}` : c.label || "Coupon") : "Coupon";
+        await notifyAdmin(supabase, orderId, cb.from.first_name || "Client", chatId, name, (order as any).amount_fcfa);
+        await sendHuman(chatId, [
+          `⏳ <b>Paiement en cours de vérification</b>`, ``,
+          `Notre équipe vérifie ton paiement. Tu recevras le code complet <b>dans les prochaines minutes</b>.`, ``,
+          `📌 Réf : <code>${orderId.slice(0,8).toUpperCase()}</code>`,
+        ].join("\n"), undefined, DELAY_SHORT);
+        return new Response("ok", { status: 200 });
+      }
+
+      // ── Admin confirme paiement ────────────────────────────────────────────
+      if (data.startsWith("confirm_")) {
+        const orderId = data.replace("confirm_", "");
+        await answerCallback(cb.id);
+        const result = await confirmBotOrder(supabase, orderId);
+        if (!result) {
+          await editMessage(chatId, messageId, "⚠️ Commande introuvable ou déjà traitée.");
+          return new Response("ok", { status: 200 });
+        }
+        await deliverCode(result.buyerChatId, result.couponCode, result.platform, result.amount);
+        await editMessage(chatId, messageId, `✅ <b>Confirmé !</b>\nCode <code>${result.couponCode}</code> livré au client.`);
+        return new Response("ok", { status: 200 });
+      }
+
+      // ── Admin refuse paiement ─────────────────────────────────────────────
+      if (data.startsWith("refuse_")) {
+        const orderId = data.replace("refuse_", "");
+        await supabase.from("bot_orders").update({ status: "cancelled" }).eq("id", orderId);
+        await answerCallback(cb.id, "❌ Refusé");
+        await editMessage(chatId, messageId, `❌ <b>Paiement refusé.</b>`);
+        const { data: order } = await supabase.from("bot_orders").select("buyer_chat_id").eq("id", orderId).maybeSingle();
+        if (order?.buyer_chat_id) {
+          await sendMessage(order.buyer_chat_id, "❌ <b>Paiement non confirmé.</b>\n\nContacte le support ou tape /coupons pour voir d'autres coupons.");
+        }
         return new Response("ok", { status: 200 });
       }
 
       await answerCallback(cb.id);
       return new Response("ok", { status: 200 });
     }
+
+
 
     // ── Messages texte libres ─────────────────────────────────────────────
     if (update.message?.text && !update.message.text.startsWith("/")) {
