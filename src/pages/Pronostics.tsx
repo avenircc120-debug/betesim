@@ -56,12 +56,6 @@ interface CommissionRecord {
   created_at: string;
 }
 
-interface PoolCoupon {
-  id: string; code: string; label: string | null; price_fcfa: number;
-  status: string; creator_id: string | null; platform?: string;
-  analyses?: { team_home: string; team_away: string; league: string | null; confidence: string; result: string } | null;
-}
-
 const COMMISSION_RATE = 0.30;
 const PARTNER_LINK = "https://1w.run/?p=YvTH"; // Lien affiliation (inscription)
 const WIN_BETTING_URL = "https://1win.com/betting"; // Site paris 1win (booking code)
@@ -139,7 +133,7 @@ const Pronostics = () => {
     }
   }, [isTelegramMode]);
 
-  const [tab, setTab] = useState<"analyses" | "publier" | "coupons" | "pool">("analyses");
+  const [tab, setTab] = useState<"analyses" | "publier" | "coupons">("analyses");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showBetSlip, setShowBetSlip] = useState(false);
   const [betBookmaker, setBetBookmaker] = useState<"1win" | "1xbet">("1win");
@@ -199,21 +193,6 @@ const Pronostics = () => {
     },
     enabled: isPartner && tab === "coupons",
     staleTime: 30_000,
-  });
-
-  const { data: poolCoupons = [], isLoading: loadingPool, refetch: refetchPool } = useQuery<PoolCoupon[]>({
-    queryKey: ["pool-coupons"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("coupons")
-        .select("id, code, label, price_fcfa, status, creator_id, platform, analyses:analysis_id(team_home, team_away, league, confidence, result)")
-        .eq("status", "active")
-        .order("created_at", { ascending: false });
-      if (error) throw error;
-      return (data ?? []) as PoolCoupon[];
-    },
-    staleTime: 30_000,
-    refetchOnWindowFocus: true,
   });
 
   const { data: footballMatches = [], refetch: refetchMatches } = useQuery({
@@ -442,7 +421,6 @@ const Pronostics = () => {
 
   const navTabs = [
     { id: "analyses", label: "Pronostics" },
-    { id: "pool", label: "🛒 Pool" },
     ...(isPartner ? [{ id: "coupons", label: "Revendeur" }] : []),
     ...(isAdmin   ? [{ id: "publier", label: "Publier" }] : []),
   ] as { id: string; label: string }[];
@@ -455,7 +433,7 @@ const Pronostics = () => {
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-2xl font-bold text-foreground">Pronostics</h1>
-              {!isTelegramMode && <p className="text-sm text-muted-foreground">Sélectionnez vos matchs · Vendez sur 1win</p>}
+              {!isTelegramMode && <p className="text-sm text-muted-foreground">Tableau de bord partenaire</p>}
             </div>
             <div className="flex items-center gap-2">
               <button onClick={() => refetchAnalyses()}
@@ -744,78 +722,6 @@ const Pronostics = () => {
                         <p className="text-[10px] text-muted-foreground">net: {r.net_amount.toLocaleString("fr-FR")} F</p>
                       </div>
                     </div>
-                  ))}
-                </div>
-              )}
-            </motion.div>
-          )}
-
-          {tab === "pool" && (
-            <motion.div key="pool" initial={{ opacity:0 }} animate={{ opacity:1 }} exit={{ opacity:0 }} className="space-y-4">
-              <div className="rounded-2xl bg-gradient-to-r from-emerald-500/10 to-teal-500/10 border border-emerald-400/30 p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-start gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-600 shrink-0">
-                      <Store className="h-5 w-5 text-white" />
-                    </div>
-                    <div>
-                      <p className="font-bold text-foreground text-sm">Pool Commun</p>
-                      <p className="text-xs text-muted-foreground">{poolCoupons.length} coupon{poolCoupons.length!==1?"s":""} disponible{poolCoupons.length!==1?"s":""}</p>
-                    </div>
-                  </div>
-                  <button onClick={() => refetchPool()} className="flex h-8 w-8 items-center justify-center rounded-xl bg-muted hover:bg-muted/70">
-                    <RefreshCw className={`h-4 w-4 text-muted-foreground ${loadingPool?"animate-spin":""}`} />
-                  </button>
-                </div>
-              </div>
-              <button onClick={() => openLink("https://t.me/pack_officiel_expert_bot")}
-                className="w-full flex items-center gap-3 rounded-2xl bg-sky-500/10 border border-sky-400/30 p-4 hover:bg-sky-500/20 transition-colors">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-sky-500 shrink-0">
-                  <Send className="h-5 w-5 text-white" />
-                </div>
-                <div className="text-left flex-1 min-w-0">
-                  <p className="font-bold text-foreground text-sm">Bot Telegram Client</p>
-                  <p className="text-xs text-muted-foreground">@pack_officiel_expert_bot · Achat automatique</p>
-                </div>
-                <ExternalLink className="h-4 w-4 text-muted-foreground shrink-0" />
-              </button>
-              {loadingPool ? (
-                <div className="flex items-center justify-center py-10"><RefreshCw className="h-6 w-6 animate-spin text-primary" /></div>
-              ) : poolCoupons.length === 0 ? (
-                <div className="rounded-2xl bg-card p-8 text-center shadow-card">
-                  <Package className="h-10 w-10 mx-auto text-muted-foreground mb-3" />
-                  <p className="font-semibold text-foreground">Pool vide pour l'instant</p>
-                  <p className="text-xs text-muted-foreground mt-1">{isPartner ? "Publiez votre premier coupon depuis l'onglet Revendeur." : "Les revendeurs publieront bientôt des coupons ici."}</p>
-                  {isPartner && (
-                    <Button onClick={() => setTab("coupons")} className="mt-4 h-10 rounded-xl gradient-primary text-primary-foreground text-sm font-bold">
-                      <Tag className="h-4 w-4 mr-2" /> Publier un coupon
-                    </Button>
-                  )}
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {poolCoupons.map((c, i) => (
-                    <motion.div key={c.id} initial={{ opacity:0, y:8 }} animate={{ opacity:1, y:0 }} transition={{ delay:i*0.04 }}
-                      className="rounded-2xl bg-card shadow-card p-4 space-y-3">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex-1 min-w-0">
-                          <p className="font-bold text-foreground text-sm">{c.label || `Coupon ${(c.platform??'').toUpperCase()}`}</p>
-                          {c.analyses && <p className="text-[11px] text-muted-foreground mt-0.5">{c.analyses.team_home} vs {c.analyses.team_away}{c.analyses.league ? ` · ${c.analyses.league}` : ""}</p>}
-                        </div>
-                        <p className="font-bold text-xl text-primary shrink-0">{c.price_fcfa.toLocaleString("fr-FR")} F</p>
-                      </div>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        {c.analyses && <>
-                          <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold border ${CONFIDENCE_COLORS[c.analyses.confidence as Confidence] ?? "bg-muted text-muted-foreground border-border"}`}>{CONFIDENCE_LABELS[c.analyses.confidence as Confidence] ?? c.analyses.confidence}</span>
-                          <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${RESULT_COLORS[c.analyses.result as Result] ?? "bg-muted text-muted-foreground"}`}>{RESULT_LABELS[c.analyses.result as Result] ?? c.analyses.result}</span>
-                        </>}
-                        {c.platform && <span className="rounded-full px-2 py-0.5 text-[10px] font-bold bg-blue-500/15 text-blue-600">{c.platform.toUpperCase()}</span>}
-                      </div>
-                      <Button onClick={() => openLink("https://t.me/pack_officiel_expert_bot")}
-                        className="h-10 w-full rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-sm font-bold">
-                        <Send className="h-4 w-4 mr-2" /> Acheter via le Bot Telegram
-                      </Button>
-                    </motion.div>
                   ))}
                 </div>
               )}
