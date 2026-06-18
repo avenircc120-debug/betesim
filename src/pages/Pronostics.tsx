@@ -195,6 +195,45 @@ const Pronostics = () => {
     staleTime: 30_000,
   });
 
+
+  // Wallet + analyses à traiter (onglet Revendeur)
+  const { data: walletData } = useQuery({
+    queryKey: ["wallet", user?.id],
+    queryFn: async () => {
+      if (!user?.id) return null;
+      const { data } = await supabase
+        .from("commission_records")
+        .select("net_amount, type, description, created_at")
+        .eq("partner_id", user.uid)
+        .in("type", ["coupon_sale", "referral_commission"]);
+      const total = (data ?? []).reduce((s: number, r: any) => s + (r.net_amount || 0), 0);
+      return { total, count: (data ?? []).length, records: data ?? [] };
+    },
+    enabled: !!user?.id,
+  });
+
+  const { data: pendingAnalyses = [] } = useQuery({
+    queryKey: ["pending-analyses", user?.id],
+    queryFn: async () => {
+      if (!user?.id) return [];
+      const { data: allAnalyses } = await supabase
+        .from("analyses")
+        .select("id, team_home, team_away, league, match_date, result, confidence_pct, platform_suggestion")
+        .eq("published", true)
+        .order("match_date", { ascending: true })
+        .limit(10);
+      if (!allAnalyses?.length) return [];
+      const { data: done } = await supabase
+        .from("coupons")
+        .select("analysis_id")
+        .eq("creator_id", user.uid)
+        .in("analysis_id", allAnalyses.map((a: any) => a.id));
+      const doneIds = new Set((done ?? []).map((c: any) => c.analysis_id));
+      return allAnalyses.filter((a: any) => !doneIds.has(a.id)) as any[];
+    },
+    enabled: !!user?.id,
+  });
+
   const { data: footballMatches = [], refetch: refetchMatches } = useQuery({
     queryKey: ["football-matches"],
     queryFn: async () => {
@@ -616,6 +655,78 @@ const Pronostics = () => {
 
           {tab === "coupons" && isPartner && (
             <motion.div key="coupons" initial={{ opacity:0 }} animate={{ opacity:1 }} exit={{ opacity:0 }} className="space-y-4">
+
+              {/* ── Wallet Card ────────────────────────────────────────── */}
+              <div className="rounded-2xl border bg-gradient-to-br from-emerald-950/50 to-emerald-900/30 border-emerald-800/40 p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">💰</span>
+                    <span className="font-semibold text-emerald-300 text-sm">Mon Wallet Revendeur</span>
+                  </div>
+                  <Badge variant="outline" className="border-emerald-600 text-emerald-400 text-xs">
+                    {walletData?.count ?? 0} vente{(walletData?.count ?? 0) > 1 ? "s" : ""}
+                  </Badge>
+                </div>
+                <div className="text-3xl font-bold text-white mb-1">
+                  {(walletData?.total ?? 0).toLocaleString("fr-FR")} <span className="text-lg text-emerald-400">FCFA</span>
+                </div>
+                <p className="text-xs text-muted-foreground">70 % de chaque coupon vendu vous revient directement</p>
+              </div>
+
+              {/* ── Lier compte Telegram ────────────────────────────────── */}
+              <div className="rounded-2xl border border-blue-800/40 bg-blue-950/20 p-4">
+                <div className="flex items-start gap-3">
+                  <span className="text-xl mt-0.5">🔗</span>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold text-blue-300 text-sm mb-1">Recevoir les alertes &amp; gérer depuis Telegram</p>
+                    <ol className="text-xs text-muted-foreground space-y-0.5 mb-2">
+                      <li>1. Copiez votre UID ci-dessous</li>
+                      <li>2. Ouvrez <a href="https://t.me/pack_officiel_expert_bot" target="_blank" className="text-blue-400 underline">@pack_officiel_expert_bot</a></li>
+                      <li>3. Envoyez : <code className="bg-blue-950/60 px-1 rounded">/connect {"{"}{user?.id}{"}"}</code></li>
+                    </ol>
+                    <div className="flex items-center gap-2">
+                      <code className="text-xs bg-muted px-2 py-1 rounded flex-1 truncate">{user?.id ?? "Connectez-vous"}</code>
+                      {user?.id && (
+                        <button onClick={() => navigator.clipboard.writeText(user.id)}
+                          className="text-xs text-blue-400 hover:text-blue-300 border border-blue-700/40 rounded px-2 py-1 flex-shrink-0">
+                          Copier
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* ── Analyses à traiter ──────────────────────────────────── */}
+              {(pendingAnalyses as any[]).length > 0 && (
+                <div className="rounded-2xl border border-amber-800/40 bg-amber-950/20 p-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className="text-lg">🔔</span>
+                    <span className="font-semibold text-amber-300 text-sm">
+                      {(pendingAnalyses as any[]).length} analyse{(pendingAnalyses as any[]).length > 1 ? "s" : ""} en attente de coupon
+                    </span>
+                  </div>
+                  <div className="space-y-2">
+                    {(pendingAnalyses as any[]).map((a: any) => (
+                      <div key={a.id} className="flex items-center justify-between rounded-xl bg-amber-950/30 border border-amber-800/30 px-3 py-2">
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium truncate">{a.team_home} vs {a.team_away}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {a.platform_suggestion?.toUpperCase() ?? "1xBet/1Win"} · {a.confidence_pct ?? "?"}% confiance
+                          </p>
+                        </div>
+                        <Badge variant="outline" className="border-amber-600 text-amber-400 text-xs ml-2 flex-shrink-0">
+                          À créer
+                        </Badge>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-2">
+                    📲 Via bot : <code className="bg-muted px-1 rounded">/analyses</code> puis sélectionne et entre le code
+                  </p>
+                </div>
+              )}
+
               <div className="rounded-2xl bg-gradient-to-r from-amber-500/10 to-orange-500/10 border border-amber-400/30 p-4">
                 <div className="flex items-center gap-3">
                   <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-500 shrink-0">
