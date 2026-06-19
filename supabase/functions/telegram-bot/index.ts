@@ -1524,7 +1524,7 @@ serve(async (req) => {
 
       // ── Dashboard home ────────────────────────────────────────────────────
       if (data === "dashboard_home" || data === "wallet_detail" || data === "show_analyses" || data === "my_coupons") {
-        const reseller = await getResellerProfile(supabase, chatId);
+        let reseller = await getResellerProfile(supabase, chatId);
         await answerCallback(cb.id);
         if (!reseller) {
           // Auto-créer le profil revendeur directement depuis le bot (sans passer par le site)
@@ -1548,9 +1548,9 @@ serve(async (req) => {
               await sendMessage(chatId, "❌ Une erreur technique est survenue. Tape /start pour réessayer.");
               return new Response("ok", { status: 200 });
             }
-            (reseller as any) = existingProfile;
+            reseller = existingProfile;
           } else {
-            (reseller as any) = insertedProfile;
+            reseller = insertedProfile;
           }
         }
 
