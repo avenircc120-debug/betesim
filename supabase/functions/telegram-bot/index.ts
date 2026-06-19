@@ -294,7 +294,7 @@ async function handleFreeText(chatId: number, text: string, firstName: string, t
   const proUrl = await pronosticsUrl(supabase);
   const proKb = { inline_keyboard: [[{ text: "📊 Voir les Pronostics", web_app: { url: proUrl } }]] };
 
-  const greetKw = ["salut","bonjour","hello","hi","allo","allô","bonsoir","yo","slt","bjr","bj"];
+  const greetKw = ["salut","bonjour","hello","hi","allo","allô","bonsoir","yo","slt","bjr","bj","coucou","cc","cv","ça va","ca va","wesh","bsr","bien","bien?","koi","quoi de neuf","quoi de 9"];
   const openKw  = ["pronostic","prono","match","voir","logiciel","coupon","pack","ouvrir","start","analyse"];
   const helpKw  = ["aide","help","?","comment","quoi","kess","kes ke","info"];
 
@@ -306,17 +306,17 @@ async function handleFreeText(chatId: number, text: string, firstName: string, t
   let kb: unknown = proKb;
 
   if (isGreet && !isOpen) {
+    kb = {
+      inline_keyboard: [
+        [{ text: "📊 Voir les Pronostics", web_app: { url: proUrl } }],
+        [{ text: "🎟 Voir les coupons disponibles", callback_data: "voir_pool" }],
+        [{ text: "📋 Mon Dashboard Revendeur", callback_data: "dashboard_home" }],
+      ],
+    };
     reply = [
-      `👋 <b>Salut ${escapeHtml(firstName)} !</b>`,
+      `👋 <b>Salut ${escapeHtml(firstName)} !`,
       ``,
-      `Bienvenue dans <b>Pack Officiel</b> 🎯`,
-      ``,
-      `Tu peux me demander :`,
-      `• Mon 2FA est actif ?`,
-      `• Quel est mon statut de compte ?`,
-      `• Quel est mon solde ?`,
-      ``,
-      `Ou touche le bouton pour voir les pronostics du jour 👇`,
+      `Que veux-tu faire ?`,
     ].join("\n");
   } else if (isOpen) {
     reply = [
@@ -338,15 +338,14 @@ async function handleFreeText(chatId: number, text: string, firstName: string, t
     ].join("\n");
   } else {
     // Message non reconnu → guide simple
+    kb = {
+      inline_keyboard: [
+        [{ text: "📊 Voir les Pronostics", web_app: { url: proUrl } }],
+        [{ text: "🎟 Voir les coupons disponibles", callback_data: "voir_pool" }],
+      ],
+    };
     reply = [
-      `🤔 Je n'ai pas bien compris, ${escapeHtml(firstName)}.`,
-      ``,
-      `Essaie :`,
-      `• "Mon 2FA est actif ?" — pour vérifier ta sécurité`,
-      `• "Quel est mon statut ?" — pour voir ton compte`,
-      `• "Quel est mon solde ?" — pour tes ventes`,
-      ``,
-      `Ou touche le bouton pour accéder aux pronostics 👇`,
+      `👇 Choisis une option :`,
     ].join("\n");
   }
 
