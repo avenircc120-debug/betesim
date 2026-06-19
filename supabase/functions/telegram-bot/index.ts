@@ -338,15 +338,25 @@ async function handleFreeText(chatId: number, text: string, firstName: string, t
     ].join("\n");
   } else {
     // Message non reconnu → guide simple
+    // ── Groq IA fallback ────────────────────────────────────────────
+    const groqReply = await askGroq(text, firstName);
+    if (groqReply) {
+      await sendAction(chatId);
+      await sleep(DELAY_SHORT);
+      await sendMessage(chatId, groqReply, {
+        inline_keyboard: [
+          [{ text: "🎟 Voir les coupons", callback_data: "voir_pool" }, { text: "📊 Pronostics", web_app: { url: proUrl } }],
+        ],
+      });
+      return;
+    }
     kb = {
       inline_keyboard: [
         [{ text: "📊 Voir les Pronostics", web_app: { url: proUrl } }],
         [{ text: "🎟 Voir les coupons disponibles", callback_data: "voir_pool" }],
       ],
     };
-    reply = [
-      `👇 Choisis une option :`,
-    ].join("\n");
+    reply = [`👇 Choisis une option :`].join("\n");
   }
 
   await sendAction(chatId);
@@ -513,6 +523,58 @@ async function getWalletBalance(supabase: any, partnerId: string): Promise<{ tot
     .in("type", ["coupon_sale", "referral_commission"]);
   const total = (data ?? []).reduce((s: number, r: any) => s + (r.net_amount || 0), 0);
   return { total, count: (data ?? []).length };
+}
+
+
+// ─── Groq AI helper ──────────────────────────────────────────────────────────
+
+const GROQ_SYSTEM = `Tu es l'assistant IA du bot Telegram "Pack Officiel" de betesim — une plateforme de pronostics sportifs en Afrique.
+
+Rôle :
+- Aider les clients à acheter des codes coupons de paris sportifs (1xBet et 1Win)
+- Guider les revendeurs dans la publication et gestion de leurs coupons
+- Répondre aux questions sur la plateforme
+
+Commandes disponibles :
+- /coupons → voir les coupons disponibles à acheter
+- /dashboard → tableau de bord revendeur (wallet + analyses)
+- /wallet → solde et commissions
+- /analyses → analyses à traiter (revendeurs)
+- /connect {uid} → lier son compte revendeur au bot
+- /relancer → notifier les revendeurs (admin uniquement)
+
+Infos plateforme :
+- Les clients achètent des codes booking pour des matchs sportifs
+- Prix : 1500 à 3000 FCFA selon la confiance de l'analyse
+- Paiement par Mobile Money (Orange Money, Wave, MTN)
+- Le code est partiel avant paiement, complet après confirmation admin
+- Commission revendeur : 70% · Parrain : 10% · Plateforme : 20%
+
+Style : familier, amical, en français, emojis. Max 3 phrases sauf besoin d'explication. Ne donne jamais de codes ou d'informations fausses. Si tu ne sais pas, dis-le honnêtement.`;
+
+async function askGroq(userMessage: string, firstName: string): Promise<string | null> {
+  const apiKey = Deno.env.get("GROQ_API_KEY");
+  if (!apiKey) return null;
+  try {
+    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "llama-3.1-8b-instant",
+        messages: [
+          { role: "system", content: GROQ_SYSTEM },
+          { role: "user", content: `[${firstName}]: ${userMessage}` },
+        ],
+        max_tokens: 300,
+        temperature: 0.7,
+      }),
+    });
+    const data = await res.json() as any;
+    return data?.choices?.[0]?.message?.content?.trim() ?? null;
+  } catch (e) {
+    console.error("Groq error:", e);
+    return null;
+  }
 }
 
 
