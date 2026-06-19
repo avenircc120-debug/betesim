@@ -872,14 +872,13 @@ serve(async (req) => {
       const chatId = update.message.chat.id;
       const uid = update.message.text.split(" ")[1]?.trim();
       if (!uid) {
-        // Plus besoin de passer par le site — création automatique via /start
         await sendMessage(chatId, [
-          `🔗 <b>Créer ton profil revendeur</b>`, ``,
-          `Tu n'as pas besoin d'aller sur le site web.`,
-          `Clique simplement sur le bouton ci-dessous pour créer ton profil directement ici :`,
-        ].join("\n"), {
-          inline_keyboard: [[{ text: "📋 Créer mon Dashboard", callback_data: "dashboard_home" }]],
-        });
+          `🔗 <b>Lier ton compte revendeur</b>`, ``,
+          `Envoie ta commande avec ton UID revendeur :`,
+          `<code>/connect {ton_uid}</code>`,
+          ``,
+          `Ton UID t'a été fourni par l'administrateur.`,
+        ].join("\n"));
         return new Response("ok", { status: 200 });
       }
       // Verify profile exists
@@ -908,17 +907,25 @@ serve(async (req) => {
     // ── /dashboard — espace revendeur ─────────────────────────────────────────
     if (update.message?.text?.startsWith("/dashboard") || update.message?.text?.startsWith("/mon_espace")) {
       const chatId = update.message.chat.id;
-      const reseller = await getResellerProfile(supabase, chatId);
+      let reseller = await getResellerProfile(supabase, chatId);
       if (!reseller) {
-        // Plus besoin du site — création automatique
-        await sendMessage(chatId, [
-          `🔒 <b>Profil non trouvé</b>`, ``,
-          `Tu n'as pas encore de profil revendeur.`,
-          `Clique sur le bouton ci-dessous — ton profil sera créé automatiquement :`,
-        ].join("\n"), {
-          inline_keyboard: [[{ text: "📋 Créer mon Dashboard", callback_data: "dashboard_home" }]],
+        // Auto-créer le profil revendeur
+        const firstName3 = update.message?.from?.first_name || "Revendeur";
+        const newId2 = crypto.randomUUID();
+        await supabase.from("profiles").insert({
+          id:               newId2,
+          full_name:        firstName3,
+          role:             "partner",
+          telegram_chat_id: chatId,
+          created_at:       new Date().toISOString(),
+          updated_at:       new Date().toISOString(),
         });
-        return new Response("ok", { status: 200 });
+        const { data: fp } = await supabase.from("profiles").select("id, full_name, role, email").eq("telegram_chat_id", chatId).maybeSingle();
+        if (!fp) {
+          await sendMessage(chatId, "❌ Impossible de créer ton profil. Contacte l'administrateur.");
+          return new Response("ok", { status: 200 });
+        }
+        reseller = fp;
       }
       const [wallet, analyses, { data: coupons }] = await Promise.all([
         getWalletBalance(supabase, reseller.id),
@@ -1375,17 +1382,14 @@ serve(async (req) => {
         const pro = await getPronostiqueurProfile(supabase, chatId);
         await answerCallback(cb.id);
         if (!pro) {
-          // L'utilisateur n'a pas encore les droits pronostiqueur — message interne, sans redirection externe
+          await answerCallback(cb.id);
           await sendMessage(chatId, [
             `🏆 <b>Espace Pronostiqueur</b>`,
             ``,
-            `🔒 Tu n'as pas encore accès à l'Espace Pronostiqueur.`,
+            `❌ Tu n'as pas encore accès à l'espace pronostiqueur.`,
             ``,
-            `Pour obtenir l'accès, contacte l'administrateur directement dans ce bot.`,
-            `Il activera ton compte pronostiqueur sans que tu aies besoin d'aller sur un site externe.`,
-          ].join("\n"), {
-            inline_keyboard: [[{ text: "🎟 Voir les coupons disponibles", callback_data: "voir_pool" }]],
-          });
+            `Contacte l'administrateur pour obtenir les droits pronostiqueur.`,
+          ].join("\n"));
           return new Response("ok", { status: 200 });
         }
 
@@ -1527,31 +1531,27 @@ serve(async (req) => {
         let reseller = await getResellerProfile(supabase, chatId);
         await answerCallback(cb.id);
         if (!reseller) {
-          // Auto-créer le profil revendeur directement depuis le bot (sans passer par le site)
+          // Auto-créer le profil revendeur directement depuis le bot
           const firstName2 = cb.from?.first_name || "Revendeur";
-          const newId = crypto.randomUUID();
-          const { data: insertedProfile, error: insertErr } = await supabase.from("profiles").insert({
-            id:               newId,
+          const newProfileId = crypto.randomUUID();
+          await supabase.from("profiles").insert({
+            id:               newProfileId,
             full_name:        firstName2,
             role:             "partner",
             telegram_chat_id: chatId,
             created_at:       new Date().toISOString(),
             updated_at:       new Date().toISOString(),
-          }).select("id, full_name, role, email").maybeSingle();
-          if (insertErr || !insertedProfile) {
-            // Si contrainte unique telegram_chat_id déjà pris : chercher le profil existant
-            const { data: existingProfile } = await supabase
-              .from("profiles").select("id, full_name, role, email")
-              .eq("telegram_chat_id", chatId).maybeSingle();
-            if (!existingProfile) {
-              console.error("dashboard_home insert error:", insertErr?.message);
-              await sendMessage(chatId, "❌ Une erreur technique est survenue. Tape /start pour réessayer.");
-              return new Response("ok", { status: 200 });
-            }
-            reseller = existingProfile;
-          } else {
-            reseller = insertedProfile;
+          });
+          // Re-charger le profil fraîchement créé
+          const { data: freshProfile } = await supabase
+            .from("profiles").select("id, full_name, role, email")
+            .eq("telegram_chat_id", chatId).maybeSingle();
+          if (!freshProfile) {
+            await sendMessage(chatId, "❌ Impossible de créer ton profil. Contacte l'administrateur.");
+            return new Response("ok", { status: 200 });
           }
+          // Continuer avec le profil créé (re-assign reseller)
+          reseller = freshProfile;
         }
 
         if (data === "wallet_detail") {
