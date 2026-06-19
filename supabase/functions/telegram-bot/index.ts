@@ -473,20 +473,20 @@ function unlockedMessage(firstName: string, hasUrl: boolean) {
 async function getResellerProfile(supabase: any, chatId: number) {
   const { data } = await supabase
     .from("profiles")
-    .select("id, full_name, role, email")
+    .select("id, full_name, is_partner, is_admin, email")
     .eq("telegram_chat_id", chatId)
     .maybeSingle();
-  return data as { id: string; full_name: string | null; role: string | null; email: string | null } | null;
+  return data as { id: string; full_name: string | null; is_partner: boolean; is_admin: boolean; email: string | null } | null;
 }
 
 async function getPronostiqueurProfile(supabase: any, chatId: number) {
   const { data } = await supabase
     .from("profiles")
-    .select("id, full_name, role, email")
+    .select("id, full_name, is_partner, is_admin, email")
     .eq("telegram_chat_id", chatId)
-    .in("role", ["pronostiqueur", "admin"])
+    .eq("is_admin", true)
     .maybeSingle();
-  return data as { id: string; full_name: string | null; role: string | null; email: string | null } | null;
+  return data as { id: string; full_name: string | null; is_partner: boolean; is_admin: boolean; email: string | null } | null;
 }
 
 async function getPronostiqueurWallet(supabase: any, proId: string): Promise<{ total: number; count: number }> {
@@ -883,12 +883,12 @@ serve(async (req) => {
       }
       // Verify profile exists
       const { data: profile, error } = await supabase
-        .from("profiles").select("id, full_name, role").eq("id", uid).maybeSingle();
+        .from("profiles").select("id, full_name, is_partner, is_admin").eq("id", uid).maybeSingle();
       if (!profile) {
         await sendMessage(chatId, "❌ UID introuvable. Vérifie bien l'identifiant copié depuis le Dashboard.");
         return new Response("ok", { status: 200 });
       }
-      if (profile.role !== "partner" && profile.role !== "admin") {
+      if (!profile.is_partner && !profile.is_admin) {
         await sendMessage(chatId, "❌ Ce compte n'a pas les droits revendeur. Contacte l'administrateur.");
         return new Response("ok", { status: 200 });
       }
@@ -911,16 +911,15 @@ serve(async (req) => {
       if (!reseller) {
         // Auto-créer le profil revendeur
         const firstName3 = update.message?.from?.first_name || "Revendeur";
-        const newId2 = crypto.randomUUID();
         await supabase.from("profiles").insert({
-          id:               newId2,
+          id:               `tg_${chatId}`,
           full_name:        firstName3,
-          role:             "partner",
+          is_partner:       true,
           telegram_chat_id: chatId,
           created_at:       new Date().toISOString(),
           updated_at:       new Date().toISOString(),
         });
-        const { data: fp } = await supabase.from("profiles").select("id, full_name, role, email").eq("telegram_chat_id", chatId).maybeSingle();
+        const { data: fp } = await supabase.from("profiles").select("id, full_name, is_partner, is_admin, email").eq("telegram_chat_id", chatId).maybeSingle();
         if (!fp) {
           await sendMessage(chatId, "❌ Impossible de créer ton profil. Contacte l'administrateur.");
           return new Response("ok", { status: 200 });
@@ -1027,7 +1026,7 @@ serve(async (req) => {
         .from("profiles")
         .select("id, full_name, telegram_chat_id")
         .not("telegram_chat_id", "is", null)
-        .in("role", ["partner", "admin"]);
+        .or("is_partner.eq.true,is_admin.eq.true");
       if (!resellers?.length) { await sendMessage(chatId, "⚠️ Aucun revendeur n'a encore lié son compte Telegram.\nPartagez la commande /connect."); return new Response("ok", { status: 200 }); }
       let notified = 0;
       for (const reseller of resellers as any[]) {
@@ -1152,6 +1151,7 @@ serve(async (req) => {
       const username  = tgUser?.username || null;
       const tgUserId  = tgUser?.id;
       const param     = msg.text.split(" ")[1]?.trim() ?? "";
+      await clearBotState(supabase, chatId); // Clear any stale awaiting_uid session
 
       // ── Lien client : ?start=c_RESELLERID ──────────────────────────────
       if (param.startsWith("c_")) {
@@ -1224,8 +1224,9 @@ serve(async (req) => {
         });
         // Auto-créer le profil revendeur directement dans le bot (pas besoin du site)
         const { data: newProfile } = await supabase.from("profiles").insert({
+          id:               `tg_${chatId}`,
           full_name:        firstName,
-          role:             "partner",
+          is_partner:       true,
           telegram_chat_id: chatId,
           created_at:       new Date().toISOString(),
           updated_at:       new Date().toISOString(),
@@ -1533,18 +1534,17 @@ serve(async (req) => {
         if (!reseller) {
           // Auto-créer le profil revendeur directement depuis le bot
           const firstName2 = cb.from?.first_name || "Revendeur";
-          const newProfileId = crypto.randomUUID();
           await supabase.from("profiles").insert({
-            id:               newProfileId,
+            id:               `tg_${chatId}`,
             full_name:        firstName2,
-            role:             "partner",
+            is_partner:       true,
             telegram_chat_id: chatId,
             created_at:       new Date().toISOString(),
             updated_at:       new Date().toISOString(),
           });
           // Re-charger le profil fraîchement créé
           const { data: freshProfile } = await supabase
-            .from("profiles").select("id, full_name, role, email")
+            .from("profiles").select("id, full_name, is_partner, is_admin, email")
             .eq("telegram_chat_id", chatId).maybeSingle();
           if (!freshProfile) {
             await sendMessage(chatId, "❌ Impossible de créer ton profil. Contacte l'administrateur.");
@@ -1823,19 +1823,23 @@ serve(async (req) => {
         const isProRole = session.state === "awaiting_uid_pro";
         const uid = rawText.replace(/[^a-f0-9\-]/gi, "").slice(0, 36);
         if (uid.length < 10) {
-          await sendMessage(chatId, "⚠️ UID invalide. Copie l'UID exact depuis le site (format : xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx).");
+          // Text is clearly not a UID — user is chatting normally, clear the state
+          await clearBotState(supabase, chatId);
+          await handleFreeText(chatId, rawText, firstName, tgUserId, supabase);
           return new Response("ok", { status: 200 });
         }
         const { data: profile, error } = await supabase
-          .from("profiles").select("id, full_name, role").eq("id", uid).maybeSingle();
+          .from("profiles").select("id, full_name, is_partner, is_admin").eq("id", uid).maybeSingle();
         if (!profile) {
           await sendMessage(chatId, "❌ UID introuvable. Vérifie bien le code copié depuis le site.");
           return new Response("ok", { status: 200 });
         }
-        const allowedRoles = isProRole ? ["pronostiqueur", "admin"] : ["partner", "admin", "pronostiqueur"];
-        if (!allowedRoles.includes(profile.role ?? "")) {
-          const roleLabel = isProRole ? "pronostiqueur" : "revendeur";
-          await sendMessage(chatId, `❌ Ce compte n'a pas les droits ${roleLabel}. Contacte l'administrateur.`);
+        if (isProRole && !profile.is_admin) {
+          await sendMessage(chatId, "❌ Ce compte n'a pas les droits pronostiqueur. Contacte l'administrateur.");
+          return new Response("ok", { status: 200 });
+        }
+        if (!isProRole && !profile.is_partner && !profile.is_admin) {
+          await sendMessage(chatId, "❌ Ce compte n'a pas les droits revendeur. Contacte l'administrateur.");
           return new Response("ok", { status: 200 });
         }
         await supabase.from("profiles").update({ telegram_chat_id: chatId }).eq("id", uid);
