@@ -1260,7 +1260,25 @@ serve(async (req) => {
         const reseller = await getResellerProfile(supabase, chatId);
         await answerCallback(cb.id);
         if (!reseller) {
-          await sendMessage(chatId, "🔒 Lie d'abord ton compte avec <code>/connect {uid}</code>\nTrouve ton UID sur betesim.vercel.app → Revendeur");
+          // Passe en mode "attente UID" pour que le user tape juste son UID
+          await supabase.from("bot_sessions").upsert({
+            telegram_chat_id: chatId,
+            state: "awaiting_uid",
+            data: { target: data },
+            updated_at: new Date().toISOString(),
+          });
+          const appBase = await getBase(supabase);
+          await sendMessage(chatId, [
+            `🔗 <b>Liaison de compte revendeur</b>`,
+            ``,
+            `Pour accéder à ton Dashboard, envoie-moi ton <b>UID revendeur</b> :`,
+            ``,
+            `1️⃣ Va sur <a href="${appBase}">${appBase}</a>`,
+            `2️⃣ Connecte-toi → onglet <b>Revendeur</b>`,
+            `3️⃣ Copie ton UID et colle-le <b>ici directement</b>`,
+          ].join("\n"), {
+            inline_keyboard: [[{ text: "🌐 Ouvrir le site", url: appBase }]],
+          });
           return new Response("ok", { status: 200 });
         }
 
@@ -1509,10 +1527,66 @@ serve(async (req) => {
 
     // ── Messages texte libres ─────────────────────────────────────────────
     if (update.message?.text && !update.message.text.startsWith("/")) {
-      const chatId   = update.message.chat.id;
-      const tgUserId = update.message.from?.id ?? 0;
+      const chatId    = update.message.chat.id;
+      const tgUserId  = update.message.from?.id ?? 0;
       const firstName = update.message.from?.first_name || "ami";
-      await handleFreeText(chatId, update.message.text, firstName, tgUserId, supabase);
+      const rawText   = update.message.text.trim();
+
+      // ── Intercepte l'état "awaiting_uid" pour auto-connecter le revendeur ──
+      const session = await getBotState(supabase, chatId);
+      if (session?.state === "awaiting_uid") {
+        const uid = rawText.replace(/[^a-f0-9\-]/gi, "").slice(0, 36);
+        if (uid.length < 10) {
+          await sendMessage(chatId, "⚠️ UID invalide. Copie l'UID exact depuis le site (format : xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx).");
+          return new Response("ok", { status: 200 });
+        }
+        const { data: profile, error } = await supabase
+          .from("profiles").select("id, full_name, role").eq("id", uid).maybeSingle();
+        if (!profile) {
+          await sendMessage(chatId, "❌ UID introuvable. Vérifie bien le code copié depuis le site.");
+          return new Response("ok", { status: 200 });
+        }
+        if (profile.role !== "partner" && profile.role !== "admin") {
+          await sendMessage(chatId, "❌ Ce compte n'a pas les droits revendeur. Contacte l'administrateur.");
+          return new Response("ok", { status: 200 });
+        }
+        await supabase.from("profiles").update({ telegram_chat_id: chatId }).eq("id", uid);
+        await clearBotState(supabase, chatId);
+        const target = (session.data as any)?.target ?? "dashboard_home";
+        await sendMessage(chatId, [
+          `✅ <b>Compte lié avec succès !</b>`,
+          `Bienvenue, <b>${escapeHtml(profile.full_name || "Revendeur")}</b> !`,
+          ``,
+          `Chargement de ton dashboard...`,
+        ].join("\n"));
+        // Rediriger vers le dashboard
+        const [wallet, analyses, { data: coupons }] = await Promise.all([
+          getWalletBalance(supabase, profile.id),
+          getPendingAnalyses(supabase, profile.id),
+          supabase.from("coupons").select("id, status").eq("creator_id", profile.id),
+        ]);
+        const active = (coupons ?? []).filter((c: any) => c.status === "active").length;
+        const sold   = (coupons ?? []).filter((c: any) => c.status === "sold").length;
+        await sendHuman(chatId, [
+          `📊 <b>Dashboard Revendeur</b>`,
+          `👤 ${escapeHtml(profile.full_name || "Revendeur")}`,
+          ``,
+          `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+          `💰 Wallet : <b>${wallet.total.toLocaleString("fr-FR")} FCFA</b> (${wallet.count} vente${wallet.count > 1 ? "s" : ""})`,
+          `🎟 Actifs : <b>${active}</b> · Vendus : <b>${sold}</b>`,
+          `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+          analyses.length > 0 ? `🔔 <b>${analyses.length} analyse${analyses.length > 1 ? "s" : ""} en attente !</b>` : `✅ Toutes les analyses traitées.`,
+        ].join("\n"), {
+          inline_keyboard: [
+            [{ text: "💰 Mon Wallet", callback_data: "wallet_detail" }, { text: "📋 Analyses", callback_data: "show_analyses" }],
+            [{ text: "🎟 Mes coupons", callback_data: "my_coupons" }],
+            [{ text: "🔗 Mes liens de partage", callback_data: "dashboard_home" }],
+          ],
+        }, DELAY_SHORT);
+        return new Response("ok", { status: 200 });
+      }
+
+      await handleFreeText(chatId, rawText, firstName, tgUserId, supabase);
       return new Response("ok", { status: 200 });
     }
 
