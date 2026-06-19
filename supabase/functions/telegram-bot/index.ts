@@ -1145,7 +1145,18 @@ serve(async (req) => {
 
       // ── Lien client : ?start=c_RESELLERID ──────────────────────────────
       if (param.startsWith("c_")) {
-        const referrerId = param.slice(2);
+        const rawId = param.slice(2);
+        // rawId peut être un chatId numérique (nouveau) ou un UUID Supabase (ancien)
+        let resolvedReferrerId: string | null = null;
+        if (/^\d+$/.test(rawId)) {
+          // Chercher le profil revendeur par telegram_chat_id
+          const { data: refProfile } = await supabase
+            .from("profiles").select("id").eq("telegram_chat_id", Number(rawId)).maybeSingle();
+          resolvedReferrerId = (refProfile as any)?.id ?? null;
+        } else {
+          resolvedReferrerId = rawId || null;
+        }
+        const referrerId = resolvedReferrerId;
         // Crée automatiquement un partner_pack pour ce nouveau client
         const { data: newPack, error: packErr } = await supabase
           .from("partner_packs")
@@ -1201,23 +1212,46 @@ serve(async (req) => {
           data: { referrer_id: referrerId, first_name: firstName, username, tg_user_id: tgUserId },
           updated_at: new Date().toISOString(),
         });
-        const appBase = await getBase(supabase);
+        // Auto-créer le profil revendeur directement dans le bot (pas besoin du site)
+        const { data: newProfile } = await supabase.from("profiles").insert({
+          full_name:        firstName,
+          role:             "partner",
+          telegram_chat_id: chatId,
+          created_at:       new Date().toISOString(),
+          updated_at:       new Date().toISOString(),
+        }).select("id").maybeSingle();
+        const profileId = (newProfile as any)?.id;
+        // Lier le parrain si valide
+        if (referrerId && profileId) {
+          let resolvedRef: string | null = null;
+          if (/^\d+$/.test(referrerId)) {
+            const { data: rp } = await supabase.from("profiles").select("id").eq("telegram_chat_id", Number(referrerId)).maybeSingle();
+            resolvedRef = (rp as any)?.id ?? null;
+          } else {
+            resolvedRef = referrerId;
+          }
+          if (resolvedRef) {
+            await supabase.from("profiles").update({ referrer_id: resolvedRef } as any).eq("id", profileId);
+          }
+        }
+        const BOT_UN = Deno.env.get("BOT_USERNAME") || "pack_officiel_expert_bot";
+        const clientLink   = `https://t.me/${BOT_UN}?start=c_${chatId}`;
+        const revendeurLink = `https://t.me/${BOT_UN}?start=r_${chatId}`;
         await sendMessage(chatId, [
-          `🤝 <b>Bienvenue ${escapeHtml(firstName)} — Inscription Revendeur</b>`,
+          `🎉 <b>Bienvenue ${escapeHtml(firstName)} — Compte Revendeur créé !</b>`,
           ``,
-          `Pour rejoindre l'équipe de revendeurs, suis ces 3 étapes :`,
+          `✅ Tu es maintenant revendeur sur Pack Officiel.`,
+          `Voici tes 2 liens de partage :`,
           ``,
-          `1️⃣ Crée ton compte sur :`,
-          `   <b>${appBase}</b>`,
+          `👥 <b>Lien Client</b> (onboarding 1win) :`,
+          `<code>${clientLink}</code>`,
           ``,
-          `2️⃣ Va dans <b>Onglet Revendeur → Copier ton UID</b>`,
+          `🤝 <b>Lien Revendeur</b> (recruter des revendeurs) :`,
+          `<code>${revendeurLink}</code>`,
           ``,
-          `3️⃣ Reviens ici et envoie :`,
-          `   <code>/connect {ton_uid}</code>`,
-          ``,
-          `✅ Tu recevras toutes tes alertes et commissions directement sur Telegram !`,
+          `📊 Tape /dashboard pour accéder à ton espace.`,
         ].join("\n"), {
-          inline_keyboard: [[{ text: "🌐 Créer mon compte", url: appBase }]],
+          inline_keyboard: [[{ text: "📋 Mon Dashboard", callback_data: "dashboard_home" }]],
         });
         return new Response("ok", { status: 200 });
       }
@@ -1498,26 +1532,25 @@ serve(async (req) => {
         const reseller = await getResellerProfile(supabase, chatId);
         await answerCallback(cb.id);
         if (!reseller) {
-          // Passe en mode "attente UID" pour que le user tape juste son UID
-          await supabase.from("bot_sessions").upsert({
+          // Auto-créer le profil revendeur directement depuis le bot
+          const firstName2 = cb.from?.first_name || "Revendeur";
+          await supabase.from("profiles").insert({
+            full_name:        firstName2,
+            role:             "partner",
             telegram_chat_id: chatId,
-            state: "awaiting_uid",
-            data: { target: data },
-            updated_at: new Date().toISOString(),
+            created_at:       new Date().toISOString(),
+            updated_at:       new Date().toISOString(),
           });
-          const appBase = await getBase(supabase);
-          await sendMessage(chatId, [
-            `🔗 <b>Liaison de compte revendeur</b>`,
-            ``,
-            `Pour accéder à ton Dashboard, envoie-moi ton <b>UID revendeur</b> :`,
-            ``,
-            `1️⃣ Va sur <a href="${appBase}">${appBase}</a>`,
-            `2️⃣ Connecte-toi → onglet <b>Revendeur</b>`,
-            `3️⃣ Copie ton UID et colle-le <b>ici directement</b>`,
-          ].join("\n"), {
-            inline_keyboard: [[{ text: "🌐 Ouvrir le site", url: appBase }]],
-          });
-          return new Response("ok", { status: 200 });
+          // Re-charger le profil fraîchement créé
+          const { data: freshProfile } = await supabase
+            .from("profiles").select("id, full_name, role, email")
+            .eq("telegram_chat_id", chatId).maybeSingle();
+          if (!freshProfile) {
+            await sendMessage(chatId, "❌ Impossible de créer ton profil. Contacte l'administrateur.");
+            return new Response("ok", { status: 200 });
+          }
+          // Continuer avec le profil créé (re-assign reseller)
+          (reseller as any) = freshProfile;
         }
 
         if (data === "wallet_detail") {
@@ -1580,21 +1613,34 @@ serve(async (req) => {
           return new Response("ok", { status: 200 });
         }
 
-        // dashboard_home
+        // dashboard_home — affiche wallet + liens de partage
+        const BOT_UNAME = Deno.env.get("BOT_USERNAME") || "pack_officiel_expert_bot";
+        const clientLink    = `https://t.me/${BOT_UNAME}?start=c_${chatId}`;
+        const revendeurLink = `https://t.me/${BOT_UNAME}?start=r_${chatId}`;
         const [wallet, analyses, { data: coupons }] = await Promise.all([
-          getWalletBalance(supabase, reseller.id),
-          getPendingAnalyses(supabase, reseller.id),
-          supabase.from("coupons").select("id, status").eq("creator_id", reseller.id),
+          getWalletBalance(supabase, (reseller as any).id),
+          getPendingAnalyses(supabase, (reseller as any).id),
+          supabase.from("coupons").select("id, status").eq("creator_id", (reseller as any).id),
         ]);
         const active = (coupons ?? []).filter((c: any) => c.status === "active").length;
-        const sold = (coupons ?? []).filter((c: any) => c.status === "sold").length;
+        const sold   = (coupons ?? []).filter((c: any) => c.status === "sold").length;
         await sendMessage(chatId, [
-          `📊 <b>Dashboard Revendeur</b>`, `👤 ${escapeHtml(reseller.full_name || "Revendeur")}`, ``,
+          `📊 <b>Dashboard Revendeur</b>`,
+          `👤 ${escapeHtml((reseller as any).full_name || "Revendeur")}`,
+          ``,
           `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
           `💰 Wallet : <b>${wallet.total.toLocaleString("fr-FR")} FCFA</b> (${wallet.count} vente${wallet.count > 1 ? "s" : ""})`,
           `🎟 Actifs : <b>${active}</b> · Vendus : <b>${sold}</b>`,
           `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
           analyses.length > 0 ? `🔔 <b>${analyses.length} analyse${analyses.length > 1 ? "s" : ""} en attente !</b>` : `✅ Toutes les analyses traitées.`,
+          `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+          `🔗 <b>Mes liens de partage :</b>`,
+          ``,
+          `👥 <b>Lien Client</b> (onboarding 1win) :`,
+          `<code>${clientLink}</code>`,
+          ``,
+          `🤝 <b>Lien Revendeur</b> (recruter) :`,
+          `<code>${revendeurLink}</code>`,
         ].join("\n"), {
           inline_keyboard: [
             [{ text: "💰 Mon Wallet", callback_data: "wallet_detail" }, { text: "📋 Analyses", callback_data: "show_analyses" }],
