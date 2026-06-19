@@ -169,51 +169,6 @@ async function handleDBQuery(
 
   // ── Solde / Ventes / Commissions ────────────────────────────────────────────
 
-  // ─── Wizard state machine (booking code) ───────────────────────────────────
-  const session = await getBotState(supabase, chatId);
-  if (session?.state === "awaiting_booking_code") {
-    const { analysis_id, platform, reseller_id } = session.data as any;
-    const code = lower.trim().toUpperCase().replace(/\s+/g, "");
-    if (code.length < 4 || code.length > 30) {
-      await sendHuman(chatId, "⚠️ Code trop court ou invalide. Entre le code exact (4-30 caractères) :", undefined, DELAY_SHORT);
-      return true;
-    }
-    // Get analysis + price
-    const { data: analysis } = await supabase.from("analyses")
-      .select("id, team_home, team_away, confidence_pct").eq("id", analysis_id).maybeSingle();
-    // Default price based on confidence
-    const conf = (analysis as any)?.confidence_pct || 75;
-    const price = conf >= 90 ? 3000 : conf >= 80 ? 2000 : 1500;
-    // Create coupon
-    const { data: newCoupon, error } = await supabase.from("coupons").insert({
-      code,
-      label: analysis ? `${(analysis as any).team_home} vs ${(analysis as any).team_away}` : "Coupon",
-      price_fcfa: price,
-      platform,
-      status: "active",
-      creator_id: reseller_id,
-      analysis_id,
-    }).select("id").single();
-    await clearBotState(supabase, chatId);
-    if (error || !newCoupon) {
-      await sendHuman(chatId, `❌ Erreur lors de la création. Réessaie ou publie depuis le site.\n<code>${error?.message || "unknown"}</code>`, undefined, DELAY_SHORT);
-      return true;
-    }
-    await sendHuman(chatId, [
-      `🎉 <b>Coupon publié dans le Pool Commun !</b>`, ``,
-      `🎟 Code : <code>${code}</code>`,
-      `💰 Prix : <b>${price.toLocaleString("fr-FR")} FCFA</b>`,
-      `📲 Plateforme : <b>${platform.toUpperCase()}</b>`, ``,
-      `Ton coupon est maintenant visible dans le catalogue. Les clients peuvent l'acheter via le bot.`,
-    ].join("\n"), {
-      inline_keyboard: [
-        [{ text: "📋 Voir d'autres analyses", callback_data: "show_analyses" }],
-        [{ text: "📊 Retour au Dashboard", callback_data: "dashboard_home" }],
-      ],
-    }, DELAY_SHORT);
-    return true;
-  }
-
 
   // Catalogue coupons
   if (lower.match(/\b(coupon|coupons|catalogue|acheter|achat|prono|pronostic|disponible|pool|tip|paris|pari|veux|liste|voir|buy)\b/)) {
@@ -298,6 +253,46 @@ async function handleFreeText(chatId: number, text: string, firstName: string, t
   const openKw  = ["pronostic","prono","match","voir","logiciel","coupon","pack","ouvrir","start","analyse"];
   const helpKw  = ["aide","help","?","comment","quoi","kess","kes ke","info"];
 
+
+  // ─── Wizard state: revendeur en train d'entrer un code booking ─────────────
+  try {
+    const session = await getBotState(supabase, chatId);
+    if (session?.state === "awaiting_booking_code") {
+      const { analysis_id, platform, reseller_id } = session.data as any;
+      const code = lower.trim().toUpperCase().replace(/\s+/g, "");
+      if (code.length < 4 || code.length > 30) {
+        await sendHuman(chatId, "⚠️ Code trop court ou invalide. Entre le code exact (4-30 caractères) :", undefined, DELAY_SHORT);
+        return;
+      }
+      const { data: analysis } = await supabase.from("analyses")
+        .select("id, team_home, team_away, confidence_pct").eq("id", analysis_id).maybeSingle();
+      const conf = (analysis as any)?.confidence_pct || 75;
+      const price = conf >= 90 ? 3000 : conf >= 80 ? 2000 : 1500;
+      const { data: newCoupon, error } = await supabase.from("coupons").insert({
+        code, label: analysis ? `${(analysis as any).team_home} vs ${(analysis as any).team_away}` : "Coupon",
+        price_fcfa: price, platform, status: "active", creator_id: reseller_id, analysis_id,
+      }).select("id").single();
+      await clearBotState(supabase, chatId);
+      if (error || !newCoupon) {
+        await sendHuman(chatId, `❌ Erreur création. Réessaie ou publie depuis le site.\n<code>${error?.message || "unknown"}</code>`, undefined, DELAY_SHORT);
+        return;
+      }
+      await sendHuman(chatId, [
+        `🎉 <b>Coupon publié dans le Pool Commun !</b>`, ``,
+        `🎟 Code : <code>${code}</code>`,
+        `💰 Prix : <b>${price.toLocaleString("fr-FR")} FCFA</b>`,
+        `📲 Plateforme : <b>${platform.toUpperCase()}</b>`, ``,
+        "Ton coupon est maintenant visible dans le catalogue.",
+      ].join("\n"), {
+        inline_keyboard: [
+          [{ text: "📋 Voir d'autres analyses", callback_data: "show_analyses" }],
+          [{ text: "📊 Dashboard", callback_data: "dashboard_home" }],
+        ],
+      }, DELAY_SHORT);
+      return;
+    }
+  } catch (_wizErr) { /* ignore wizard errors, fall through to normal handling */ }
+
   const isGreet = greetKw.some(k => lower.includes(k));
   const isOpen  = openKw.some(k => lower.includes(k));
   const isHelp  = helpKw.some(k => lower.includes(k));
@@ -314,7 +309,7 @@ async function handleFreeText(chatId: number, text: string, firstName: string, t
       ],
     };
     reply = [
-      `👋 <b>Salut ${escapeHtml(firstName)} !`,
+      `👋 Salut <b>${escapeHtml(firstName)}</b> !`,
       ``,
       `Que veux-tu faire ?`,
     ].join("\n");
