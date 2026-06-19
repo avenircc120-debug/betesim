@@ -504,14 +504,14 @@ const Pronostics = () => {
           ))}
         </motion.div>
 
-        {!isTelegramMode && <div className="flex gap-1 rounded-2xl bg-muted p-1">
+        {<div className="flex gap-1 rounded-2xl bg-muted p-1">
           {navTabs.map(t => (
             <button key={t.id} onClick={() => setTab(t.id as any)}
               className={`flex-1 rounded-xl py-2 text-xs font-semibold transition-all ${
                 tab === t.id ? "bg-card shadow text-foreground" : "text-muted-foreground"
               }`}>{t.label}</button>
           ))}
-        </div>}
+        </div>
 
         {tab === "analyses" && analyses.length > 0 && selectedIds.size === 0 && (
           <motion.div initial={{ opacity:0, y:8 }} animate={{ opacity:1, y:0 }}
@@ -1302,6 +1302,27 @@ const Pronostics = () => {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* ── Bottom nav sticky pour mode Telegram ─────────────────────────── */}
+      {isTelegramMode && navTabs.length > 1 && (
+        <div className="fixed bottom-0 left-0 right-0 z-50 bg-card/95 backdrop-blur border-t border-border">
+          <div className="flex items-center justify-around px-2 py-2 safe-area-bottom">
+            {navTabs.map(t => (
+              <button key={t.id} onClick={() => setTab(t.id as any)}
+                className={`flex flex-col items-center gap-0.5 flex-1 py-1 rounded-xl transition-all ${
+                  tab === t.id
+                    ? "text-primary bg-primary/10"
+                    : "text-muted-foreground"
+                }`}>
+                {t.id === "analyses" && <BarChart2 className="h-5 w-5" />}
+                {t.id === "coupons"  && <Coins className="h-5 w-5" />}
+                {t.id === "publier"  && <Plus className="h-5 w-5" />}
+                <span className="text-[10px] font-semibold">{t.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
