@@ -872,13 +872,14 @@ serve(async (req) => {
       const chatId = update.message.chat.id;
       const uid = update.message.text.split(" ")[1]?.trim();
       if (!uid) {
+        // Plus besoin de passer par le site — création automatique via /start
         await sendMessage(chatId, [
-          `🔗 <b>Lier ton compte revendeur</b>`, ``,
-          `Pour recevoir les alertes et accéder à ton dashboard :`,
-          `1. Va sur <b>betesim.vercel.app</b> → onglet Revendeur`,
-          `2. Copie ton UID affiché`,
-          `3. Envoie : <code>/connect {ton_uid}</code>`,
-        ].join("\n"));
+          `🔗 <b>Créer ton profil revendeur</b>`, ``,
+          `Tu n'as pas besoin d'aller sur le site web.`,
+          `Clique simplement sur le bouton ci-dessous pour créer ton profil directement ici :`,
+        ].join("\n"), {
+          inline_keyboard: [[{ text: "📋 Créer mon Dashboard", callback_data: "dashboard_home" }]],
+        });
         return new Response("ok", { status: 200 });
       }
       // Verify profile exists
@@ -909,12 +910,14 @@ serve(async (req) => {
       const chatId = update.message.chat.id;
       const reseller = await getResellerProfile(supabase, chatId);
       if (!reseller) {
+        // Plus besoin du site — création automatique
         await sendMessage(chatId, [
-          `🔒 <b>Compte non lié</b>`, ``,
-          `Pour accéder à ton dashboard, lie d'abord ton compte :`,
-          `<code>/connect {ton_uid}</code>`, ``,
-          `Trouve ton UID sur <b>betesim.vercel.app → Revendeur</b>`,
-        ].join("\n"));
+          `🔒 <b>Profil non trouvé</b>`, ``,
+          `Tu n'as pas encore de profil revendeur.`,
+          `Clique sur le bouton ci-dessous — ton profil sera créé automatiquement :`,
+        ].join("\n"), {
+          inline_keyboard: [[{ text: "📋 Créer mon Dashboard", callback_data: "dashboard_home" }]],
+        });
         return new Response("ok", { status: 200 });
       }
       const [wallet, analyses, { data: coupons }] = await Promise.all([
@@ -1372,24 +1375,16 @@ serve(async (req) => {
         const pro = await getPronostiqueurProfile(supabase, chatId);
         await answerCallback(cb.id);
         if (!pro) {
-          // Même flow que revendeur: demander UID
-          await supabase.from("bot_sessions").upsert({
-            telegram_chat_id: chatId,
-            state: "awaiting_uid_pro",
-            data: { target: data },
-            updated_at: new Date().toISOString(),
-          });
-          const appBase = await getBase(supabase);
+          // L'utilisateur n'a pas encore les droits pronostiqueur — message interne, sans redirection externe
           await sendMessage(chatId, [
             `🏆 <b>Espace Pronostiqueur</b>`,
             ``,
-            `Pour accéder à ton espace, envoie-moi ton <b>UID pronostiqueur</b> :`,
+            `🔒 Tu n'as pas encore accès à l'Espace Pronostiqueur.`,
             ``,
-            `1️⃣ Va sur <a href="${appBase}">${appBase}</a>`,
-            `2️⃣ Connecte-toi → onglet <b>Revendeur</b>`,
-            `3️⃣ Copie ton UID et colle-le <b>ici</b>`,
+            `Pour obtenir l'accès, contacte l'administrateur directement dans ce bot.`,
+            `Il activera ton compte pronostiqueur sans que tu aies besoin d'aller sur un site externe.`,
           ].join("\n"), {
-            inline_keyboard: [[{ text: "🌐 Ouvrir le site", url: appBase }]],
+            inline_keyboard: [[{ text: "🎟 Voir les coupons disponibles", callback_data: "voir_pool" }]],
           });
           return new Response("ok", { status: 200 });
         }
@@ -1532,25 +1527,31 @@ serve(async (req) => {
         const reseller = await getResellerProfile(supabase, chatId);
         await answerCallback(cb.id);
         if (!reseller) {
-          // Auto-créer le profil revendeur directement depuis le bot
+          // Auto-créer le profil revendeur directement depuis le bot (sans passer par le site)
           const firstName2 = cb.from?.first_name || "Revendeur";
-          await supabase.from("profiles").insert({
+          const newId = crypto.randomUUID();
+          const { data: insertedProfile, error: insertErr } = await supabase.from("profiles").insert({
+            id:               newId,
             full_name:        firstName2,
             role:             "partner",
             telegram_chat_id: chatId,
             created_at:       new Date().toISOString(),
             updated_at:       new Date().toISOString(),
-          });
-          // Re-charger le profil fraîchement créé
-          const { data: freshProfile } = await supabase
-            .from("profiles").select("id, full_name, role, email")
-            .eq("telegram_chat_id", chatId).maybeSingle();
-          if (!freshProfile) {
-            await sendMessage(chatId, "❌ Impossible de créer ton profil. Contacte l'administrateur.");
-            return new Response("ok", { status: 200 });
+          }).select("id, full_name, role, email").maybeSingle();
+          if (insertErr || !insertedProfile) {
+            // Si contrainte unique telegram_chat_id déjà pris : chercher le profil existant
+            const { data: existingProfile } = await supabase
+              .from("profiles").select("id, full_name, role, email")
+              .eq("telegram_chat_id", chatId).maybeSingle();
+            if (!existingProfile) {
+              console.error("dashboard_home insert error:", insertErr?.message);
+              await sendMessage(chatId, "❌ Une erreur technique est survenue. Tape /start pour réessayer.");
+              return new Response("ok", { status: 200 });
+            }
+            (reseller as any) = existingProfile;
+          } else {
+            (reseller as any) = insertedProfile;
           }
-          // Continuer avec le profil créé (re-assign reseller)
-          (reseller as any) = freshProfile;
         }
 
         if (data === "wallet_detail") {
