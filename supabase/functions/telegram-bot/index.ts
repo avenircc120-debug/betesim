@@ -1078,14 +1078,11 @@ serve(async (req) => {
       const username  = cb.from.username || null;
       const firstName = cb.from.first_name || "Partenaire";
       const data = cb.data;
-      const pack = await getPackByTgUser(supabase, tgUserId);
 
-      if (!pack) {
-        await answerCallback(cb.id, "Session expirée — tape /start");
-        return new Response("ok", { status: 200 });
-      }
-
+      // ── Onboarding callbacks (need partner_pack) ──────────────────────────
       if (data === "done_2fa") {
+        const pack = await getPackByTgUser(supabase, tgUserId);
+        if (!pack) { await answerCallback(cb.id, "Session expirée — tape /start"); return new Response("ok", { status: 200 }); }
         await supabase.from("partner_packs").update({
           secured_2fa_at: new Date().toISOString(),
           telegram_username: username ?? pack.telegram_username,
@@ -1099,6 +1096,8 @@ serve(async (req) => {
       }
 
       if (data === "recheck_username") {
+        const pack = await getPackByTgUser(supabase, tgUserId);
+        if (!pack) { await answerCallback(cb.id, "Session expirée — tape /start"); return new Response("ok", { status: 200 }); }
         const uname = username ?? null;
         if (!uname) {
           await answerCallback(cb.id, "Toujours pas d'@username…");
@@ -1113,6 +1112,8 @@ serve(async (req) => {
       }
 
       if (data === "goto_1win") {
+        const pack = await getPackByTgUser(supabase, tgUserId);
+        if (!pack) { await answerCallback(cb.id, "Session expirée — tape /start"); return new Response("ok", { status: 200 }); }
         const uname = username ?? pack.telegram_username ?? null;
         if (!uname) { await answerCallback(cb.id, "Crée d'abord ton @username"); return new Response("ok", { status: 200 }); }
         const partnerLink = await getPartnerLink(supabase);
@@ -1122,6 +1123,8 @@ serve(async (req) => {
       }
 
       if (data === "done_1win") {
+        const pack = await getPackByTgUser(supabase, tgUserId);
+        if (!pack) { await answerCallback(cb.id, "Session expirée — tape /start"); return new Response("ok", { status: 200 }); }
         const now = new Date().toISOString();
         await supabase.from("partner_packs").update({
           partner_clicked_at: now, software_unlocked_at: now,
