@@ -306,6 +306,7 @@ async function handleFreeText(chatId: number, text: string, firstName: string, t
         [{ text: "📊 Voir les Pronostics", web_app: { url: proUrl } }],
         [{ text: "🎟 Voir les coupons disponibles", callback_data: "voir_pool" }],
         [{ text: "📋 Mon Dashboard Revendeur", callback_data: "dashboard_home" }],
+        [{ text: "🏆 Mon Espace Pronostiqueur", callback_data: "pro_home" }],
       ],
     };
     reply = [
@@ -478,6 +479,61 @@ async function getResellerProfile(supabase: any, chatId: number) {
   return data as { id: string; full_name: string | null; role: string | null; email: string | null } | null;
 }
 
+async function getPronostiqueurProfile(supabase: any, chatId: number) {
+  const { data } = await supabase
+    .from("profiles")
+    .select("id, full_name, role, email")
+    .eq("telegram_chat_id", chatId)
+    .in("role", ["pronostiqueur", "admin"])
+    .maybeSingle();
+  return data as { id: string; full_name: string | null; role: string | null; email: string | null } | null;
+}
+
+async function getPronostiqueurWallet(supabase: any, proId: string): Promise<{ total: number; count: number }> {
+  const { data } = await supabase
+    .from("commission_records")
+    .select("net_amount")
+    .eq("partner_id", proId)
+    .eq("type", "pronostiqueur_share");
+  const total = (data ?? []).reduce((s: number, r: any) => s + (r.net_amount || 0), 0);
+  return { total, count: (data ?? []).length };
+}
+
+async function getPronostiqueurStats(supabase: any, proId: string) {
+  // Analyses de ce pronostiqueur
+  const { data: analyses } = await supabase
+    .from("analyses")
+    .select("id, team_home, team_away, league, result, match_date, published")
+    .eq("pronostiqueur_id", proId)
+    .order("created_at", { ascending: false })
+    .limit(20);
+
+  const allA = analyses ?? [];
+  const published = allA.filter((a: any) => a.published).length;
+  const won       = allA.filter((a: any) => a.result === "gagné").length;
+  const lost      = allA.filter((a: any) => a.result === "perdu").length;
+  const pending   = allA.filter((a: any) => a.result === "en_attente").length;
+
+  // Coupons créés à partir de ses analyses
+  const analysisIds = allA.map((a: any) => a.id);
+  let resellers: any[] = [];
+  let soldCoupons: any[] = [];
+  if (analysisIds.length > 0) {
+    const { data: coupons } = await supabase
+      .from("coupons")
+      .select("id, status, price_fcfa, creator_id, buyer_id, sold_at, analysis_id, creator:creator_id(full_name), buyer:buyer_id(full_name)")
+      .in("analysis_id", analysisIds);
+    const allC = coupons ?? [];
+    soldCoupons = allC.filter((c: any) => c.status === "sold");
+    // Revendeurs uniques
+    const resellerMap = new Map<string, string>();
+    allC.forEach((c: any) => { if (c.creator_id) resellerMap.set(c.creator_id, (c.creator as any)?.full_name || c.creator_id.slice(0, 8)); });
+    resellers = Array.from(resellerMap.entries()).map(([id, name]) => ({ id, name }));
+  }
+
+  return { allA, published, won, lost, pending, resellers, soldCoupons };
+}
+
 async function setBotState(supabase: any, chatId: number, state: string, data: Record<string, unknown>) {
   await supabase.from("bot_sessions").upsert({ telegram_chat_id: chatId, state, data, updated_at: new Date().toISOString() });
 }
@@ -637,7 +693,7 @@ async function createBotOrder(supabase: any, couponId: string, buyerChatId: numb
 async function confirmBotOrder(supabase: any, orderId: string) {
   const { data: order } = await supabase
     .from("bot_orders")
-    .select("id, buyer_chat_id, amount_fcfa, coupons(id, code, platform, price_fcfa, creator_id, referrer_id)")
+    .select("id, buyer_chat_id, amount_fcfa, coupons(id, code, platform, price_fcfa, creator_id, referrer_id, analysis_id)")
     .eq("id", orderId).maybeSingle();
   if (!order) return null;
   const coupon = (order as any).coupons;
@@ -645,13 +701,35 @@ async function confirmBotOrder(supabase: any, orderId: string) {
   await supabase.from("coupons").update({ status: "sold", sold_at: new Date().toISOString(), buyer_id: String(order.buyer_chat_id) }).eq("id", coupon.id);
   await supabase.from("bot_orders").update({ status: "paid", paid_at: new Date().toISOString() }).eq("id", orderId);
   const gross = coupon.price_fcfa;
-  const creatorShare = Math.round(gross * 0.70);
+
+  // Récupérer le pronostiqueur lié à l'analyse (si applicable)
+  let pronostiqueurId: string | null = null;
+  if (coupon.analysis_id) {
+    const { data: analysis } = await supabase.from("analyses")
+      .select("pronostiqueur_id").eq("id", coupon.analysis_id).maybeSingle();
+    pronostiqueurId = (analysis as any)?.pronostiqueur_id ?? null;
+  }
+
+  // Répartition des commissions :
+  // Avec pronostiqueur : 60% revendeur / 10% pronostiqueur / 10% parrain / 20% plateforme
+  // Sans pronostiqueur : 70% revendeur / 10% parrain / 20% plateforme
+  const hasProno = !!pronostiqueurId;
+  const creatorPct  = hasProno ? 0.60 : 0.70;
+  const pronoPct    = hasProno ? 0.10 : 0.00;
+  const creatorShare  = Math.round(gross * creatorPct);
+  const pronoShare    = hasProno ? Math.round(gross * pronoPct) : 0;
   const referrerShare = Math.round(gross * 0.10);
-  const platformShare = gross - creatorShare - referrerShare;
+  const platformShare = gross - creatorShare - pronoShare - (coupon.referrer_id ? referrerShare : 0);
+
   const records: any[] = [
-    { coupon_id: coupon.id, type: "coupon_sale", gross_amount: gross, commission_amount: platformShare, net_amount: creatorShare, description: "Vente coupon (70%)", partner_id: coupon.creator_id },
+    { coupon_id: coupon.id, type: "coupon_sale", gross_amount: gross, commission_amount: platformShare, net_amount: creatorShare, description: `Vente coupon (${Math.round(creatorPct*100)}%)`, partner_id: coupon.creator_id },
   ];
-  if (coupon.referrer_id) records.push({ coupon_id: coupon.id, type: "referral_commission", gross_amount: gross, commission_amount: platformShare, net_amount: referrerShare, description: "Commission parrain (10%)", partner_id: coupon.referrer_id });
+  if (pronostiqueurId) {
+    records.push({ coupon_id: coupon.id, type: "pronostiqueur_share", gross_amount: gross, commission_amount: platformShare, net_amount: pronoShare, description: "Part pronostiqueur (10%)", partner_id: pronostiqueurId });
+  }
+  if (coupon.referrer_id) {
+    records.push({ coupon_id: coupon.id, type: "referral_commission", gross_amount: gross, commission_amount: platformShare, net_amount: referrerShare, description: "Commission parrain (10%)", partner_id: coupon.referrer_id });
+  }
   if (records.length) await supabase.from("commission_records").insert(records);
   return { couponCode: coupon.code, buyerChatId: order.buyer_chat_id, platform: coupon.platform, amount: gross };
 }
@@ -1255,6 +1333,166 @@ serve(async (req) => {
       }
 
 
+      // ── Espace Pronostiqueur ─────────────────────────────────────────────────
+      if (data === "pro_home" || data === "pro_analyses" || data === "pro_resellers" || data === "pro_clients" || data === "pro_wallet") {
+        const pro = await getPronostiqueurProfile(supabase, chatId);
+        await answerCallback(cb.id);
+        if (!pro) {
+          // Même flow que revendeur: demander UID
+          await supabase.from("bot_sessions").upsert({
+            telegram_chat_id: chatId,
+            state: "awaiting_uid_pro",
+            data: { target: data },
+            updated_at: new Date().toISOString(),
+          });
+          const appBase = await getBase(supabase);
+          await sendMessage(chatId, [
+            `🏆 <b>Espace Pronostiqueur</b>`,
+            ``,
+            `Pour accéder à ton espace, envoie-moi ton <b>UID pronostiqueur</b> :`,
+            ``,
+            `1️⃣ Va sur <a href="${appBase}">${appBase}</a>`,
+            `2️⃣ Connecte-toi → onglet <b>Revendeur</b>`,
+            `3️⃣ Copie ton UID et colle-le <b>ici</b>`,
+          ].join("\n"), {
+            inline_keyboard: [[{ text: "🌐 Ouvrir le site", url: appBase }]],
+          });
+          return new Response("ok", { status: 200 });
+        }
+
+        const proKbBottom = {
+          inline_keyboard: [
+            [{ text: "📊 Mes analyses", callback_data: "pro_analyses" }, { text: "👥 Revendeurs actifs", callback_data: "pro_resellers" }],
+            [{ text: "🛒 Clients acheteurs", callback_data: "pro_clients" }, { text: "💰 Mon sous-wallet", callback_data: "pro_wallet" }],
+          ],
+        };
+
+        // ── pro_wallet ──────────────────────────────────────────────────────
+        if (data === "pro_wallet") {
+          const [wallet, { data: records }] = await Promise.all([
+            getPronostiqueurWallet(supabase, pro.id),
+            supabase.from("commission_records")
+              .select("net_amount, created_at, coupon_id")
+              .eq("partner_id", pro.id)
+              .eq("type", "pronostiqueur_share")
+              .order("created_at", { ascending: false })
+              .limit(8),
+          ]);
+          const lines = (records ?? []).map((r: any) => {
+            const date = new Date(r.created_at).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" });
+            return `  • ${date} — <b>+${(r.net_amount || 0).toLocaleString("fr-FR")} FCFA</b>`;
+          });
+          await sendMessage(chatId, [
+            `💰 <b>Sous-Wallet Pronostiqueur</b>`,
+            `👤 ${escapeHtml(pro.full_name || "Pronostiqueur")}`,
+            ``,
+            `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+            `💵 Total gagné : <b>${wallet.total.toLocaleString("fr-FR")} FCFA</b>`,
+            `📦 Ventes liées : <b>${wallet.count}</b>`,
+            `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+            lines.length ? `\n📋 <b>Derniers gains :</b>\n${lines.join("\n")}` : `\n<i>Aucun gain enregistré pour l'instant.</i>`,
+            ``,
+            `<i>💡 Tu touches 10% de chaque coupon vendu basé sur tes analyses.</i>`,
+          ].join("\n"), {
+            inline_keyboard: [
+              [{ text: "◀ Retour dashboard", callback_data: "pro_home" }],
+            ],
+          });
+          return new Response("ok", { status: 200 });
+        }
+
+        // ── pro_analyses ────────────────────────────────────────────────────
+        if (data === "pro_analyses") {
+          const stats = await getPronostiqueurStats(supabase, pro.id);
+          const recentLines = stats.allA.slice(0, 8).map((a: any) => {
+            const emoji = a.result === "gagné" ? "✅" : a.result === "perdu" ? "❌" : a.result === "en_attente" ? "⏳" : "➖";
+            const date = a.match_date ? new Date(a.match_date).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" }) : "—";
+            return `${emoji} <b>${escapeHtml(a.team_home)} vs ${escapeHtml(a.team_away)}</b> (${date})`;
+          });
+          await sendMessage(chatId, [
+            `📊 <b>Mes Analyses</b>`,
+            ``,
+            `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+            `📝 Publiées : <b>${stats.published}</b>`,
+            `✅ Gagnées  : <b>${stats.won}</b>   ❌ Perdues : <b>${stats.lost}</b>   ⏳ En attente : <b>${stats.pending}</b>`,
+            `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+            recentLines.length ? `\n<b>Dernières analyses :</b>\n${recentLines.join("\n")}` : `\n<i>Aucune analyse publiée pour l'instant.</i>`,
+          ].join("\n"), {
+            inline_keyboard: [
+              [{ text: "👥 Revendeurs actifs", callback_data: "pro_resellers" }, { text: "🛒 Clients acheteurs", callback_data: "pro_clients" }],
+              [{ text: "◀ Retour dashboard", callback_data: "pro_home" }],
+            ],
+          });
+          return new Response("ok", { status: 200 });
+        }
+
+        // ── pro_resellers ───────────────────────────────────────────────────
+        if (data === "pro_resellers") {
+          const stats = await getPronostiqueurStats(supabase, pro.id);
+          const lines = stats.resellers.slice(0, 10).map((r: any, i: number) => {
+            const count = stats.soldCoupons.filter((c: any) => c.creator_id === r.id).length;
+            return `${i + 1}. <b>${escapeHtml(r.name)}</b> — ${count} vente${count > 1 ? "s" : ""}`;
+          });
+          await sendMessage(chatId, [
+            `👥 <b>Revendeurs actifs sur tes analyses</b>`,
+            ``,
+            `<b>${stats.resellers.length}</b> revendeur${stats.resellers.length > 1 ? "s" : ""} ont créé des coupons depuis tes analyses.`,
+            ``,
+            lines.length ? lines.join("\n") : `<i>Aucun revendeur encore.</i>`,
+          ].join("\n"), {
+            inline_keyboard: [
+              [{ text: "🛒 Clients acheteurs", callback_data: "pro_clients" }, { text: "◀ Retour", callback_data: "pro_home" }],
+            ],
+          });
+          return new Response("ok", { status: 200 });
+        }
+
+        // ── pro_clients ─────────────────────────────────────────────────────
+        if (data === "pro_clients") {
+          const stats = await getPronostiqueurStats(supabase, pro.id);
+          const totalRevenu = stats.soldCoupons.reduce((s: number, c: any) => s + (c.price_fcfa || 0), 0);
+          const lines = stats.soldCoupons.slice(0, 10).map((c: any) => {
+            const date = c.sold_at ? new Date(c.sold_at).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" }) : "—";
+            const buyer = (c.buyer as any)?.full_name || "Client anonyme";
+            return `• ${date} — <b>${escapeHtml(buyer)}</b> — ${(c.price_fcfa || 0).toLocaleString("fr-FR")} FCFA`;
+          });
+          await sendMessage(chatId, [
+            `🛒 <b>Clients ayant acheté tes coupons</b>`,
+            ``,
+            `💰 Revenu total généré : <b>${totalRevenu.toLocaleString("fr-FR")} FCFA</b>`,
+            `📦 Ventes : <b>${stats.soldCoupons.length}</b>`,
+            ``,
+            lines.length ? lines.join("\n") : `<i>Aucun achat pour l'instant.</i>`,
+          ].join("\n"), {
+            inline_keyboard: [
+              [{ text: "💰 Mon sous-wallet", callback_data: "pro_wallet" }, { text: "◀ Retour", callback_data: "pro_home" }],
+            ],
+          });
+          return new Response("ok", { status: 200 });
+        }
+
+        // ── pro_home (default) ──────────────────────────────────────────────
+        const [wallet, stats] = await Promise.all([
+          getPronostiqueurWallet(supabase, pro.id),
+          getPronostiqueurStats(supabase, pro.id),
+        ]);
+        const winRate = stats.won + stats.lost > 0
+          ? Math.round((stats.won / (stats.won + stats.lost)) * 100) : null;
+        await sendHuman(chatId, [
+          `🏆 <b>Espace Pronostiqueur</b>`,
+          `👤 ${escapeHtml(pro.full_name || "Pronostiqueur")}`,
+          ``,
+          `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+          `📊 Analyses publiées : <b>${stats.published}</b>`,
+          winRate !== null ? `🎯 Taux de réussite : <b>${winRate}%</b>` : `🎯 Taux de réussite : <b>—</b>`,
+          `👥 Revendeurs actifs : <b>${stats.resellers.length}</b>`,
+          `🛒 Ventes générées : <b>${stats.soldCoupons.length}</b>`,
+          `💰 Sous-wallet : <b>${wallet.total.toLocaleString("fr-FR")} FCFA</b>`,
+          `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+        ].join("\n"), proKbBottom, DELAY_SHORT);
+        return new Response("ok", { status: 200 });
+      }
+
       // ── Dashboard home ────────────────────────────────────────────────────
       if (data === "dashboard_home" || data === "wallet_detail" || data === "show_analyses" || data === "my_coupons") {
         const reseller = await getResellerProfile(supabase, chatId);
@@ -1534,7 +1772,8 @@ serve(async (req) => {
 
       // ── Intercepte l'état "awaiting_uid" pour auto-connecter le revendeur ──
       const session = await getBotState(supabase, chatId);
-      if (session?.state === "awaiting_uid") {
+      if (session?.state === "awaiting_uid" || session?.state === "awaiting_uid_pro") {
+        const isProRole = session.state === "awaiting_uid_pro";
         const uid = rawText.replace(/[^a-f0-9\-]/gi, "").slice(0, 36);
         if (uid.length < 10) {
           await sendMessage(chatId, "⚠️ UID invalide. Copie l'UID exact depuis le site (format : xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx).");
@@ -1546,13 +1785,16 @@ serve(async (req) => {
           await sendMessage(chatId, "❌ UID introuvable. Vérifie bien le code copié depuis le site.");
           return new Response("ok", { status: 200 });
         }
-        if (profile.role !== "partner" && profile.role !== "admin") {
-          await sendMessage(chatId, "❌ Ce compte n'a pas les droits revendeur. Contacte l'administrateur.");
+        const allowedRoles = isProRole ? ["pronostiqueur", "admin"] : ["partner", "admin", "pronostiqueur"];
+        if (!allowedRoles.includes(profile.role ?? "")) {
+          const roleLabel = isProRole ? "pronostiqueur" : "revendeur";
+          await sendMessage(chatId, `❌ Ce compte n'a pas les droits ${roleLabel}. Contacte l'administrateur.`);
           return new Response("ok", { status: 200 });
         }
         await supabase.from("profiles").update({ telegram_chat_id: chatId }).eq("id", uid);
         await clearBotState(supabase, chatId);
-        const target = (session.data as any)?.target ?? "dashboard_home";
+        const defaultTarget = isProRole ? "pro_home" : "dashboard_home";
+        const target = (session.data as any)?.target ?? defaultTarget;
         await sendMessage(chatId, [
           `✅ <b>Compte lié avec succès !</b>`,
           `Bienvenue, <b>${escapeHtml(profile.full_name || "Revendeur")}</b> !`,
