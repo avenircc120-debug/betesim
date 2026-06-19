@@ -1020,17 +1020,132 @@ serve(async (req) => {
       return new Response("ok", { status: 200 });
     }
 
-    // ── /start <pack_id> ─────────────────────────────────────────────────
+    // ── /monlien — liens partageables du revendeur ──────────────────────────
+    if (update.message?.text?.startsWith("/monlien") || update.message?.text?.startsWith("/mes_liens") || update.message?.text?.startsWith("/partager")) {
+      const chatId = update.message.chat.id;
+      const reseller = await getResellerProfile(supabase, chatId);
+      if (!reseller) {
+        await sendMessage(chatId, [
+          `🔒 <b>Accès revendeur requis</b>`,
+          ``,
+          `Lie d'abord ton compte avec <code>/connect {uid}</code>`,
+        ].join("\n"));
+        return new Response("ok", { status: 200 });
+      }
+      const BOT_USERNAME = "pack_officiel_expert_bot";
+      const clientLink   = `https://t.me/${BOT_USERNAME}?start=c_${reseller.id}`;
+      const revendeurLink = `https://t.me/${BOT_USERNAME}?start=r_${reseller.id}`;
+      await sendMessage(chatId, [
+        `🔗 <b>Tes liens de partage</b>`,
+        ``,
+        `👥 <b>Lien CLIENT</b>`,
+        `<i>Partage ce lien à tes clients pour qu'ils s'inscrivent directement :</i>`,
+        `<code>${clientLink}</code>`,
+        ``,
+        `🤝 <b>Lien REVENDEUR</b>`,
+        `<i>Partage ce lien pour recruter de nouveaux revendeurs :</i>`,
+        `<code>${revendeurLink}</code>`,
+        ``,
+        `💡 Chaque vente via ton lien client te rapporte <b>70%</b> de commission !`,
+      ].join("\n"), {
+        inline_keyboard: [
+          [{ text: "📋 Mon Dashboard", callback_data: "dashboard_home" }],
+        ],
+      });
+      return new Response("ok", { status: 200 });
+    }
+
+    // ── /start — smart deep-link handler ────────────────────────────────────
     if (update.message?.text?.startsWith("/start")) {
-      const msg = update.message;
-      const chatId = msg.chat.id;
-      const tgUser = msg.from;
+      const msg       = update.message;
+      const chatId    = msg.chat.id;
+      const tgUser    = msg.from;
       const firstName = tgUser?.first_name || "Partenaire";
       const username  = tgUser?.username || null;
       const tgUserId  = tgUser?.id;
-      const packId    = msg.text.split(" ")[1]?.trim();
+      const param     = msg.text.split(" ")[1]?.trim() ?? "";
 
-      if (!packId) {
+      // ── Lien client : ?start=c_RESELLERID ──────────────────────────────
+      if (param.startsWith("c_")) {
+        const referrerId = param.slice(2);
+        // Crée automatiquement un partner_pack pour ce nouveau client
+        const { data: newPack, error: packErr } = await supabase
+          .from("partner_packs")
+          .insert({
+            telegram_user_id:    tgUserId,
+            telegram_username:   username,
+            telegram_first_name: firstName,
+            bot_started_at:      new Date().toISOString(),
+            referrer_id:         referrerId || null,
+          })
+          .select().maybeSingle();
+        if (packErr || !newPack) {
+          // Pack peut-être déjà existant — cherche-le
+          const { data: existing } = await supabase
+            .from("partner_packs")
+            .select("*")
+            .eq("telegram_user_id", tgUserId)
+            .order("bot_started_at", { ascending: false })
+            .limit(1).maybeSingle();
+          if (existing?.software_unlocked_at) {
+            const softUrl = await buildSoftwareUrl(supabase, existing.id);
+            await sendHuman(chatId, unlockedMessage(firstName, true), {
+              inline_keyboard: [
+                [{ text:"📊 Ouvrir le Pack Officiel", web_app:{ url: softUrl } }],
+                [{ text:"🎟 Voir les coupons disponibles", callback_data:"voir_pool" }],
+              ],
+            }, DELAY_SHORT);
+            return new Response("ok", { status: 200 });
+          }
+        }
+        await sendMessage(chatId, welcomeMessage(firstName));
+        await sendHuman(chatId, step1Message(), step1Keyboard, DELAY_LONG);
+        return new Response("ok", { status: 200 });
+      }
+
+      // ── Lien revendeur : ?start=r_RESELLERID ────────────────────────────
+      if (param.startsWith("r_")) {
+        const referrerId = param.slice(2);
+        // Vérifie si ce TG user est déjà revendeur
+        const existing = await getResellerProfile(supabase, chatId);
+        if (existing) {
+          await sendMessage(chatId, [
+            `✅ <b>Ton compte revendeur est déjà actif, ${escapeHtml(firstName)} !</b>`,
+            ``,
+            `📊 Utilise /dashboard pour accéder à ton espace.`,
+          ].join("\n"));
+          return new Response("ok", { status: 200 });
+        }
+        // Enregistre la demande d'inscription revendeur via bot_sessions
+        await supabase.from("bot_sessions").upsert({
+          telegram_chat_id: chatId,
+          state: "pending_reseller",
+          data: { referrer_id: referrerId, first_name: firstName, username, tg_user_id: tgUserId },
+          updated_at: new Date().toISOString(),
+        });
+        const appBase = await getBase(supabase);
+        await sendMessage(chatId, [
+          `🤝 <b>Bienvenue ${escapeHtml(firstName)} — Inscription Revendeur</b>`,
+          ``,
+          `Pour rejoindre l'équipe de revendeurs, suis ces 3 étapes :`,
+          ``,
+          `1️⃣ Crée ton compte sur :`,
+          `   <b>${appBase}</b>`,
+          ``,
+          `2️⃣ Va dans <b>Onglet Revendeur → Copier ton UID</b>`,
+          ``,
+          `3️⃣ Reviens ici et envoie :`,
+          `   <code>/connect {ton_uid}</code>`,
+          ``,
+          `✅ Tu recevras toutes tes alertes et commissions directement sur Telegram !`,
+        ].join("\n"), {
+          inline_keyboard: [[{ text: "🌐 Créer mon compte", url: appBase }]],
+        });
+        return new Response("ok", { status: 200 });
+      }
+
+      // ── Pas de paramètre : accueil général ──────────────────────────────
+      if (!param) {
         const pUrl = await pronosticsUrl(supabase);
         await sendMessage(chatId, [
           `👋 <b>Bienvenue ${escapeHtml(firstName)} sur Pack Officiel !</b>`,
@@ -1042,14 +1157,15 @@ serve(async (req) => {
         return new Response("ok", { status: 200 });
       }
 
+      // ── Ancien format : pack_id direct (rétrocompatible) ────────────────
       const { data: pack, error } = await supabase
         .from("partner_packs")
         .update({ telegram_user_id: tgUserId, telegram_username: username,
           telegram_first_name: firstName, bot_started_at: new Date().toISOString() })
-        .eq("id", packId).select().maybeSingle();
+        .eq("id", param).select().maybeSingle();
 
       if (error || !pack) {
-        await sendMessage(chatId, `❌ Pack introuvable. Contactez le support.`);
+        await sendMessage(chatId, `❌ Lien invalide. Contactez le support.`);
         return new Response("ok", { status: 200 });
       }
 
@@ -1057,9 +1173,9 @@ serve(async (req) => {
         const softUrl = await buildSoftwareUrl(supabase, pack.id);
         await sendHuman(chatId, unlockedMessage(firstName, true), {
           inline_keyboard: [
-          [{ text:"📊 Ouvrir le Pack Officiel", web_app:{ url: softUrl } }],
-          [{ text:"🎟 Voir les coupons disponibles", callback_data:"voir_pool" }],
-        ],
+            [{ text:"📊 Ouvrir le Pack Officiel", web_app:{ url: softUrl } }],
+            [{ text:"🎟 Voir les coupons disponibles", callback_data:"voir_pool" }],
+          ],
         }, DELAY_SHORT);
         return new Response("ok", { status: 200 });
       }
