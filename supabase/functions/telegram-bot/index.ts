@@ -1086,6 +1086,11 @@ Deno.serve(async (req) => {
     console.error("[FATAL] SUPABASE_SERVICE_ROLE_KEY manquant — accès DB impossible. Configurez ce secret dans Supabase.");
     return new Response("ok", { status: 200 });
   }
+  // Log GROQ status (non bloquant — le bot fonctionne sans Groq)
+  const _groqKey = Deno.env.get("GROQ_API_KEY");
+  if (!_groqKey) {
+    console.warn("[WARN] GROQ_API_KEY manquant — le fallback IA Groq est désactivé. Ajoutez-le dans Supabase pour activer les réponses intelligentes.");
+  }
 
   // Répondre immédiatement à Telegram (évite le Read timeout expired)
   // EdgeRuntime.waitUntil maintient la fonction vivante le temps du traitement
