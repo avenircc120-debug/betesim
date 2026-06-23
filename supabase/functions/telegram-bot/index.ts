@@ -310,7 +310,7 @@ async function handleFreeText(chatId: number, text: string, firstName: string, t
         await sendHuman(chatId, `✅ Code ${newCodes.length} enregistré !\n\nEntre maintenant le <b>code ${newCodes.length + 1}</b> sur ${total_codes} :`, undefined, DELAY_SHORT);
       } else {
         await setBotState(supabase, chatId, "pub_odds", { codes: newCodes });
-        await sendHuman(chatId, [`✅ ${total_codes} code${total_codes>1?"s":""} enregistré${total_codes>1?"s":""} !`,``,`📊 <b>Quelle est la cote totale du coupon ?</b>`,`<i>Exemple : 4.50 ou 3 (minimum 1.10)</i>`,``,`💡 Prix auto-calculé : < 3x → 250 F · 3-6x → 500 F · > 6x → 1000 F`].join("\n"), undefined, DELAY_SHORT);
+        await sendHuman(chatId, [`✅ ${total_codes} code${total_codes>1?"s":""} enregistré${total_codes>1?"s":""} !`,``,`📊 <b>Quelle est la cote totale du coupon ?</b>`,`<i>Exemple : 4.50 ou 12.5 (minimum 2.00)</i>`,``,`💡 Prix auto-calculé : 2.00-5.49 → 250 F · 5.50-15.99 → 500 F · 16.00+ → 1000 F`].join("\n"), undefined, DELAY_SHORT);
       }
       return;
     }
@@ -330,7 +330,7 @@ async function handleFreeText(chatId: number, text: string, firstName: string, t
 
     if (pubSess?.state === "pub_time") {
       const { codes, odds, price } = pubSess.data as { codes: string[]; odds: number; price: number };
-      const timeMatch = text.trim().match(/^(d{1,2})[h:](d{2})$/i);
+      const timeMatch = text.trim().match(/^(\d{1,2})[h:](\d{2})$/i);
       if (!timeMatch) {
         await sendHuman(chatId, "⚠️ Format invalide. Entre l'heure comme <b>18:30</b> ou <b>20h00</b> :", undefined, DELAY_SHORT);
         return;
@@ -613,8 +613,8 @@ async function clearBotState(supabase: any, chatId: number) {
 
 // ── Helpers marketplace ───────────────────────────────────────────────────────
 function calcPrice(odds: number): number {
-  if (odds < 3) return 250;
-  if (odds < 6) return 500;
+  if (odds < 5.50) return 250;
+  if (odds < 16.00) return 500;
   return 1000;
 }
 

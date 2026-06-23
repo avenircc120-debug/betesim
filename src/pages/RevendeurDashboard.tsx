@@ -64,11 +64,18 @@ export default function RevendeurDashboard() {
   const [tab, setTab] = useState<Tab>("pronostics");
   const [showWithdraw, setShowWithdraw] = useState(false);
 
-  // Formulaire "Publier un Pronostic"
+  // Formulaire "Publier un Coupon" — simplifié : 3 champs
   const [pForm, setPForm] = useState({
-    team_home: "", team_away: "", league: "", prediction: "",
-    confidence: "moyen", odds: "", coupon_code: "", price_fcfa: "500", label: "",
+    coupon_code: "", total_odds: "", match_start_time: "", label: "",
   });
+
+  function calcPriceFromOdds(odds: string): number {
+    const n = parseFloat(odds);
+    if (isNaN(n) || n < 2) return 0;
+    if (n < 5.50) return 250;
+    if (n < 16.00) return 500;
+    return 1000;
+  }
 
   // Formulaire retrait
   const [wForm, setWForm] = useState({ amount: "", phone: "", provider: "mtn" });
@@ -114,28 +121,21 @@ export default function RevendeurDashboard() {
   });
 
   // ── Mutations ────────────────────────────────────────────────────────────────
-  // Publier un pronostic complet dans le Pool Commun
+  // Publier un coupon dans le coffre (Pool Commun) — mode simplifié
   const publishMutation = useMutation({
     mutationFn: async () => {
-      if (!pForm.team_home.trim()) throw new Error("Équipe domicile requise");
-      if (!pForm.team_away.trim()) throw new Error("Équipe extérieur requise");
-      if (!pForm.prediction.trim()) throw new Error("Pronostic requis");
-      if (!pForm.coupon_code.trim()) throw new Error("Code coupon (1xBet/1Win) requis");
-      const price = parseInt(pForm.price_fcfa);
-      if (isNaN(price) || price < 100) throw new Error("Prix minimum : 100 FCFA");
+      if (!pForm.coupon_code.trim()) throw new Error("Code coupon requis");
+      const odds = parseFloat(pForm.total_odds);
+      if (isNaN(odds) || odds < 2) throw new Error("Cote totale invalide (minimum 2.00)");
+      if (!pForm.match_start_time) throw new Error("Date/Heure de début requise");
+      const matchStart = new Date(pForm.match_start_time);
+      if (matchStart <= new Date()) throw new Error("L'heure de début doit être dans le futur");
 
       const body = {
-        analysis_data: {
-          team_home:  pForm.team_home.trim(),
-          team_away:  pForm.team_away.trim(),
-          league:     pForm.league.trim() || undefined,
-          prediction: pForm.prediction.trim(),
-          confidence: pForm.confidence,
-          odds:       pForm.odds ? parseFloat(pForm.odds) : undefined,
-        },
-        coupon_code: pForm.coupon_code.trim().toUpperCase(),
-        label:       pForm.label.trim() || undefined,
-        price_fcfa:  price,
+        coupon_code:      pForm.coupon_code.trim().toUpperCase(),
+        total_odds:       odds,
+        match_start_time: matchStart.toISOString(),
+        label:            pForm.label.trim() || undefined,
       };
 
       const { data, error } = await supabase.functions.invoke("inject-to-pool", { body });
@@ -144,8 +144,9 @@ export default function RevendeurDashboard() {
       return data;
     },
     onSuccess: (d) => {
-      toast.success(`Pronostic publié ! Code : ${d.code} 🎉`);
-      setPForm({ team_home:"", team_away:"", league:"", prediction:"", confidence:"moyen", odds:"", coupon_code:"", price_fcfa:"500", label:"" });
+      const price = d.price_fcfa?.toLocaleString?.() ?? "?";
+      toast.success(`Coupon publié dans le coffre ! Code : ${d.code} — ${price} FCFA 🎉`);
+      setPForm({ coupon_code: "", total_odds: "", match_start_time: "", label: "" });
       qc.invalidateQueries({ queryKey: ["my-pool-coupons"] });
       setTab("coupons");
     },
@@ -264,76 +265,51 @@ export default function RevendeurDashboard() {
                 <h2 className="text-sm font-semibold text-foreground">Publier un pronostic dans le Pool</h2>
               </div>
 
-              {/* Infos match */}
-              <div className="bg-card border border-border rounded-xl p-4 space-y-3">
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Match</p>
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="text-xs text-muted-foreground mb-1 block">Équipe Domicile *</label>
-                    <Input placeholder="ex: PSG" value={pForm.team_home}
-                      onChange={e => setPForm(f=>({...f, team_home: e.target.value}))} />
-                  </div>
-                  <div>
-                    <label className="text-xs text-muted-foreground mb-1 block">Équipe Extérieur *</label>
-                    <Input placeholder="ex: OM" value={pForm.team_away}
-                      onChange={e => setPForm(f=>({...f, team_away: e.target.value}))} />
-                  </div>
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">Ligue / Compétition</label>
-                  <Input placeholder="ex: Ligue 1, Champions League…" value={pForm.league}
-                    onChange={e => setPForm(f=>({...f, league: e.target.value}))} />
-                </div>
+              {/* Barème info */}
+              <div className="bg-primary/5 border border-primary/20 rounded-xl px-4 py-3 text-xs text-muted-foreground space-y-1">
+                <p className="font-semibold text-foreground">Prix calculé automatiquement depuis la cote</p>
+                <p>📊 Cote 2.00 – 5.49 → <strong className="text-foreground">250 FCFA</strong></p>
+                <p>📊 Cote 5.50 – 15.99 → <strong className="text-foreground">500 FCFA</strong></p>
+                <p>📊 Cote 16.00+ → <strong className="text-foreground">1 000 FCFA</strong></p>
               </div>
 
-              {/* Pronostic */}
+              {/* Code coupon */}
               <div className="bg-card border border-border rounded-xl p-4 space-y-3">
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Pronostic</p>
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Code Coupon</p>
                 <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">Votre pronostic *</label>
-                  <Input placeholder="ex: 1X – Victoire ou Nul Domicile, Over 2.5…" value={pForm.prediction}
-                    onChange={e => setPForm(f=>({...f, prediction: e.target.value}))} />
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="text-xs text-muted-foreground mb-1 block">Confiance</label>
-                    <select className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                      value={pForm.confidence} onChange={e => setPForm(f=>({...f, confidence: e.target.value}))}>
-                      <option value="fort">🔥 Fort</option>
-                      <option value="moyen">⚡ Moyen</option>
-                      <option value="faible">⚠️ Faible</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-xs text-muted-foreground mb-1 block">Cote (optionnel)</label>
-                    <Input type="number" step="0.01" min="1" placeholder="ex: 2.45" value={pForm.odds}
-                      onChange={e => setPForm(f=>({...f, odds: e.target.value}))} />
-                  </div>
-                </div>
-              </div>
-
-              {/* Coupon bookmaker */}
-              <div className="bg-card border border-border rounded-xl p-4 space-y-3">
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Coupon 1xBet / 1Win</p>
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">Code booking *</label>
-                  <Input placeholder="Collez votre code 1xBet/1Win ici" value={pForm.coupon_code}
-                    onChange={e => setPForm(f=>({...f, coupon_code: e.target.value}))}
+                  <label className="text-xs text-muted-foreground mb-1 block">Code booking 1xBet / 1Win *</label>
+                  <Input placeholder="Collez votre code ici" value={pForm.coupon_code}
+                    onChange={e => setPForm(f => ({ ...f, coupon_code: e.target.value }))}
                     className="font-mono uppercase text-sm tracking-wider" />
-                  <p className="text-xs text-muted-foreground mt-1">Ce code est celui que le client utilisera sur 1xBet/1Win pour placer les mêmes paris.</p>
+                  <p className="text-xs text-muted-foreground mt-1">Le code restera masqué jusqu'au paiement du client.</p>
+                </div>
+              </div>
+
+              {/* Cote + heure */}
+              <div className="bg-card border border-border rounded-xl p-4 space-y-3">
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Cote & Horaire</p>
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">Cote totale du coupon *</label>
+                  <Input type="number" step="0.01" min="2" placeholder="ex: 4.50" value={pForm.total_odds}
+                    onChange={e => setPForm(f => ({ ...f, total_odds: e.target.value }))} />
+                  {pForm.total_odds && calcPriceFromOdds(pForm.total_odds) > 0 && (
+                    <p className="text-xs mt-1">
+                      Prix calculé : <strong className="text-primary">{calcPriceFromOdds(pForm.total_odds).toLocaleString()} FCFA</strong>
+                      &nbsp;·&nbsp; Votre part (70%) :{" "}
+                      <strong className="text-green-400">{Math.floor(calcPriceFromOdds(pForm.total_odds) * 0.70).toLocaleString()} FCFA</strong>
+                    </p>
+                  )}
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">Date / Heure de début des matchs *</label>
+                  <Input type="datetime-local" value={pForm.match_start_time}
+                    onChange={e => setPForm(f => ({ ...f, match_start_time: e.target.value }))} />
+                  <p className="text-xs text-muted-foreground mt-1">Le coupon sera automatiquement supprimé à cette heure.</p>
                 </div>
                 <div>
                   <label className="text-xs text-muted-foreground mb-1 block">Description (optionnel)</label>
                   <Input placeholder="ex: Combo 3 matchs du soir" value={pForm.label}
-                    onChange={e => setPForm(f=>({...f, label: e.target.value}))} />
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">Prix de vente (FCFA) *</label>
-                  <Input type="number" min={100} placeholder="500" value={pForm.price_fcfa}
-                    onChange={e => setPForm(f=>({...f, price_fcfa: e.target.value}))} />
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Vous recevrez <strong className="text-green-400">{Math.floor((parseInt(pForm.price_fcfa)||0) * 0.70).toLocaleString()} FCFA</strong> par vente (70%).
-                  </p>
+                    onChange={e => setPForm(f => ({ ...f, label: e.target.value }))} />
                 </div>
               </div>
 
@@ -341,7 +317,7 @@ export default function RevendeurDashboard() {
                 disabled={publishMutation.isPending}>
                 {publishMutation.isPending
                   ? <><Loader2 className="w-4 h-4 animate-spin" />Publication en cours…</>
-                  : <><Zap className="w-4 h-4" />Publier dans le Pool Commun</>}
+                  : <><Zap className="w-4 h-4" />Déposer dans le coffre</>}
               </Button>
             </motion.div>
           )}
