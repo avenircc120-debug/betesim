@@ -1070,15 +1070,13 @@ Deno.serve(async (req) => {
   }
   if (req.method !== "POST") return new Response("OK", { status: 200 });
 
-  // Lire le body AVANT de retourner (doit être lu avant l'envoi de la réponse)
+  // Lire le body
   let bodyText: string;
   try { bodyText = await req.text(); }
   catch { return new Response("ok", { status: 200 }); }
 
-  // Retourner 200 IMMÉDIATEMENT à Telegram pour éviter le timeout du webhook
-  // Le traitement se fait en arrière-plan via EdgeRuntime.waitUntil
-  // @ts-ignore
-  EdgeRuntime.waitUntil((async () => {
+  // Traitement synchrone — Telegram attend jusqu'à 60s, largement suffisant
+  await (async () => {
     const supabase = makeSupabase();
     let update: any;
     try { update = JSON.parse(bodyText); }
@@ -2348,9 +2346,8 @@ Deno.serve(async (req) => {
     return;
   } catch (err: any) {
     console.error("telegram-bot error:", err?.message ?? err);
-    return;
   }
-  })());
+  })();
 
   return new Response("ok", { status: 200 });
 });
