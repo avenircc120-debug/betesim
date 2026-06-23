@@ -64,6 +64,7 @@ Deno.serve(async (req) => {
       analysis_id: existingAnalysisId,
       total_odds,
       match_start_time,
+      section_number,
     } = body;
 
     let price_fcfa: number = body.price_fcfa ?? 0;
@@ -121,13 +122,14 @@ Deno.serve(async (req) => {
 
     // ── Injecter dans le Pool ───────────────────────────────────────────────
     const insertPayload: Record<string, unknown> = {
-      partner_id:  user.id,
-      creator_id:  user.id,
-      analysis_id: finalAnalysisId,
-      code:        finalCode,
-      label:       label?.trim() ?? null,
+      partner_id:    user.id,
+      creator_id:    user.id,
+      analysis_id:   finalAnalysisId,
+      code:          finalCode,
+      label:         label?.trim() ?? null,
       price_fcfa,
-      status:      "active",
+      status:        "active",
+      section_number: section_number != null ? Number(section_number) : null,
     };
 
     if (total_odds != null) {
@@ -151,6 +153,7 @@ Deno.serve(async (req) => {
         total_odds:       coupon.total_odds,
         match_start_time: coupon.match_start_time,
         label:            coupon.label,
+        section_number:   coupon.section_number,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
