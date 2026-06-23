@@ -203,6 +203,9 @@ Deno.serve(async (req) => {
     const action = String(body.action ?? "fetch");
 
     if (action === "fetch") {
+      // ── Purge automatique : supprimer les matchs dont la date est passée ──
+      await supabase.from("football_matches").delete().lt("match_date", new Date().toISOString());
+
       let matches: any[] = [];
       const errors: string[] = [];
       const sources: string[] = [];
@@ -248,17 +251,18 @@ Deno.serve(async (req) => {
     }
 
     if (action === "list") {
-      const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      // Seulement les matchs à venir (WHERE match_date > NOW())
       const { data } = await supabase
         .from("football_matches").select("*")
-        .gte("match_date", since).order("match_date", { ascending: true }).limit(200);
+        .gte("match_date", new Date().toISOString())
+        .order("match_date", { ascending: true }).limit(200);
       return ok({ success: true, matches: data ?? [] });
     }
 
     if (action === "list_by_type") {
       const type = body.competition_type ?? null;
-      const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-      let query = supabase.from("football_matches").select("*").gte("match_date", since).order("match_date", { ascending: true }).limit(100);
+      // Seulement les matchs à venir (WHERE match_date > NOW())
+      let query = supabase.from("football_matches").select("*").gte("match_date", new Date().toISOString()).order("match_date", { ascending: true }).limit(100);
       if (type) query = query.eq("competition_type", type);
       const { data } = await query;
       return ok({ success: true, matches: data ?? [] });
