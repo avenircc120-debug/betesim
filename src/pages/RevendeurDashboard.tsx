@@ -4,8 +4,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   PlusCircle, Tag, Wallet, TrendingUp, ArrowDownCircle,
   CheckCircle, XCircle, Clock, Loader2, RefreshCw, Store,
-  Copy, Check, Share2, Send, Link2, Trophy, ChevronDown,
-  ChevronUp, Zap, Target, BarChart2, Layers, PackageOpen,
+  Copy, Check, Share2, Send, Link2, Trophy,
+  Zap, BarChart2, PackageOpen,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -36,7 +36,7 @@ const STATUS_MAP: Record<string, { label: string; color: string; icon: React.Rea
   expired: { label: "Expiré",    color: "text-red-400",    icon: <XCircle     className="w-3.5 h-3.5" /> },
 };
 
-type Tab = "pronostics" | "sections" | "coupons" | "outils" | "commissions";
+type Tab = "pronostics" | "coupons" | "outils" | "commissions";
 
 interface SectionCoupon extends Coupon {
   section_number: number | null;
@@ -67,13 +67,8 @@ export default function RevendeurDashboard() {
   const { data: profile } = useProfile();
   const qc = useQueryClient();
 
-  const [tab, setTab] = useState<Tab>("sections");
+  const [tab, setTab] = useState<Tab>("pronostics");
   const [showWithdraw, setShowWithdraw] = useState(false);
-
-  // Formulaire "Publier un Coupon" — simplifié : 3 champs
-  const [pForm, setPForm] = useState({
-    coupon_code: "", total_odds: "", match_start_time: "", label: "",
-  });
 
   // État du formulaire de section
   const [activeSection, setActiveSection] = useState<number | null>(null);
@@ -150,38 +145,6 @@ export default function RevendeurDashboard() {
   });
 
   // ── Mutations ────────────────────────────────────────────────────────────────
-  // Publier un coupon dans le coffre (Pool Commun) — mode simplifié
-  const publishMutation = useMutation({
-    mutationFn: async () => {
-      if (!pForm.coupon_code.trim()) throw new Error("Code coupon requis");
-      const odds = parseFloat(pForm.total_odds);
-      if (isNaN(odds) || odds < 2) throw new Error("Cote totale invalide (minimum 2.00)");
-      if (!pForm.match_start_time) throw new Error("Date/Heure de début requise");
-      const matchStart = new Date(pForm.match_start_time);
-      if (matchStart <= new Date()) throw new Error("L'heure de début doit être dans le futur");
-
-      const body = {
-        coupon_code:      pForm.coupon_code.trim().toUpperCase(),
-        total_odds:       odds,
-        match_start_time: matchStart.toISOString(),
-        label:            pForm.label.trim() || undefined,
-      };
-
-      const { data, error } = await supabase.functions.invoke("inject-to-pool", { body });
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
-      return data;
-    },
-    onSuccess: (d) => {
-      const price = d.price_fcfa?.toLocaleString?.() ?? "?";
-      toast.success(`Coupon publié dans le coffre ! Code : ${d.code} — ${price} FCFA 🎉`);
-      setPForm({ coupon_code: "", total_odds: "", match_start_time: "", label: "" });
-      qc.invalidateQueries({ queryKey: ["my-pool-coupons"] });
-      setTab("coupons");
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
-
   // Publier un coupon dans une section numérotée
   const publishToSectionMutation = useMutation({
     mutationFn: async (sectionNum: number) => {
@@ -259,7 +222,6 @@ export default function RevendeurDashboard() {
   const soldCoupons   = coupons.filter(c => c.status === "sold").length;
 
   const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
-    { id: "sections",    label: "Sections",    icon: <Layers     className="w-4 h-4" /> },
     { id: "pronostics",  label: "Publier",     icon: <Zap        className="w-4 h-4" /> },
     { id: "coupons",     label: "Mes coupons", icon: <Tag        className="w-4 h-4" /> },
     { id: "outils",      label: "Partage",     icon: <Share2     className="w-4 h-4" /> },
@@ -319,15 +281,15 @@ export default function RevendeurDashboard() {
           ))}
         </div>
 
-        {/* ── TAB: SECTIONS DE PUBLICATION ────────────────────────────────── */}
+        {/* ── TAB: PUBLIER (sections numérotées) ──────────────────────────── */}
         <AnimatePresence mode="wait">
-          {tab === "sections" && (
-            <motion.div key="sections" initial={{ opacity:0, y:8 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0 }}
+          {tab === "pronostics" && (
+            <motion.div key="pronostics" initial={{ opacity:0, y:8 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0 }}
               className="space-y-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <Layers className="w-4 h-4 text-primary" />
-                  <h2 className="text-sm font-semibold text-foreground">Espace de Publication</h2>
+                  <Zap className="w-4 h-4 text-primary" />
+                  <h2 className="text-sm font-semibold text-foreground">Publier un coupon</h2>
                 </div>
                 <button onClick={() => { refetchSections(); }} className="p-1.5 rounded-lg hover:bg-muted transition-colors">
                   <RefreshCw className="w-3.5 h-3.5 text-muted-foreground" />
@@ -336,7 +298,7 @@ export default function RevendeurDashboard() {
 
               <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl px-4 py-3 text-xs text-blue-300">
                 <p className="font-semibold mb-1">Comment ça marche ?</p>
-                <p>Publiez un code dans une section → il entre dans le <strong>coffre-fort</strong> → le bot le distribue aux clients après paiement.</p>
+                <p>Publiez votre code dans une section → il entre dans le <strong>coffre-fort</strong> → le bot le distribue aux clients après paiement.</p>
               </div>
 
               {[1, 2, 3].map(sectionNum => {
@@ -446,72 +408,6 @@ export default function RevendeurDashboard() {
                 <p>📊 Cote 5.50 – 15.99 → <strong className="text-foreground">500 FCFA</strong></p>
                 <p>📊 Cote 16.00+ → <strong className="text-foreground">1 000 FCFA</strong></p>
               </div>
-            </motion.div>
-          )}
-
-          {/* ── TAB: PUBLIER UN PRONOSTIC ───────────────────────────────────── */}
-          {tab === "pronostics" && (
-            <motion.div key="pronostics" initial={{ opacity:0, y:8 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0 }}
-              className="space-y-4">
-              <div className="flex items-center gap-2">
-                <Zap className="w-4 h-4 text-primary" />
-                <h2 className="text-sm font-semibold text-foreground">Publier un pronostic dans le Pool</h2>
-              </div>
-
-              {/* Barème info */}
-              <div className="bg-primary/5 border border-primary/20 rounded-xl px-4 py-3 text-xs text-muted-foreground space-y-1">
-                <p className="font-semibold text-foreground">Prix calculé automatiquement depuis la cote</p>
-                <p>📊 Cote 2.00 – 5.49 → <strong className="text-foreground">250 FCFA</strong></p>
-                <p>📊 Cote 5.50 – 15.99 → <strong className="text-foreground">500 FCFA</strong></p>
-                <p>📊 Cote 16.00+ → <strong className="text-foreground">1 000 FCFA</strong></p>
-              </div>
-
-              {/* Code coupon */}
-              <div className="bg-card border border-border rounded-xl p-4 space-y-3">
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Code Coupon</p>
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">Code booking 1xBet / 1Win *</label>
-                  <Input placeholder="Collez votre code ici" value={pForm.coupon_code}
-                    onChange={e => setPForm(f => ({ ...f, coupon_code: e.target.value }))}
-                    className="font-mono uppercase text-sm tracking-wider" />
-                  <p className="text-xs text-muted-foreground mt-1">Le code restera masqué jusqu'au paiement du client.</p>
-                </div>
-              </div>
-
-              {/* Cote + heure */}
-              <div className="bg-card border border-border rounded-xl p-4 space-y-3">
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Cote & Horaire</p>
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">Cote totale du coupon *</label>
-                  <Input type="number" step="0.01" min="2" placeholder="ex: 4.50" value={pForm.total_odds}
-                    onChange={e => setPForm(f => ({ ...f, total_odds: e.target.value }))} />
-                  {pForm.total_odds && calcPriceFromOdds(pForm.total_odds) > 0 && (
-                    <p className="text-xs mt-1">
-                      Prix calculé : <strong className="text-primary">{calcPriceFromOdds(pForm.total_odds).toLocaleString()} FCFA</strong>
-                      &nbsp;·&nbsp; Votre part (70%) :{" "}
-                      <strong className="text-green-400">{Math.floor(calcPriceFromOdds(pForm.total_odds) * 0.70).toLocaleString()} FCFA</strong>
-                    </p>
-                  )}
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">Date / Heure de début des matchs *</label>
-                  <Input type="datetime-local" value={pForm.match_start_time}
-                    onChange={e => setPForm(f => ({ ...f, match_start_time: e.target.value }))} />
-                  <p className="text-xs text-muted-foreground mt-1">Le coupon sera automatiquement supprimé à cette heure.</p>
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">Description (optionnel)</label>
-                  <Input placeholder="ex: Combo 3 matchs du soir" value={pForm.label}
-                    onChange={e => setPForm(f => ({ ...f, label: e.target.value }))} />
-                </div>
-              </div>
-
-              <Button className="w-full gap-2" onClick={() => requireAuth(() => publishMutation.mutate())}
-                disabled={publishMutation.isPending}>
-                {publishMutation.isPending
-                  ? <><Loader2 className="w-4 h-4 animate-spin" />Publication en cours…</>
-                  : <><Zap className="w-4 h-4" />Déposer dans le coffre</>}
-              </Button>
             </motion.div>
           )}
 
