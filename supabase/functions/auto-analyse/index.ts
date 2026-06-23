@@ -45,13 +45,16 @@ Deno.serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
+    // ── 0. Purge analyses expirées (matchs déjà joués) ─────────────────────
+    const now = new Date().toISOString();
+    await supabase.from("analyses").delete().not("match_date", "is", null).lt("match_date", now);
+
     // ── 1. Rafraîchir les matchs depuis les APIs foot ───────────────────────
-    console.log("▶ Étape 1 : rafraîchissement des matchs…");
     const fetchRes = await supabase.functions.invoke("football-data", {
       body: { action: "fetch" },
     });
     const fetchData = fetchRes.data as { fetched?: number; source?: string } | null;
-    console.log(`  ✔ ${fetchData?.fetched ?? 0} matchs récupérés (source: ${fetchData?.source ?? "?"})`);
+
 
     // ── 2. Lister les matchs dans les 48h à venir ────────────────────────────
     console.log("▶ Étape 2 : récupération des matchs dans les 48h…");
@@ -69,7 +72,7 @@ Deno.serve(async (req) => {
       console.log("  ⚠ Aucun match dans les 48h.");
       return ok({ success: true, message: "Aucun match dans les 48h", created: 0 });
     }
-    console.log(`  ✔ ${matches.length} matchs trouvés`);
+
 
     // ── 3. Déduplication : filtrer ceux qui ont déjà une analyse ─────────────
     console.log("▶ Étape 3 : vérification des doublons…");
@@ -83,7 +86,7 @@ Deno.serve(async (req) => {
       (existingAnalyses ?? []).map((a: any) => a.external_match_id)
     );
     const toAnalyse = matches.filter((m: any) => !alreadyDone.has(m.external_id));
-    console.log(`  ✔ ${toAnalyse.length} matchs à analyser (${alreadyDone.size} déjà traités)`);
+
 
     if (toAnalyse.length === 0) {
       return ok({ success: true, message: "Toutes les analyses sont déjà générées", created: 0 });
@@ -96,7 +99,7 @@ Deno.serve(async (req) => {
 
     for (const match of toAnalyse.slice(0, 6)) {
       const matchLabel = `${match.team_home} vs ${match.team_away}`;
-      console.log(`  → Analyse : ${matchLabel}`);
+
 
       try {
         const analysisRes = await supabase.functions.invoke("pronostic-analysis", {
