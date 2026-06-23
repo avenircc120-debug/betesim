@@ -5,7 +5,7 @@ import {
   PlusCircle, Tag, Wallet, TrendingUp, ArrowDownCircle,
   CheckCircle, XCircle, Clock, Loader2, RefreshCw, Store,
   Copy, Check, Share2, Send, Link2, Trophy, ChevronDown,
-  ChevronUp, Zap, Target, BarChart2,
+  ChevronUp, Zap, Target, BarChart2, Layers, PackageOpen,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -36,7 +36,13 @@ const STATUS_MAP: Record<string, { label: string; color: string; icon: React.Rea
   expired: { label: "Expiré",    color: "text-red-400",    icon: <XCircle     className="w-3.5 h-3.5" /> },
 };
 
-type Tab = "pronostics" | "coupons" | "outils" | "commissions";
+type Tab = "pronostics" | "sections" | "coupons" | "outils" | "commissions";
+
+interface SectionCoupon extends Coupon {
+  section_number: number | null;
+  total_odds?: number | null;
+  match_start_time?: string | null;
+}
 
 function CopyButton({ value, label }: { value: string; label: string }) {
   const [copied, setCopied] = useState(false);
@@ -61,11 +67,17 @@ export default function RevendeurDashboard() {
   const { data: profile } = useProfile();
   const qc = useQueryClient();
 
-  const [tab, setTab] = useState<Tab>("pronostics");
+  const [tab, setTab] = useState<Tab>("sections");
   const [showWithdraw, setShowWithdraw] = useState(false);
 
   // Formulaire "Publier un Coupon" — simplifié : 3 champs
   const [pForm, setPForm] = useState({
+    coupon_code: "", total_odds: "", match_start_time: "", label: "",
+  });
+
+  // État du formulaire de section
+  const [activeSection, setActiveSection] = useState<number | null>(null);
+  const [sForm, setSForm] = useState({
     coupon_code: "", total_odds: "", match_start_time: "", label: "",
   });
 
@@ -81,6 +93,23 @@ export default function RevendeurDashboard() {
   const [wForm, setWForm] = useState({ amount: "", phone: "", provider: "mtn" });
 
   // ── Queries ─────────────────────────────────────────────────────────────────
+
+  const { data: sectionCoupons = [], refetch: refetchSections } = useQuery<SectionCoupon[]>({
+    queryKey: ["section-coupons", user?.id],
+    enabled: !!user,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("coupons")
+        .select("*, analyses(title,team_home,team_away)")
+        .eq("creator_id", user!.id)
+        .eq("status", "active")
+        .not("section_number", "is", null)
+        .order("section_number");
+      if (error) throw error;
+      return (data ?? []) as SectionCoupon[];
+    },
+  });
+
   const { data: coupons = [], isLoading: loadingCoupons, refetch } = useQuery<Coupon[]>({
     queryKey: ["my-pool-coupons", user?.id],
     enabled: !!user,
@@ -153,6 +182,40 @@ export default function RevendeurDashboard() {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  // Publier un coupon dans une section numérotée
+  const publishToSectionMutation = useMutation({
+    mutationFn: async (sectionNum: number) => {
+      if (!sForm.coupon_code.trim()) throw new Error("Code coupon requis");
+      const odds = parseFloat(sForm.total_odds);
+      if (isNaN(odds) || odds < 2) throw new Error("Cote totale invalide (minimum 2.00)");
+      if (!sForm.match_start_time) throw new Error("Date/Heure de début requise");
+      const matchStart = new Date(sForm.match_start_time);
+      if (matchStart <= new Date()) throw new Error("L'heure de début doit être dans le futur");
+
+      const body = {
+        coupon_code:      sForm.coupon_code.trim().toUpperCase(),
+        total_odds:       odds,
+        match_start_time: matchStart.toISOString(),
+        label:            sForm.label.trim() || undefined,
+        section_number:   sectionNum,
+      };
+
+      const { data, error } = await supabase.functions.invoke("inject-to-pool", { body });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      return data;
+    },
+    onSuccess: (d) => {
+      const price = d.price_fcfa?.toLocaleString?.() ?? "?";
+      toast.success(`Section publiée dans le coffre ! Code : ${d.code} — ${price} FCFA 🎉`);
+      setSForm({ coupon_code: "", total_odds: "", match_start_time: "", label: "" });
+      setActiveSection(null);
+      qc.invalidateQueries({ queryKey: ["section-coupons"] });
+      qc.invalidateQueries({ queryKey: ["my-pool-coupons"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
   // Demande de retrait
   const withdrawMutation = useMutation({
     mutationFn: async () => {
@@ -196,10 +259,11 @@ export default function RevendeurDashboard() {
   const soldCoupons   = coupons.filter(c => c.status === "sold").length;
 
   const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
+    { id: "sections",    label: "Sections",    icon: <Layers     className="w-4 h-4" /> },
     { id: "pronostics",  label: "Publier",     icon: <Zap        className="w-4 h-4" /> },
     { id: "coupons",     label: "Mes coupons", icon: <Tag        className="w-4 h-4" /> },
     { id: "outils",      label: "Partage",     icon: <Share2     className="w-4 h-4" /> },
-    { id: "commissions", label: "Commissions", icon: <BarChart2  className="w-4 h-4" /> },
+    { id: "commissions", label: "Gains",       icon: <BarChart2  className="w-4 h-4" /> },
   ];
 
   return (
@@ -255,8 +319,137 @@ export default function RevendeurDashboard() {
           ))}
         </div>
 
-        {/* ── TAB: PUBLIER UN PRONOSTIC ───────────────────────────────────── */}
+        {/* ── TAB: SECTIONS DE PUBLICATION ────────────────────────────────── */}
         <AnimatePresence mode="wait">
+          {tab === "sections" && (
+            <motion.div key="sections" initial={{ opacity:0, y:8 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0 }}
+              className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Layers className="w-4 h-4 text-primary" />
+                  <h2 className="text-sm font-semibold text-foreground">Espace de Publication</h2>
+                </div>
+                <button onClick={() => { refetchSections(); }} className="p-1.5 rounded-lg hover:bg-muted transition-colors">
+                  <RefreshCw className="w-3.5 h-3.5 text-muted-foreground" />
+                </button>
+              </div>
+
+              <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl px-4 py-3 text-xs text-blue-300">
+                <p className="font-semibold mb-1">Comment ça marche ?</p>
+                <p>Publiez un code dans une section → il entre dans le <strong>coffre-fort</strong> → le bot le distribue aux clients après paiement.</p>
+              </div>
+
+              {[1, 2, 3].map(sectionNum => {
+                const current = sectionCoupons.find(c => c.section_number === sectionNum);
+                const isOpen = activeSection === sectionNum;
+                const expireTime = current?.match_start_time
+                  ? new Date(current.match_start_time).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })
+                  : null;
+
+                return (
+                  <div key={sectionNum} className="bg-card border border-border rounded-xl overflow-hidden">
+                    {/* En-tête de section */}
+                    <div className="flex items-center justify-between px-4 py-3 border-b border-border/50">
+                      <div className="flex items-center gap-2">
+                        <div className="w-7 h-7 rounded-lg bg-primary/15 flex items-center justify-center">
+                          <span className="text-xs font-bold text-primary">{sectionNum}</span>
+                        </div>
+                        <span className="text-sm font-semibold text-foreground">Section {sectionNum}</span>
+                      </div>
+                      {current ? (
+                        <span className="flex items-center gap-1 text-xs font-medium text-green-400">
+                          <CheckCircle className="w-3.5 h-3.5" /> Actif
+                        </span>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">Vide</span>
+                      )}
+                    </div>
+
+                    {/* Coupon actif */}
+                    {current && (
+                      <div className="px-4 py-3 space-y-1 bg-green-500/5">
+                        <div className="flex items-center justify-between">
+                          <p className="font-mono font-bold text-sm text-foreground">{current.code}</p>
+                          <p className="text-xs font-semibold text-green-400">{current.price_fcfa.toLocaleString()} FCFA</p>
+                        </div>
+                        {current.label && <p className="text-xs text-muted-foreground">{current.label}</p>}
+                        {expireTime && (
+                          <p className="text-xs text-amber-400 flex items-center gap-1">
+                            <Clock className="w-3 h-3" /> Expire à {expireTime}
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Formulaire de publication */}
+                    {!current && (
+                      <div className="px-4 py-3">
+                        {isOpen ? (
+                          <div className="space-y-3">
+                            <div>
+                              <label className="text-xs text-muted-foreground mb-1 block">Code booking 1xBet / 1Win *</label>
+                              <Input placeholder="Collez votre code ici" value={sForm.coupon_code}
+                                onChange={e => setSForm(f => ({ ...f, coupon_code: e.target.value }))}
+                                className="font-mono uppercase text-sm" />
+                            </div>
+                            <div className="grid grid-cols-2 gap-2">
+                              <div>
+                                <label className="text-xs text-muted-foreground mb-1 block">Cote totale *</label>
+                                <Input type="number" step="0.01" min="2" placeholder="ex: 4.50" value={sForm.total_odds}
+                                  onChange={e => setSForm(f => ({ ...f, total_odds: e.target.value }))} />
+                                {sForm.total_odds && calcPriceFromOdds(sForm.total_odds) > 0 && (
+                                  <p className="text-[10px] mt-0.5 text-primary font-semibold">
+                                    {calcPriceFromOdds(sForm.total_odds).toLocaleString()} FCFA
+                                  </p>
+                                )}
+                              </div>
+                              <div>
+                                <label className="text-xs text-muted-foreground mb-1 block">Heure début *</label>
+                                <Input type="datetime-local" value={sForm.match_start_time}
+                                  onChange={e => setSForm(f => ({ ...f, match_start_time: e.target.value }))} />
+                              </div>
+                            </div>
+                            <div>
+                              <label className="text-xs text-muted-foreground mb-1 block">Description (optionnel)</label>
+                              <Input placeholder="ex: Combo soir" value={sForm.label}
+                                onChange={e => setSForm(f => ({ ...f, label: e.target.value }))} />
+                            </div>
+                            <div className="flex gap-2">
+                              <Button className="flex-1 gap-1.5 text-xs h-8"
+                                onClick={() => requireAuth(() => publishToSectionMutation.mutate(sectionNum))}
+                                disabled={publishToSectionMutation.isPending}>
+                                {publishToSectionMutation.isPending
+                                  ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />Publication…</>
+                                  : <><PackageOpen className="w-3.5 h-3.5" />Publier dans Section {sectionNum}</>}
+                              </Button>
+                              <Button variant="outline" size="sm" className="text-xs h-8"
+                                onClick={() => { setActiveSection(null); setSForm({ coupon_code:"", total_odds:"", match_start_time:"", label:"" }); }}>
+                                Annuler
+                              </Button>
+                            </div>
+                          </div>
+                        ) : (
+                          <Button variant="outline" className="w-full gap-2 text-xs h-8"
+                            onClick={() => { setActiveSection(sectionNum); setSForm({ coupon_code:"", total_odds:"", match_start_time:"", label:"" }); }}>
+                            <PlusCircle className="w-3.5 h-3.5" /> Publier dans cette section
+                          </Button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+
+              <div className="bg-muted/50 rounded-xl px-4 py-3 text-xs text-muted-foreground space-y-1">
+                <p className="font-semibold text-foreground">Barème automatique</p>
+                <p>📊 Cote 2.00 – 5.49 → <strong className="text-foreground">250 FCFA</strong></p>
+                <p>📊 Cote 5.50 – 15.99 → <strong className="text-foreground">500 FCFA</strong></p>
+                <p>📊 Cote 16.00+ → <strong className="text-foreground">1 000 FCFA</strong></p>
+              </div>
+            </motion.div>
+          )}
+
+          {/* ── TAB: PUBLIER UN PRONOSTIC ───────────────────────────────────── */}
           {tab === "pronostics" && (
             <motion.div key="pronostics" initial={{ opacity:0, y:8 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0 }}
               className="space-y-4">
