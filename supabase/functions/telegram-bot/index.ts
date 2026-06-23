@@ -151,7 +151,7 @@ async function handleDBQuery(
     const unlocked = !!pack.software_unlocked_at;
     const proUrl = await pronosticsUrl(supabase);
     const kb = unlocked
-      ? { inline_keyboard: [[{ text: "📊 Ouvrir mes Pronostics", web_app: { url: proUrl } }]] }
+      ? { inline_keyboard: [[{ text: "📊 Ouvrir mes Analyses", web_app: { url: proUrl } }]] }
       : undefined;
 
     await sendHuman(chatId, [
@@ -246,7 +246,7 @@ async function handleFreeText(chatId: number, text: string, firstName: string, t
 
   const lower = text.toLowerCase();
   const proUrl = await pronosticsUrl(supabase);
-  const proKb = { inline_keyboard: [[{ text: "📊 Voir les Pronostics", web_app: { url: proUrl } }]] };
+  const proKb = { inline_keyboard: [[{ text: "📊 Voir les Analyses", web_app: { url: proUrl } }]] };
 
   const greetKw = ["salut","bonjour","hello","hi","allo","allô","bonsoir","yo","slt","bjr","bj","coucou","cc","cv","ça va","ca va","wesh","bsr","bien","bien?","koi","quoi de neuf","quoi de 9"];
   const openKw  = ["pronostic","prono","match","voir","logiciel","coupon","pack","ouvrir","start","analyse"];
@@ -366,10 +366,9 @@ async function handleFreeText(chatId: number, text: string, firstName: string, t
   if (isGreet && !isOpen) {
     kb = {
       inline_keyboard: [
-        [{ text: "📊 Voir les Pronostics", web_app: { url: proUrl } }],
+        [{ text: "📊 Voir les Analyses", web_app: { url: proUrl } }],
         [{ text: "🎟 Voir les coupons disponibles", callback_data: "voir_pool" }],
         [{ text: "📋 Mon Dashboard Revendeur", callback_data: "dashboard_home" }],
-        [{ text: "🏆 Mon Espace Pronostiqueur", callback_data: "pro_home" }],
       ],
     };
     reply = [
@@ -404,14 +403,14 @@ async function handleFreeText(chatId: number, text: string, firstName: string, t
       await sleep(DELAY_SHORT);
       await sendMessage(chatId, groqReply, {
         inline_keyboard: [
-          [{ text: "🎟 Voir les coupons", callback_data: "voir_pool" }, { text: "📊 Pronostics", web_app: { url: proUrl } }],
+          [{ text: "🎟 Voir les coupons", callback_data: "voir_pool" }, { text: "📊 Analyses", web_app: { url: proUrl } }],
         ],
       });
       return;
     }
     kb = {
       inline_keyboard: [
-        [{ text: "📊 Voir les Pronostics", web_app: { url: proUrl } }],
+        [{ text: "📊 Voir les Analyses", web_app: { url: proUrl } }],
         [{ text: "🎟 Voir les coupons disponibles", callback_data: "voir_pool" }],
       ],
     };
@@ -922,7 +921,7 @@ Deno.serve(async (req) => {
     const pUrl = await pronosticsUrl(sb);
     const r = await fetch(`${TG_API}/bot${token}/setChatMenuButton`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ menu_button: { type:"web_app", text:"📊 Pronostics", web_app:{ url: pUrl } } }),
+      body: JSON.stringify({ menu_button: { type:"web_app", text:"📊 Analyses", web_app:{ url: pUrl } } }),
     });
     const json = await r.json();
     return new Response(JSON.stringify({ ...json, pronosticsUrl: pUrl }, null, 2), {
@@ -1044,7 +1043,7 @@ Deno.serve(async (req) => {
       const pUrl = await pronosticsUrl(supabase);
       await sendMessage(chatId, `🎯 Ouvre <b>Pack Officiel</b> en plein écran :`, {
         inline_keyboard: [
-          [{ text:"📊 Voir les Pronostics", web_app:{ url: pUrl } }],
+          [{ text:"📊 Voir les Analyses", web_app:{ url: pUrl } }],
           [{ text:"🎟 Voir les coupons disponibles", callback_data:"voir_pool" }],
         ],
       });
@@ -1508,7 +1507,7 @@ Deno.serve(async (req) => {
           ``,
           `🎯 Touche le bouton ci-dessous pour démarrer.`,
         ].join("\n"), {
-          inline_keyboard: [[{ text:"📊 Voir les Pronostics", web_app:{ url: pUrl } }]],
+          inline_keyboard: [[{ text:"📊 Voir les Analyses", web_app:{ url: pUrl } }]],
         });
         return new Response("ok", { status: 200 });
       }
