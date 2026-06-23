@@ -12,8 +12,8 @@
  * Déduplication : external_match_id empêche de créer deux fois l'analyse d'un même match.
  * Rate limit : max 6 analyses par appel, 2s de pause entre chaque pour respecter Groq.
  */
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+import { createClient } from "npm:@supabase/supabase-js@2";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -36,7 +36,7 @@ function pause(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-serve(async (req) => {
+Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
 
   try {
@@ -130,6 +130,7 @@ serve(async (req) => {
           prediction: analysis.prediction,
           confidence: mapConfidence(analysis.confidence ?? "medium"),
           odds,
+          markets: analysis.markets ?? null,
           stats: {
             probabilities: analysis.probabilities ?? {},
             keyFactors: analysis.keyFactors ?? [],
