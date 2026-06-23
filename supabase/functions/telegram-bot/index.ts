@@ -19,14 +19,20 @@ const DELAY_LONG  = 2500;
 async function tg(method: string, body: Record<string, unknown>) {
   const token = Deno.env.get("TELEGRAM_BOT_TOKEN");
   if (!token) throw new Error("TELEGRAM_BOT_TOKEN manquant");
-  const res = await fetch(`${TG_API}/bot${token}/${method}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  const json = await res.json();
-  if (!json.ok) console.error(`tg(${method}) failed:`, JSON.stringify(json));
-  return json;
+  try {
+    const res = await fetch(`${TG_API}/bot${token}/${method}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(12000),
+    });
+    const json = await res.json();
+    if (!json.ok) console.error(`tg(${method}) failed:`, JSON.stringify(json));
+    return json;
+  } catch (e: any) {
+    console.error(`tg(${method}) timeout/error:`, e?.message);
+    return { ok: false };
+  }
 }
 
 const sendMessage = (chatId: number, text: string, keyboard?: unknown) =>
@@ -789,6 +795,7 @@ async function askGroq(userMessage: string, firstName: string): Promise<string |
     const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      signal: AbortSignal.timeout(6000),
       body: JSON.stringify({
         model: "llama-3.1-8b-instant",
         messages: [
@@ -802,7 +809,7 @@ async function askGroq(userMessage: string, firstName: string): Promise<string |
     const data = await res.json() as any;
     return data?.choices?.[0]?.message?.content?.trim() ?? null;
   } catch (e) {
-    console.error("Groq error:", e);
+    console.error("Groq timeout/error:", e);
     return null;
   }
 }
