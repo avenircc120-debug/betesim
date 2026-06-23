@@ -1087,8 +1087,9 @@ Deno.serve(async (req) => {
     return new Response("ok", { status: 200 });
   }
 
-  // Traitement synchrone — Telegram attend jusqu'à 60s, largement suffisant
-  await (async () => {
+  // Répondre immédiatement à Telegram (évite le Read timeout expired)
+  // EdgeRuntime.waitUntil maintient la fonction vivante le temps du traitement
+  const processing = (async () => {
     const supabase = makeSupabase();
     let update: any;
     try { update = JSON.parse(bodyText); }
@@ -2365,5 +2366,7 @@ Deno.serve(async (req) => {
   }
   })();
 
+  // Maintenir la fonction active jusqu'à la fin du traitement asynchrone
+  EdgeRuntime.waitUntil(processing);
   return new Response("ok", { status: 200 });
 });
