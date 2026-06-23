@@ -96,7 +96,7 @@ async function handleDBQuery(
   const lower = text.toLowerCase();
   const pack = await getPackByTgUser(supabase, tgUserId);
 
-  // ── Statut 2FA ─────────────────────────────────────────────────────────────
+  // ── Statut 2FA ────────────────────��────────────────────────────────────────
   if (lower.match(/\b(2fa|2 fa|deux.?facteurs|protection|vérif|securis|sécuris|authenti)\b/)) {
     if (!pack) {
       await sendHuman(chatId, `🔍 Je ne trouve pas ton compte lié à ce Telegram. Tape /start pour commencer.`, undefined, DELAY_SHORT);
@@ -931,6 +931,70 @@ serve(async (req) => {
     });
   }
 
+
+  // ── Share page (universal native share) ─────────────────────────────────────
+  if (url.searchParams.get("source") === "share") {
+    const su  = decodeURIComponent(url.searchParams.get("url")   || "");
+    const st  = decodeURIComponent(url.searchParams.get("text")  || su);
+    const sl  = decodeURIComponent(url.searchParams.get("label") || "Partager le lien");
+    const html = `<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+  <title>${sl}</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"><\/script>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+         background:var(--tg-theme-bg-color,#fff);color:var(--tg-theme-text-color,#222);
+         display:flex;flex-direction:column;align-items:center;justify-content:center;
+         min-height:100vh;padding:28px 20px;gap:18px;text-align:center}
+    .ico{font-size:52px}
+    h2{font-size:20px;font-weight:700;line-height:1.3}
+    .sub{font-size:14px;opacity:.65;line-height:1.5}
+    .url{background:var(--tg-theme-secondary-bg-color,#f4f4f8);border-radius:12px;
+         padding:12px 16px;font-size:12px;word-break:break-all;width:100%;font-family:monospace;
+         color:var(--tg-theme-hint-color,#888)}
+    .btn{background:var(--tg-theme-button-color,#0088cc);color:var(--tg-theme-button-text-color,#fff);
+         border:none;border-radius:14px;padding:15px 24px;font-size:17px;font-weight:600;
+         cursor:pointer;width:100%;max-width:320px;transition:opacity .15s}
+    .btn:active{opacity:.8}
+    .copy{background:transparent;color:var(--tg-theme-link-color,#0088cc);
+          font-size:14px;padding:8px 16px;border:none;cursor:pointer}
+    .status{font-size:14px;font-weight:600;color:#22c55e;min-height:18px}
+  </style>
+</head>
+<body>
+  <div class="ico">📤</div>
+  <h2>${sl}</h2>
+  <div class="url" id="urlBox">${su}</div>
+  <p class="sub">Choisissez l'application de votre choix</p>
+  <p class="status" id="st"></p>
+  <button class="btn" id="shareBtn" onclick="doShare()">Partager via…</button>
+  <button class="copy" onclick="copyLink()">📋 Copier le lien</button>
+  <script>
+    const tg=window.Telegram.WebApp; tg.ready(); tg.expand();
+    const SU=${JSON.stringify(su)}, ST=${JSON.stringify(st)};
+    async function doShare(){
+      if(navigator.share){
+        try{await navigator.share({title:'Betesim',text:ST,url:SU});
+          document.getElementById('st').textContent='✅ Partagé !';
+          setTimeout(()=>tg.close(),800);
+        }catch(e){if(e.name!=='AbortError')copyLink();}
+      }else{copyLink();}
+    }
+    async function copyLink(){
+      try{await navigator.clipboard.writeText(SU);}catch{}
+      document.getElementById('st').textContent='✅ Lien copié !';
+      document.getElementById('shareBtn').textContent='✅ Copié !';
+      setTimeout(()=>tg.close(),1400);
+    }
+    setTimeout(doShare,350);
+  <\/script>
+</body></html>`;
+    return new Response(html, { headers:{"Content-Type":"text/html; charset=utf-8"} });
+  }
   if (req.method !== "POST") return new Response("OK", { status: 200 });
 
   const supabase = makeSupabase();
@@ -1301,20 +1365,14 @@ serve(async (req) => {
       const clientLink   = `https://t.me/${BOT_USERNAME}?start=c_${reseller.id}`;
       const revendeurLink = `https://t.me/${BOT_USERNAME}?start=r_${reseller.id}`;
       await sendMessage(chatId, [
-        `🔗 <b>Tes liens de partage</b>`,
-        ``,
-        `👥 <b>Lien CLIENT</b>`,
-        `<i>Partage ce lien à tes clients pour qu'ils s'inscrivent directement :</i>`,
-        `<code>${clientLink}</code>`,
-        ``,
-        `🤝 <b>Lien REVENDEUR</b>`,
-        `<i>Partage ce lien pour recruter de nouveaux revendeurs :</i>`,
-        `<code>${revendeurLink}</code>`,
-        ``,
-        `💡 Chaque vente via ton lien client te rapporte <b>70%</b> de commission !`,
+        `🔗 <b>Tes liens de partage</b>`, ``,
+        `💡 Clique sur un bouton pour ouvrir le <b>menu de partage natif</b> de ton téléphone et partager sur n'importe quelle appli (WhatsApp, TikTok, Instagram, Telegram, etc.).`,
+        ``, `70% de commission sur chaque vente via ton lien client !`,
       ].join("\n"), {
         inline_keyboard: [
-          [{ text: "📋 Mon Dashboard", callback_data: "dashboard_home" }],
+          [{ text: "🔗 Partager Lien Client",    web_app: { url: FUNCTION_URL+"?source=share&label="+encodeURIComponent("Partager Lien Client")+"&url="+encodeURIComponent(clientLink)+"&text="+encodeURIComponent("🎟 Rejoins-moi sur Betesim pour accéder aux coupons de pronostics ! "+clientLink) } }],
+          [{ text: "🔗 Partager Lien Revendeur", web_app: { url: FUNCTION_URL+"?source=share&label="+encodeURIComponent("Partager Lien Revendeur")+"&url="+encodeURIComponent(revendeurLink)+"&text="+encodeURIComponent("💼 Deviens revendeur sur Betesim et gagne des commissions ! "+revendeurLink) } }],
+          [{ text: "📊 Mon Dashboard", callback_data: "dashboard_home" }],
         ],
       });
       return new Response("ok", { status: 200 });
@@ -1638,7 +1696,7 @@ serve(async (req) => {
           return new Response("ok", { status: 200 });
         }
 
-        // ── pro_resellers ───────────────────────────────────────────────────
+        // ── pro_resellers ───────��───────────────────────────────────────────
         if (data === "pro_resellers") {
           const stats = await getPronostiqueurStats(supabase, pro.id);
           const lines = stats.resellers.slice(0, 10).map((r: any, i: number) => {
@@ -1683,7 +1741,7 @@ serve(async (req) => {
           return new Response("ok", { status: 200 });
         }
 
-        // ── pro_home (default) ──────────────────────────────────────────────
+        // ── pro_home (default) ─────────────────���────────────────────────────
         const [wallet, stats] = await Promise.all([
           getPronostiqueurWallet(supabase, pro.id),
           getPronostiqueurStats(supabase, pro.id),
@@ -1812,7 +1870,7 @@ serve(async (req) => {
           `🎟 Actifs : <b>${active}</b> · Vendus : <b>${sold}</b>`,
           `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
           analyses.length > 0 ? `🔔 <b>${analyses.length} analyse${analyses.length > 1 ? "s" : ""} en attente !</b>` : `✅ Toutes les analyses traitées.`,
-          `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+          `━━━━━━━━━━━━━━━━━━━━���━━━━━━━━`,
           `🔗 <b>Mes liens de partage :</b>`,
           ``,
           `👥 <b>Lien Client</b> (onboarding 1win) :`,
@@ -1822,14 +1880,17 @@ serve(async (req) => {
           `<code>${revendeurLink}</code>`,
         ].join("\n"), {
           inline_keyboard: (() => {
-            const BOT_UN = "pack_officiel_expert_bot";
-            const cLink  = `https://t.me/${BOT_UN}?start=c_${chatId}`;
-            const sMsg   = `🎟 Coupons de pronostics sur Telegram ! Rejoins-moi : ${cLink}`;
+            const _bu   = "pack_officiel_expert_bot";
+            const _cL   = `https://t.me/${_bu}?start=c_${chatId}`;
+            const _rL   = `https://t.me/${_bu}?start=r_${chatId}`;
+            const _mkSh = (label: string, lnk: string, txt: string) =>
+              ({ text: label, web_app: { url: FUNCTION_URL+"?source=share&label="+encodeURIComponent(label)+"&url="+encodeURIComponent(lnk)+"&text="+encodeURIComponent(txt) } });
             return [
               [{ text: "📤 Publier un coupon", callback_data: "start_pub" }],
               [{ text: "💰 Mon Wallet", callback_data: "wallet_detail" }, { text: "🎟 Mes coupons", callback_data: "my_coupons" }],
               [{ text: "📋 Analyses", callback_data: "show_analyses" }, { text: "🎟 Voir le Pool", callback_data: "voir_pool" }],
-              [{ text: "📲 WhatsApp", url: `https://wa.me/?text=${encodeURIComponent(sMsg)}` }, { text: "📘 Facebook", url: `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(cLink)}` }],
+              [_mkSh("🔗 Partager Lien Client",    _cL, "🎟 Rejoins-moi sur Betesim pour des coupons de pronostics ! "+_cL)],
+              [_mkSh("🔗 Partager Lien Revendeur", _rL, "💼 Deviens revendeur Betesim et gagne des commissions ! "+_rL)],
               analyses.length > 0 ? [{ text: `🔔 Créer coupon analyse (${analyses.length})`, callback_data: "show_analyses" }] : [],
             ].filter((r: any[]) => r.length > 0);
           })(),
@@ -1939,11 +2000,13 @@ serve(async (req) => {
         const clientLink = `https://t.me/${BOT_UNAME}?start=c_${chatId}`;
         const matchHour  = new Date(match_start).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", timeZone: "Africa/Abidjan" });
         const shareMsg   = `🎟 Coupon de pronostics disponible !\n📊 Cote: ${odds} | 💰 ${price.toLocaleString("fr-FR")} FCFA\n⏰ Matchs à ${matchHour}\nAchète maintenant: ${clientLink}`;
-        const shareWa    = `https://wa.me/?text=${encodeURIComponent(shareMsg)}`;
-        const shareFb    = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(clientLink)}`;
-        await sendHuman(chatId, [`✅ <b>Coupon publié dans le Pool !</b>`,``,`🎟 Code${codes.length>1?"s":""} : <code>${maskCodes(codes)}</code>`,`📊 Cote : <b>${odds}</b> · 💰 Prix : <b>${price.toLocaleString("fr-FR")} FCFA</b>`,`⏰ Expire à : <b>${matchHour}</b>`,``,`🔗 <b>Lien client à partager :</b>`,`<code>${clientLink}</code>`].join("\n"), {
+        const _resellerLink = `https://t.me/pack_officiel_expert_bot?start=r_${chatId}`;
+        const _mkSh2 = (label: string, lnk: string, txt: string) =>
+          ({ text: label, web_app: { url: FUNCTION_URL+"?source=share&label="+encodeURIComponent(label)+"&url="+encodeURIComponent(lnk)+"&text="+encodeURIComponent(txt) } });
+        await sendHuman(chatId, [`✅ <b>Coupon publié dans le Pool !</b>`,``,`🎟 Code${codes.length>1?"s":""} : <code>${maskCodes(codes)}</code>`,`📊 Cote : <b>${odds}</b> · 💰 Prix : <b>${price.toLocaleString("fr-FR")} FCFA</b>`,`⏰ Expire à : <b>${matchHour}</b>`,``,`💡 Partage ton lien client pour que tes clients achètent ce coupon.`].join("\n"), {
           inline_keyboard: [
-            [{ text: "📲 WhatsApp", url: shareWa }, { text: "📘 Facebook", url: shareFb }],
+            [_mkSh2("🔗 Partager Lien Client",    clientLink,    `🎟 Coupon de pronostics disponible ! Cote ${odds} · ${price.toLocaleString("fr-FR")} FCFA. Achète ici : ${clientLink}`)],
+            [_mkSh2("🔗 Partager Lien Revendeur", _resellerLink, `💼 Rejoins mon équipe Betesim et gagne des commissions ! ${_resellerLink}`)],
             [{ text: "📊 Mon Dashboard", callback_data: "dashboard_home" }],
             [{ text: "➕ Publier un autre coupon", callback_data: "start_pub" }],
           ],
@@ -1963,7 +2026,7 @@ serve(async (req) => {
         return new Response("ok", { status: 200 });
       }
 
-      // ── Sélection coupon → formulaire paiement ─────────────────────────────
+      // ── Sélection coupon → formulaire paiement ─────────────────────��───────
       if (data.startsWith("acheter_")) {
         const couponId = data.replace("acheter_", "");
         const { data: coupon } = await supabase.from("coupons")
@@ -2069,7 +2132,7 @@ serve(async (req) => {
 
 
 
-    // ── Messages texte libres ─────────────────────────────────────────────
+    // ── Messages texte libres ────────────────────────────────────────────��
     if (update.message?.text && !update.message.text.startsWith("/")) {
       const chatId    = update.message.chat.id;
       const tgUserId  = update.message.from?.id ?? 0;
@@ -2130,13 +2193,16 @@ serve(async (req) => {
           analyses.length > 0 ? `🔔 <b>${analyses.length} analyse${analyses.length > 1 ? "s" : ""} en attente !</b>` : `✅ Toutes les analyses traitées.`,
         ].join("\n"), {
           inline_keyboard: (() => {
-            const BOT_UN2 = "pack_officiel_expert_bot";
-            const cLink2  = `https://t.me/${BOT_UN2}?start=c_${chatId}`;
-            const sMsg2   = `🎟 Coupons de pronostics sur Telegram ! Rejoins-moi : ${cLink2}`;
+            const _bu3  = "pack_officiel_expert_bot";
+            const _cL3  = `https://t.me/${_bu3}?start=c_${chatId}`;
+            const _rL3  = `https://t.me/${_bu3}?start=r_${chatId}`;
+            const _mk3  = (label: string, lnk: string, txt: string) =>
+              ({ text: label, web_app: { url: FUNCTION_URL+"?source=share&label="+encodeURIComponent(label)+"&url="+encodeURIComponent(lnk)+"&text="+encodeURIComponent(txt) } });
             return [
               [{ text: "📤 Publier un coupon", callback_data: "start_pub" }],
               [{ text: "💰 Mon Wallet", callback_data: "wallet_detail" }, { text: "🎟 Mes coupons", callback_data: "my_coupons" }],
-              [{ text: "📲 WhatsApp", url: `https://wa.me/?text=${encodeURIComponent(sMsg2)}` }, { text: "📘 Facebook", url: `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(cLink2)}` }],
+              [_mk3("🔗 Partager Lien Client",    _cL3, "🎟 Rejoins-moi sur Betesim pour des coupons de pronostics ! "+_cL3)],
+              [_mk3("🔗 Partager Lien Revendeur", _rL3, "💼 Deviens revendeur Betesim et gagne des commissions ! "+_rL3)],
             ];
           })(),
         }, DELAY_SHORT);
