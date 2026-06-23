@@ -659,16 +659,22 @@ async function createFedaPayLink(
   } catch (e: any) { console.error("FedaPay error:", e?.message); return null; }
 }
 
-async function getPendingAnalyses(supabase: any, resellerId?: string) {
-  const { data } = await supabase
+async function getPendingAnalyses(supabase: any, resellerId?: string, searchTerm?: string) {
+  let query = supabase
     .from("analyses")
-    .select("id, team_home, team_away, league, match_date, result, confidence_pct, platform_suggestion")
+    .select("id, team_home, team_away, league, country, match_date, result, confidence_pct, platform_suggestion")
     .eq("published", true)
     .order("match_date", { ascending: true })
-    .limit(10);
+    .limit(50);
+
+  if (searchTerm) {
+    const t = searchTerm.toLowerCase();
+    query = query.or(`team_home.ilike.%${t}%,team_away.ilike.%${t}%,league.ilike.%${t}%,country.ilike.%${t}%`);
+  }
+
+  const { data } = await query;
   if (!data?.length) return [];
   if (!resellerId) return data;
-  // Filter out analyses already converted by this reseller
   const { data: existing } = await supabase
     .from("coupons")
     .select("analysis_id")
@@ -676,6 +682,67 @@ async function getPendingAnalyses(supabase: any, resellerId?: string) {
     .in("analysis_id", data.map((a: any) => a.id));
   const doneIds = new Set((existing ?? []).map((c: any) => c.analysis_id));
   return (data as any[]).filter((a: any) => !doneIds.has(a.id));
+}
+
+function competitionEmoji(league: string, country: string): string {
+  const l = (league || "").toLowerCase();
+  const c = (country || "").toLowerCase();
+  if (l.includes("monde") || l.includes("world cup") || l.includes("fifa")) return "🌍";
+  if (l.includes("can") || l.includes("afrique") || l.includes("africa")) return "🌍";
+  if (l.includes("copa america")) return "🌎";
+  if (l.includes("euro") || l.includes("nations league")) return "🇪🇺";
+  if (l.includes("gold cup") || l.includes("concacaf")) return "🌎";
+  if (l.includes("asian cup") || l.includes("afc")) return "🌏";
+  if (l.includes("champions league") || l.includes("ligue des champions")) return "🏆";
+  if (l.includes("europa league")) return "🥇";
+  if (l.includes("conférence") || l.includes("conference")) return "🥈";
+  if (l.includes("caf")) return "🏆";
+  if (c.includes("france") || l.includes("ligue 1") || l.includes("coupe de france")) return "🇫🇷";
+  if (c.includes("angleterre") || c.includes("england") || l.includes("premier league") || l.includes("fa cup") || l.includes("carabao")) return "🏴󠁧󠁢󠁥󠁮󠁧󠁿";
+  if (c.includes("espagne") || c.includes("spain") || l.includes("la liga") || l.includes("copa del rey")) return "🇪🇸";
+  if (c.includes("italie") || c.includes("italy") || l.includes("serie a") || l.includes("coppa")) return "🇮🇹";
+  if (c.includes("allemagne") || c.includes("germany") || l.includes("bundesliga") || l.includes("dfb")) return "🇩🇪";
+  if (c.includes("portugal") || l.includes("liga nos")) return "🇵🇹";
+  if (c.includes("pays-bas") || c.includes("netherlands") || l.includes("eredivisie")) return "🇳🇱";
+  if (c.includes("belgique") || c.includes("belgium") || l.includes("pro league")) return "🇧🇪";
+  if (c.includes("turquie") || c.includes("turkey") || l.includes("süper lig")) return "🇹🇷";
+  if (c.includes("brésil") || c.includes("brazil") || l.includes("brasileir")) return "🇧🇷";
+  if (c.includes("mexique") || c.includes("mexico") || l.includes("liga mx")) return "🇲🇽";
+  if (c.includes("états-unis") || c.includes("usa") || l.includes("mls")) return "🇺🇸";
+  if (c.includes("arabie") || l.includes("saudi")) return "🇸🇦";
+  if (c.includes("égypte") || c.includes("egypt") || l.includes("egyptian")) return "🇪🇬";
+  if (c.includes("sénégal") || c.includes("senegal")) return "🇸🇳";
+  if (c.includes("algérie") || c.includes("algeria")) return "🇩🇿";
+  if (c.includes("maroc") || c.includes("morocco")) return "🇲🇦";
+  if (c.includes("afrique") || c.includes("africa")) return "🌍";
+  return "⚽";
+}
+
+function groupAnalysesByCompetition(analyses: any[]): Map<string, any[]> {
+  const groups = new Map<string, any[]>();
+  for (const a of analyses) {
+    const key = a.league || a.country || "Autre";
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(a);
+  }
+  return groups;
+}
+
+function formatAnalysesGrouped(analyses: any[], total: number): string {
+  const groups = groupAnalysesByCompetition(analyses);
+  const lines: string[] = [`📋 <b>Analyses disponibles (${total})</b>`, ``];
+  for (const [league, items] of groups) {
+    const emoji = competitionEmoji(league, items[0]?.country || "");
+    lines.push(`${emoji} <b>${escapeHtml(league)}</b>`);
+    for (const a of items.slice(0, 4)) {
+      const date = a.match_date ? new Date(a.match_date).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" }) : "—";
+      const conf = a.confidence_pct ? ` · ${a.confidence_pct}%` : "";
+      lines.push(`  • ${escapeHtml(a.team_home)} vs ${escapeHtml(a.team_away)} — <i>${date}${conf}</i>`);
+    }
+    if (items.length > 4) lines.push(`  <i>+ ${items.length - 4} autres…</i>`);
+    lines.push(``);
+  }
+  return lines.join("\n");
 }
 
 async function getWalletBalance(supabase: any, partnerId: string): Promise<{ total: number; count: number }> {
@@ -1199,30 +1266,57 @@ Deno.serve(async (req) => {
       return new Response("ok", { status: 200 });
     }
 
-    // ── /analyses — analyses à traiter ──────────────��─────────────────────────
+    // ── /rechercher — recherche d'analyses par équipe/compétition ─────────────
+    if (update.message?.text?.startsWith("/rechercher") || update.message?.text?.startsWith("/search")) {
+      const chatId = update.message.chat.id;
+      const reseller = await getResellerProfile(supabase, chatId);
+      if (!reseller) { await sendMessage(chatId, "🔒 Lie d'abord ton compte avec <code>/connect {uid}</code>"); return new Response("ok", { status: 200 }); }
+      const parts = (update.message.text || "").split(" ").slice(1);
+      const term = parts.join(" ").trim();
+      if (!term) {
+        await sendMessage(chatId,
+          "🔍 <b>Recherche d'analyses</b>\n\nTape : <code>/rechercher Bayern</code> ou <code>/rechercher Ligue 1</code>\n\nTu peux chercher par :\n• Nom d'équipe (ex: <code>PSG</code>, <code>Real Madrid</code>)\n• Compétition (ex: <code>Champions League</code>, <code>CAN</code>)\n• Pays (ex: <code>France</code>, <code>Afrique</code>)",
+          { inline_keyboard: [[{ text: "📋 Toutes les analyses", callback_data: "show_analyses" }]] }
+        );
+        return new Response("ok", { status: 200 });
+      }
+      const analyses = await getPendingAnalyses(supabase, reseller.id, term);
+      if (!analyses.length) {
+        await sendMessage(chatId,
+          `🔍 Aucun résultat pour "<b>${escapeHtml(term)}</b>"\n\nEssaie un autre terme ou consulte toutes les analyses.`,
+          { inline_keyboard: [[{ text: "📋 Toutes les analyses", callback_data: "show_analyses" }]] }
+        );
+        return new Response("ok", { status: 200 });
+      }
+      const grouped = formatAnalysesGrouped(analyses, analyses.length);
+      await sendMessage(chatId,
+        `🔍 <b>Résultats pour "${escapeHtml(term)}" (${analyses.length})</b>\n\n${grouped}`,
+        {
+          inline_keyboard: [
+            ...analyses.slice(0, 6).map((a: any) => [{ text: `➕ ${a.team_home} vs ${a.team_away}`, callback_data: `create_coupon_${a.id}` }]),
+            [{ text: "📋 Toutes les analyses", callback_data: "show_analyses" }, { text: "◀ Dashboard", callback_data: "dashboard_home" }],
+          ],
+        }
+      );
+      return new Response("ok", { status: 200 });
+    }
+
+    // ── /analyses — analyses groupées par compétition ─────────────────────────
     if (update.message?.text?.startsWith("/analyses")) {
       const chatId = update.message.chat.id;
       const reseller = await getResellerProfile(supabase, chatId);
       if (!reseller) { await sendMessage(chatId, "🔒 Lie d'abord ton compte avec <code>/connect {uid}</code>"); return new Response("ok", { status: 200 }); }
       const analyses = await getPendingAnalyses(supabase, reseller.id);
       if (!analyses.length) {
-        await sendMessage(chatId, "✅ <b>Toutes les analyses ont déjà un coupon.</b>\n\nNouvel arrivage bientôt !");
+        await sendMessage(chatId, "✅ <b>Toutes les analyses ont déjà un coupon.</b>\n\nNouvel arrivage bientôt !", { inline_keyboard: [[{ text: "◀ Dashboard", callback_data: "dashboard_home" }]] });
         return new Response("ok", { status: 200 });
       }
-      const lines = analyses.map((a: any, i: number) => {
-        const date = a.match_date ? new Date(a.match_date).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" }) : "";
-        const plat = a.platform_suggestion ? ` [${a.platform_suggestion.toUpperCase()}]` : "";
-        return `${i + 1}. <b>${escapeHtml(a.team_home)} vs ${escapeHtml(a.team_away)}</b>${plat}\n   📅 ${date} — 🎯 ${a.confidence_pct || "?"}% de confiance`;
-      });
-      await sendMessage(chatId, [
-        `📋 <b>Analyses à transformer (${analyses.length})</b>`, ``,
-        `<i>Crée un coupon sur 1xBet/1Win pour chaque analyse, puis publie-le :</i>`, ``,
-        ...lines,
-      ].join("\n"), {
-        inline_keyboard: analyses.slice(0, 6).map((a: any) => [{
-          text: `➕ ${a.team_home} vs ${a.team_away}`,
-          callback_data: `create_coupon_${a.id}`,
-        }]),
+      const grouped = formatAnalysesGrouped(analyses, analyses.length);
+      await sendMessage(chatId, grouped, {
+        inline_keyboard: [
+          ...analyses.slice(0, 5).map((a: any) => [{ text: `➕ ${a.team_home} vs ${a.team_away}`, callback_data: `create_coupon_${a.id}` }]),
+          [{ text: "🔍 Rechercher un match", callback_data: "prompt_search" }, { text: "◀ Dashboard", callback_data: "dashboard_home" }],
+        ],
       });
       return new Response("ok", { status: 200 });
     }
@@ -1840,17 +1934,22 @@ Deno.serve(async (req) => {
             await sendMessage(chatId, "✅ <b>Toutes les analyses ont un coupon.</b>\n\nNouvel arrivage bientôt !", { inline_keyboard: [[{ text: "◀ Dashboard", callback_data: "dashboard_home" }]] });
             return new Response("ok", { status: 200 });
           }
-          const lines = analyses.map((a: any, i: number) => {
-            const date = a.match_date ? new Date(a.match_date).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" }) : "";
-            const plat = a.platform_suggestion ? ` [${a.platform_suggestion.toUpperCase()}]` : "";
-            return `${i + 1}. <b>${escapeHtml(a.team_home)} vs ${escapeHtml(a.team_away)}</b>${plat} — ${date}`;
-          });
-          await sendMessage(chatId, [`📋 <b>Analyses à traiter (${analyses.length})</b>`, "", ...lines, "", "<i>Sélectionne une analyse pour créer le coupon :</i>"].join("\n"), {
+          const grouped = formatAnalysesGrouped(analyses, analyses.length);
+          await sendMessage(chatId, grouped, {
             inline_keyboard: [
-              ...analyses.slice(0, 6).map((a: any) => [{ text: `➕ ${a.team_home} vs ${a.team_away}`, callback_data: `create_coupon_${a.id}` }]),
-              [{ text: "◀ Dashboard", callback_data: "dashboard_home" }],
+              ...analyses.slice(0, 5).map((a: any) => [{ text: `➕ ${a.team_home} vs ${a.team_away}`, callback_data: `create_coupon_${a.id}` }]),
+              [{ text: "🔍 Rechercher un match", callback_data: "prompt_search" }, { text: "◀ Dashboard", callback_data: "dashboard_home" }],
             ],
           });
+          return new Response("ok", { status: 200 });
+        }
+
+        if (data === "prompt_search") {
+          await answerCallback(update.callback_query!.id);
+          await sendMessage(chatId,
+            "🔍 <b>Recherche d'analyses</b>\n\nTape ta recherche :\n<code>/rechercher Bayern</code>\n<code>/rechercher CAN</code>\n<code>/rechercher Champions League</code>\n<code>/rechercher France</code>\n\nTu peux chercher par équipe, compétition ou pays.",
+            { inline_keyboard: [[{ text: "📋 Toutes les analyses", callback_data: "show_analyses" }, { text: "◀ Dashboard", callback_data: "dashboard_home" }]] }
+          );
           return new Response("ok", { status: 200 });
         }
 
