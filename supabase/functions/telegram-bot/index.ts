@@ -1075,6 +1075,18 @@ Deno.serve(async (req) => {
   try { bodyText = await req.text(); }
   catch { return new Response("ok", { status: 200 }); }
 
+  // ── Validation des variables critiques ─────────────────────────────────────
+  const _botToken = Deno.env.get("TELEGRAM_BOT_TOKEN");
+  const _serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!_botToken) {
+    console.error("[FATAL] TELEGRAM_BOT_TOKEN manquant — le bot ne peut pas répondre. Configurez ce secret dans Supabase.");
+    return new Response("ok", { status: 200 }); // 200 pour éviter les retentatives Telegram
+  }
+  if (!_serviceKey) {
+    console.error("[FATAL] SUPABASE_SERVICE_ROLE_KEY manquant — accès DB impossible. Configurez ce secret dans Supabase.");
+    return new Response("ok", { status: 200 });
+  }
+
   // Traitement synchrone — Telegram attend jusqu'à 60s, largement suffisant
   await (async () => {
     const supabase = makeSupabase();
@@ -2345,7 +2357,11 @@ Deno.serve(async (req) => {
 
     return;
   } catch (err: any) {
-    console.error("telegram-bot error:", err?.message ?? err);
+    console.error("[telegram-bot] Erreur fatale non rattrapée:", {
+      message: err?.message ?? String(err),
+      stack: err?.stack?.slice(0, 800) ?? "(pas de stack)",
+      time: new Date().toISOString(),
+    });
   }
   })();
 
