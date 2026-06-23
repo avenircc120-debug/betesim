@@ -402,10 +402,9 @@ async function handleFreeText(chatId: number, text: string, firstName: string, t
   } else {
     // Message non reconnu → guide simple
     // ── Groq IA fallback ─────���──────────────────────────────────────
+    await sendAction(chatId); // typing immédiat pendant que Groq réfléchit
     const groqReply = await askGroq(text, firstName);
     if (groqReply) {
-      await sendAction(chatId);
-      await sleep(DELAY_SHORT);
       await sendMessage(chatId, groqReply, {
         inline_keyboard: [
           [{ text: "🎟 Voir les coupons", callback_data: "voir_pool" }, { text: "📊 Analyses", web_app: { url: proUrl } }],
@@ -807,14 +806,14 @@ async function askGroq(userMessage: string, firstName: string): Promise<string |
     const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-      signal: AbortSignal.timeout(6000),
+      signal: AbortSignal.timeout(4000),
       body: JSON.stringify({
         model: "llama-3.1-8b-instant",
         messages: [
           { role: "system", content: GROQ_SYSTEM },
           { role: "user", content: `[${firstName}]: ${userMessage}` },
         ],
-        max_tokens: 300,
+        max_tokens: 150,
         temperature: 0.7,
       }),
     });
