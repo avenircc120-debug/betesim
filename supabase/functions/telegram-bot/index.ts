@@ -1484,21 +1484,19 @@ serve(async (req) => {
         const BOT_UN = Deno.env.get("BOT_USERNAME") || "pack_officiel_expert_bot";
         const clientLink   = `https://t.me/${BOT_UN}?start=c_${chatId}`;
         const revendeurLink = `https://t.me/${BOT_UN}?start=r_${chatId}`;
+        const _shareWelcome = (lnk: string, txt: string) =>
+          `https://t.me/share/url?url=${encodeURIComponent(lnk)}&text=${encodeURIComponent(txt)}`;
         await sendMessage(chatId, [
           `🎉 <b>Bienvenue ${escapeHtml(firstName)} — Compte Revendeur créé !</b>`,
           ``,
           `✅ Tu es maintenant revendeur sur Pack Officiel.`,
-          `Voici tes 2 liens de partage :`,
-          ``,
-          `👥 <b>Lien Client</b> (onboarding 1win) :`,
-          `<code>${clientLink}</code>`,
-          ``,
-          `🤝 <b>Lien Revendeur</b> (recruter des revendeurs) :`,
-          `<code>${revendeurLink}</code>`,
-          ``,
-          `📊 Tape /dashboard pour accéder à ton espace.`,
+          `Utilise les boutons ci-dessous pour partager tes liens et accéder à ton espace.`,
         ].join("\n"), {
-          inline_keyboard: [[{ text: "📋 Mon Dashboard", callback_data: "dashboard_home" }]],
+          inline_keyboard: [
+            [{ text: "📋 Mon Dashboard", callback_data: "dashboard_home" }],
+            [{ text: "🔗 Partager Lien Client",    url: _shareWelcome(clientLink,   "🎟 Rejoins-moi sur Betesim pour des coupons de pronostics ! "+clientLink) }],
+            [{ text: "🔗 Partager Lien Revendeur", url: _shareWelcome(revendeurLink, "💼 Deviens revendeur Betesim et gagne des commissions ! "+revendeurLink) }],
+          ],
         });
         return new Response("ok", { status: 200 });
       }
@@ -1861,6 +1859,11 @@ serve(async (req) => {
         ]);
         const active = (coupons ?? []).filter((c: any) => c.status === "active").length;
         const sold   = (coupons ?? []).filter((c: any) => c.status === "sold").length;
+        const _bu_dash  = "pack_officiel_expert_bot";
+        const _cL_dash  = `https://t.me/${_bu_dash}?start=c_${chatId}`;
+        const _rL_dash  = `https://t.me/${_bu_dash}?start=r_${chatId}`;
+        const _shareUrl = (lnk: string, txt: string) =>
+          `https://t.me/share/url?url=${encodeURIComponent(lnk)}&text=${encodeURIComponent(txt)}`;
         await sendMessage(chatId, [
           `📊 <b>Dashboard Revendeur</b>`,
           `👤 ${escapeHtml((reseller as any).full_name || "Revendeur")}`,
@@ -1870,30 +1873,15 @@ serve(async (req) => {
           `🎟 Actifs : <b>${active}</b> · Vendus : <b>${sold}</b>`,
           `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
           analyses.length > 0 ? `🔔 <b>${analyses.length} analyse${analyses.length > 1 ? "s" : ""} en attente !</b>` : `✅ Toutes les analyses traitées.`,
-          `━━━━━━━━━━━━━━━━━━━━���━━━━━━━━`,
-          `🔗 <b>Mes liens de partage :</b>`,
-          ``,
-          `👥 <b>Lien Client</b> (onboarding 1win) :`,
-          `<code>${clientLink}</code>`,
-          ``,
-          `🤝 <b>Lien Revendeur</b> (recruter) :`,
-          `<code>${revendeurLink}</code>`,
         ].join("\n"), {
-          inline_keyboard: (() => {
-            const _bu   = "pack_officiel_expert_bot";
-            const _cL   = `https://t.me/${_bu}?start=c_${chatId}`;
-            const _rL   = `https://t.me/${_bu}?start=r_${chatId}`;
-            const _mkSh = (label: string, lnk: string, txt: string) =>
-              ({ text: label, web_app: { url: FUNCTION_URL+"?source=share&label="+encodeURIComponent(label)+"&url="+encodeURIComponent(lnk)+"&text="+encodeURIComponent(txt) } });
-            return [
-              [{ text: "📤 Publier un coupon", callback_data: "start_pub" }],
-              [{ text: "💰 Mon Wallet", callback_data: "wallet_detail" }, { text: "🎟 Mes coupons", callback_data: "my_coupons" }],
-              [{ text: "📋 Analyses", callback_data: "show_analyses" }, { text: "🎟 Voir le Pool", callback_data: "voir_pool" }],
-              [_mkSh("🔗 Partager Lien Client",    _cL, "🎟 Rejoins-moi sur Betesim pour des coupons de pronostics ! "+_cL)],
-              [_mkSh("🔗 Partager Lien Revendeur", _rL, "💼 Deviens revendeur Betesim et gagne des commissions ! "+_rL)],
-              analyses.length > 0 ? [{ text: `🔔 Créer coupon analyse (${analyses.length})`, callback_data: "show_analyses" }] : [],
-            ].filter((r: any[]) => r.length > 0);
-          })(),
+          inline_keyboard: [
+            [{ text: "📤 Publier un coupon", callback_data: "start_pub" }],
+            [{ text: "💰 Mon Wallet", callback_data: "wallet_detail" }, { text: "🎟 Mes coupons", callback_data: "my_coupons" }],
+            [{ text: "📋 Analyses", callback_data: "show_analyses" }, { text: "🎟 Voir le Pool", callback_data: "voir_pool" }],
+            [{ text: "🔗 Partager Lien Client",    url: _shareUrl(_cL_dash, "🎟 Rejoins-moi sur Betesim pour des coupons de pronostics ! "+_cL_dash) }],
+            [{ text: "🔗 Partager Lien Revendeur", url: _shareUrl(_rL_dash, "💼 Deviens revendeur Betesim et gagne des commissions ! "+_rL_dash) }],
+            ...(analyses.length > 0 ? [[{ text: `🔔 Créer coupon analyse (${analyses.length})`, callback_data: "show_analyses" }]] : []),
+          ],
         });
         return new Response("ok", { status: 200 });
       }
