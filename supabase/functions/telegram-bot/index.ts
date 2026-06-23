@@ -602,16 +602,29 @@ async function getPronostiqueurStats(supabase: any, proId: string) {
   return { allA, published, won, lost, pending, resellers, soldCoupons };
 }
 
+// ── Cache mémoire sessions (réduit les écritures DB) ─────────────────────────
+// Warm-start Deno : le Map persiste entre invocations sur la même instance
+const _sessionCache = new Map<number, { state: string; data: Record<string, unknown> } | null>();
+
 async function setBotState(supabase: any, chatId: number, state: string, data: Record<string, unknown>) {
-  await supabase.from("bot_sessions").upsert({ telegram_chat_id: chatId, state, data, updated_at: new Date().toISOString() });
+  const cached = _sessionCache.get(chatId);
+  // N'écrire en DB que si l'état change réellement
+  if (!cached || cached.state !== state || JSON.stringify(cached.data) !== JSON.stringify(data)) {
+    await supabase.from("bot_sessions").upsert({ telegram_chat_id: chatId, state, data, updated_at: new Date().toISOString() });
+    _sessionCache.set(chatId, { state, data });
+  }
 }
 
 async function getBotState(supabase: any, chatId: number): Promise<{ state: string; data: Record<string, unknown> } | null> {
+  if (_sessionCache.has(chatId)) return _sessionCache.get(chatId) ?? null;
   const { data } = await supabase.from("bot_sessions").select("state, data").eq("telegram_chat_id", chatId).maybeSingle();
-  return data as { state: string; data: Record<string, unknown> } | null;
+  const result = data as { state: string; data: Record<string, unknown> } | null;
+  _sessionCache.set(chatId, result);
+  return result;
 }
 
 async function clearBotState(supabase: any, chatId: number) {
+  _sessionCache.delete(chatId);
   await supabase.from("bot_sessions").delete().eq("telegram_chat_id", chatId);
 }
 
