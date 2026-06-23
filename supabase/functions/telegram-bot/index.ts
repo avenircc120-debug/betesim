@@ -1110,6 +1110,7 @@ Deno.serve(async (req) => {
     return new Response("ok", { status: 200 });
   }
 
+  const bgTask = (async () => {
   try {
     // ── /app ─────────────────────────────────────────────────────────────
     if (update.message?.text?.startsWith("/app")) {
@@ -1121,7 +1122,7 @@ Deno.serve(async (req) => {
           [{ text:"🎟 Voir les coupons disponibles", callback_data:"voir_pool" }],
         ],
       });
-      return new Response("ok", { status: 200 });
+      return;
     }
 
     // ── /coupons /catalogue ───────────────────────────────────────────────
@@ -1135,7 +1136,7 @@ Deno.serve(async (req) => {
         }]),
       } : undefined;
       await sendMessage(chatId, formatCatalog(coupons), keyboard);
-      return new Response("ok", { status: 200 });
+      return;
     }
 
     // ── /confirmer (admin) ────────────────────────────────────────────────
@@ -1146,15 +1147,15 @@ Deno.serve(async (req) => {
       const buyerChatId = Number(parts[2]);
       if (!couponId || !buyerChatId) {
         await sendMessage(chatId, "Usage : /confirmer {coupon_id} {buyer_chat_id}");
-        return new Response("ok", { status: 200 });
+        return;
       }
       const { data: coupon } = await supabase.from("coupons").select("id,code,price_fcfa,platform,status").eq("id", couponId).maybeSingle();
-      if (!coupon) { await sendMessage(chatId, "❌ Coupon introuvable"); return new Response("ok", { status: 200 }); }
-      if (coupon.status !== "active") { await sendMessage(chatId, "❌ Coupon déjà vendu ou inactif"); return new Response("ok", { status: 200 }); }
+      if (!coupon) { await sendMessage(chatId, "❌ Coupon introuvable"); return; }
+      if (coupon.status !== "active") { await sendMessage(chatId, "❌ Coupon déjà vendu ou inactif"); return; }
       await supabase.from("coupons").update({ status:"sold", sold_at: new Date().toISOString(), buyer_id: String(buyerChatId) }).eq("id", couponId);
       await deliverCoupon(buyerChatId, coupon.code, coupon.platform, coupon.price_fcfa);
       await sendMessage(chatId, `✅ Paiement confirmé. Code <code>${coupon.code}</code> envoyé au client ${buyerChatId}.`);
-      return new Response("ok", { status: 200 });
+      return;
     }
 
 
@@ -1170,18 +1171,18 @@ Deno.serve(async (req) => {
           ``,
           `Ton UID t'a été fourni par l'administrateur.`,
         ].join("\n"));
-        return new Response("ok", { status: 200 });
+        return;
       }
       // Verify profile exists
       const { data: profile, error } = await supabase
         .from("profiles").select("id, full_name, is_partner, is_admin").eq("id", uid).maybeSingle();
       if (!profile) {
         await sendMessage(chatId, "❌ UID introuvable. Vérifie bien l'identifiant copié depuis le Dashboard.");
-        return new Response("ok", { status: 200 });
+        return;
       }
       if (!profile.is_partner && !profile.is_admin) {
         await sendMessage(chatId, "❌ Ce compte n'a pas les droits revendeur. Contacte l'administrateur.");
-        return new Response("ok", { status: 200 });
+        return;
       }
       await supabase.from("profiles").update({ telegram_chat_id: chatId }).eq("id", uid);
       await sendMessage(chatId, [
@@ -1192,7 +1193,7 @@ Deno.serve(async (req) => {
         `💰 /wallet — Ton solde et commissions`,
         `📋 /analyses — Analyses à traiter`,
       ].join("\n"));
-      return new Response("ok", { status: 200 });
+      return;
     }
 
     // ── /dashboard — espace revendeur ─────────────────────────────────────────
@@ -1213,7 +1214,7 @@ Deno.serve(async (req) => {
         const { data: fp } = await supabase.from("profiles").select("id, full_name, is_partner, is_admin, email").eq("telegram_chat_id", chatId).maybeSingle();
         if (!fp) {
           await sendMessage(chatId, "❌ Impossible de créer ton profil. Contacte l'administrateur.");
-          return new Response("ok", { status: 200 });
+          return;
         }
         reseller = fp;
       }
@@ -1245,14 +1246,14 @@ Deno.serve(async (req) => {
           [{ text: "🎟 Voir mes coupons", callback_data: "my_coupons" }],
         ].filter((row: any[]) => row.length > 0),
       });
-      return new Response("ok", { status: 200 });
+      return;
     }
 
     // ── /wallet — détail commissions ──────────────────────────────────────────
     if (update.message?.text?.startsWith("/wallet")) {
       const chatId = update.message.chat.id;
       const reseller = await getResellerProfile(supabase, chatId);
-      if (!reseller) { await sendMessage(chatId, "🔒 Lie d'abord ton compte avec <code>/connect {uid}</code>"); return new Response("ok", { status: 200 }); }
+      if (!reseller) { await sendMessage(chatId, "🔒 Lie d'abord ton compte avec <code>/connect {uid}</code>"); return; }
       const { data: records } = await supabase
         .from("commission_records")
         .select("net_amount, type, description, created_at")
@@ -1270,14 +1271,14 @@ Deno.serve(async (req) => {
         lines.length ? `📋 <b>Dernières commissions :</b>` : `📋 <i>Aucune commission pour l'instant.</i>`,
         ...lines,
       ].join("\n"));
-      return new Response("ok", { status: 200 });
+      return;
     }
 
     // ── /rechercher — recherche d'analyses par équipe/compétition ─────────────
     if (update.message?.text?.startsWith("/rechercher") || update.message?.text?.startsWith("/search")) {
       const chatId = update.message.chat.id;
       const reseller = await getResellerProfile(supabase, chatId);
-      if (!reseller) { await sendMessage(chatId, "🔒 Lie d'abord ton compte avec <code>/connect {uid}</code>"); return new Response("ok", { status: 200 }); }
+      if (!reseller) { await sendMessage(chatId, "🔒 Lie d'abord ton compte avec <code>/connect {uid}</code>"); return; }
       const parts = (update.message.text || "").split(" ").slice(1);
       const term = parts.join(" ").trim();
       if (!term) {
@@ -1285,7 +1286,7 @@ Deno.serve(async (req) => {
           "🔍 <b>Recherche d'analyses</b>\n\nTape : <code>/rechercher Bayern</code> ou <code>/rechercher Ligue 1</code>\n\nTu peux chercher par :\n• Nom d'équipe (ex: <code>PSG</code>, <code>Real Madrid</code>)\n• Compétition (ex: <code>Champions League</code>, <code>CAN</code>)\n• Pays (ex: <code>France</code>, <code>Afrique</code>)",
           { inline_keyboard: [[{ text: "📋 Toutes les analyses", callback_data: "show_analyses" }]] }
         );
-        return new Response("ok", { status: 200 });
+        return;
       }
       const analyses = await getPendingAnalyses(supabase, reseller.id, term);
       if (!analyses.length) {
@@ -1293,7 +1294,7 @@ Deno.serve(async (req) => {
           `🔍 Aucun résultat pour "<b>${escapeHtml(term)}</b>"\n\nEssaie un autre terme ou consulte toutes les analyses.`,
           { inline_keyboard: [[{ text: "📋 Toutes les analyses", callback_data: "show_analyses" }]] }
         );
-        return new Response("ok", { status: 200 });
+        return;
       }
       const grouped = formatAnalysesGrouped(analyses, analyses.length);
       await sendMessage(chatId,
@@ -1305,18 +1306,18 @@ Deno.serve(async (req) => {
           ],
         }
       );
-      return new Response("ok", { status: 200 });
+      return;
     }
 
     // ── /analyses — analyses groupées par compétition ─────────────────────────
     if (update.message?.text?.startsWith("/analyses")) {
       const chatId = update.message.chat.id;
       const reseller = await getResellerProfile(supabase, chatId);
-      if (!reseller) { await sendMessage(chatId, "🔒 Lie d'abord ton compte avec <code>/connect {uid}</code>"); return new Response("ok", { status: 200 }); }
+      if (!reseller) { await sendMessage(chatId, "🔒 Lie d'abord ton compte avec <code>/connect {uid}</code>"); return; }
       const analyses = await getPendingAnalyses(supabase, reseller.id);
       if (!analyses.length) {
         await sendMessage(chatId, "✅ <b>Toutes les analyses ont déjà un coupon.</b>\n\nNouvel arrivage bientôt !", { inline_keyboard: [[{ text: "◀ Dashboard", callback_data: "dashboard_home" }]] });
-        return new Response("ok", { status: 200 });
+        return;
       }
       const grouped = formatAnalysesGrouped(analyses, analyses.length);
       await sendMessage(chatId, grouped, {
@@ -1325,7 +1326,7 @@ Deno.serve(async (req) => {
           [{ text: "🔍 Rechercher un match", callback_data: "prompt_search" }, { text: "◀ Dashboard", callback_data: "dashboard_home" }],
         ],
       });
-      return new Response("ok", { status: 200 });
+      return;
     }
 
     // ── /publier — revendeur : wizard création coupon libre ──────────────────
@@ -1348,7 +1349,7 @@ Deno.serve(async (req) => {
           [{ text: "❌ Annuler", callback_data: "dashboard_home" }],
         ],
       });
-      return new Response("ok", { status: 200 });
+      return;
     }
 
     // ── /relancer — admin : notifier tous les revendeurs ──────────────────────
@@ -1361,14 +1362,14 @@ Deno.serve(async (req) => {
         .eq("published", true)
         .order("match_date", { ascending: true })
         .limit(5);
-      if (!analyses?.length) { await sendMessage(chatId, "📭 Aucune analyse publiée à envoyer."); return new Response("ok", { status: 200 }); }
+      if (!analyses?.length) { await sendMessage(chatId, "📭 Aucune analyse publiée à envoyer."); return; }
       // Get all resellers with telegram_chat_id
       const { data: resellers } = await supabase
         .from("profiles")
         .select("id, full_name, telegram_chat_id")
         .not("telegram_chat_id", "is", null)
         .or("is_partner.eq.true,is_admin.eq.true");
-      if (!resellers?.length) { await sendMessage(chatId, "⚠️ Aucun revendeur n'a encore lié son compte Telegram.\nPartagez la commande /connect."); return new Response("ok", { status: 200 }); }
+      if (!resellers?.length) { await sendMessage(chatId, "⚠️ Aucun revendeur n'a encore lié son compte Telegram.\nPartagez la commande /connect."); return; }
       let notified = 0;
       for (const reseller of resellers as any[]) {
         if (!reseller.telegram_chat_id || reseller.telegram_chat_id === chatId) continue;
@@ -1396,7 +1397,7 @@ Deno.serve(async (req) => {
         notified++;
       }
       await sendMessage(chatId, `✅ <b>${notified} revendeur${notified > 1 ? "s" : ""} notifié${notified > 1 ? "s" : ""}.</b>\n\nRevendeurs non liés : ${(resellers as any[]).length - notified} (n'ont pas encore fait /connect)`);
-      return new Response("ok", { status: 200 });
+      return;
     }
 
 
@@ -1406,7 +1407,7 @@ Deno.serve(async (req) => {
       const profile = await getProfileByChatId(supabase, chatId);
       if (!profile?.is_admin) {
         await sendMessage(chatId, "⛔ Commande réservée à l'administrateur.");
-        return new Response("ok", { status: 200 });
+        return;
       }
       await sendMessage(chatId, "🤖 <b>Pipeline analyses automatiques lancé…</b>\n\nJe récupère les matchs, génère les analyses IA et les publie. Patiente 30–60 secondes.");
       try {
@@ -1414,7 +1415,7 @@ Deno.serve(async (req) => {
         const data = res.data as { success?: boolean; created?: number; analyses?: string[]; errors?: string[] } | null;
         if (!data?.success) {
           await sendMessage(chatId, `❌ Erreur dans le pipeline : ${JSON.stringify(data)}`);
-          return new Response("ok", { status: 200 });
+          return;
         }
         const lines = [
           `✅ <b>${data.created} analyse${(data.created ?? 0) > 1 ? "s" : ""} générée${(data.created ?? 0) > 1 ? "s" : ""} et publiées !</b>`,
@@ -1427,7 +1428,7 @@ Deno.serve(async (req) => {
       } catch (err: any) {
         await sendMessage(chatId, `❌ Échec : ${err?.message ?? "erreur inconnue"}`);
       }
-      return new Response("ok", { status: 200 });
+      return;
     }
 
     // ── /coupons /catalogue ───────────────────────────────────────────────────
@@ -1440,7 +1441,7 @@ Deno.serve(async (req) => {
           callback_data: `acheter_${c.id}`,
         }]),
       } : undefined);
-      return new Response("ok", { status: 200 });
+      return;
     }
 
     // ── /ordres (admin) ────────────────���──────────────────────────────────────
@@ -1454,7 +1455,7 @@ Deno.serve(async (req) => {
         .limit(10);
       if (!orders?.length) {
         await sendMessage(chatId, "📭 Aucune commande en attente.");
-        return new Response("ok", { status: 200 });
+        return;
       }
       const lines = (orders as any[]).map((o, i) => {
         const c = o.coupons;
@@ -1463,19 +1464,19 @@ Deno.serve(async (req) => {
         return `${emoji} ${i+1}. <b>${escapeHtml(o.buyer_name||"Client")}</b> — ${n} — ${o.amount_fcfa.toLocaleString("fr-FR")} F\n   Réf: <code>${o.id.slice(0,8).toUpperCase()}</code>`;
       });
       await sendMessage(chatId, [`📋 <b>Commandes récentes (${orders.length})</b>`, "", ...lines].join("\n"));
-      return new Response("ok", { status: 200 });
+      return;
     }
 
     // ── /confirmer {order_id} (admin) ─────────────────────────────────────────
     if (update.message?.text?.startsWith("/confirmer")) {
       const chatId = update.message.chat.id;
       const orderId = update.message.text.split(" ")[1]?.trim();
-      if (!orderId) { await sendMessage(chatId, "Usage : <code>/confirmer {order_id}</code>\nVoir les IDs avec /ordres"); return new Response("ok", { status: 200 }); }
+      if (!orderId) { await sendMessage(chatId, "Usage : <code>/confirmer {order_id}</code>\nVoir les IDs avec /ordres"); return; }
       const result = await confirmBotOrder(supabase, orderId);
-      if (!result) { await sendMessage(chatId, "❌ Commande introuvable ou déjà traitée."); return new Response("ok", { status: 200 }); }
+      if (!result) { await sendMessage(chatId, "❌ Commande introuvable ou déjà traitée."); return; }
       await deliverCode(result.buyerChatId, result.couponCode, result.platform, result.amount);
       await sendMessage(chatId, `✅ Code <code>${result.couponCode}</code> livré au client ${result.buyerChatId}.`);
-      return new Response("ok", { status: 200 });
+      return;
     }
 
     // ── /monlien — liens partageables du revendeur ──────────────────────────
@@ -1488,7 +1489,7 @@ Deno.serve(async (req) => {
           ``,
           `Lie d'abord ton compte avec <code>/connect {uid}</code>`,
         ].join("\n"));
-        return new Response("ok", { status: 200 });
+        return;
       }
       const BOT_USERNAME = "pack_officiel_expert_bot";
       const clientLink   = `https://t.me/${BOT_USERNAME}?start=c_${reseller.id}`;
@@ -1504,7 +1505,7 @@ Deno.serve(async (req) => {
           [{ text: "📊 Mon Dashboard", callback_data: "dashboard_home" }],
         ],
       });
-      return new Response("ok", { status: 200 });
+      return;
     }
 
     // ── /start — smart deep-link handler ────────────────────────────────────
@@ -1559,12 +1560,12 @@ Deno.serve(async (req) => {
                 [{ text:"🎟 Voir les coupons disponibles", callback_data:"voir_pool" }],
               ],
             }, DELAY_SHORT);
-            return new Response("ok", { status: 200 });
+            return;
           }
         }
         await sendMessage(chatId, welcomeMessage(firstName));
         await sendHuman(chatId, step1Message(), step1Keyboard, DELAY_LONG);
-        return new Response("ok", { status: 200 });
+        return;
       }
 
       // ── Lien revendeur : ?start=r_RESELLERID ────────────────────────────
@@ -1578,7 +1579,7 @@ Deno.serve(async (req) => {
             ``,
             `📊 Utilise /dashboard pour accéder à ton espace.`,
           ].join("\n"));
-          return new Response("ok", { status: 200 });
+          return;
         }
         // Enregistre la demande d'inscription revendeur via bot_sessions
         await supabase.from("bot_sessions").upsert({
@@ -1627,7 +1628,7 @@ Deno.serve(async (req) => {
             [{ text: "🔗 Partager Lien Revendeur", url: _shareWelcome(revendeurLink, "💼 Deviens revendeur Betesim et gagne des commissions ! "+revendeurLink) }],
           ],
         });
-        return new Response("ok", { status: 200 });
+        return;
       }
 
       // ── Pas de paramètre : accueil général ──────────────────────────────
@@ -1640,7 +1641,7 @@ Deno.serve(async (req) => {
         ].join("\n"), {
           inline_keyboard: [[{ text:"📊 Voir les Analyses", web_app:{ url: pUrl } }]],
         });
-        return new Response("ok", { status: 200 });
+        return;
       }
 
       // ── Ancien format : pack_id direct (rétrocompatible) ────────────────
@@ -1652,7 +1653,7 @@ Deno.serve(async (req) => {
 
       if (error || !pack) {
         await sendMessage(chatId, `❌ Lien invalide. Contactez le support.`);
-        return new Response("ok", { status: 200 });
+        return;
       }
 
       if (pack.software_unlocked_at) {
@@ -1663,12 +1664,12 @@ Deno.serve(async (req) => {
             [{ text:"🎟 Voir les coupons disponibles", callback_data:"voir_pool" }],
           ],
         }, DELAY_SHORT);
-        return new Response("ok", { status: 200 });
+        return;
       }
 
       await sendMessage(chatId, welcomeMessage(firstName));
       await sendHuman(chatId, step1Message(), step1Keyboard, DELAY_LONG);
-      return new Response("ok", { status: 200 });
+      return;
     }
 
     // ── Callback buttons ─────────────────────────────────────────────────
@@ -1684,7 +1685,7 @@ Deno.serve(async (req) => {
       // ── Onboarding callbacks (need partner_pack) ──────────────────────────
       if (data === "done_2fa") {
         const pack = await getPackByTgUser(supabase, tgUserId);
-        if (!pack) { await answerCallback(cb.id, "Session expirée — tape /start"); return new Response("ok", { status: 200 }); }
+        if (!pack) { await answerCallback(cb.id, "Session expirée — tape /start"); return; }
         await supabase.from("partner_packs").update({
           secured_2fa_at: new Date().toISOString(),
           telegram_username: username ?? pack.telegram_username,
@@ -1694,39 +1695,39 @@ Deno.serve(async (req) => {
         await editMessage(chatId, messageId, `✅ <b>2FA activée — bravo !</b>`);
         await sendHuman(chatId, step2Infos(firstName, username ?? pack.telegram_username ?? null),
           step2Keyboard(!!(username ?? pack.telegram_username)), DELAY_LONG);
-        return new Response("ok", { status: 200 });
+        return;
       }
 
       if (data === "recheck_username") {
         const pack = await getPackByTgUser(supabase, tgUserId);
-        if (!pack) { await answerCallback(cb.id, "Session expirée — tape /start"); return new Response("ok", { status: 200 }); }
+        if (!pack) { await answerCallback(cb.id, "Session expirée — tape /start"); return; }
         const uname = username ?? null;
         if (!uname) {
           await answerCallback(cb.id, "Toujours pas d'@username…");
           await sendHuman(chatId, `🤔 Je ne vois toujours pas d'@username.\n\nVa dans <b>Réglages → Modifier le profil → Nom d'utilisateur</b> puis réessaie.`,
             step2Keyboard(false), DELAY_SHORT);
-          return new Response("ok", { status: 200 });
+          return;
         }
         await supabase.from("partner_packs").update({ telegram_username: uname }).eq("id", pack.id);
         await answerCallback(cb.id, "✅ Username détecté !");
         await sendHuman(chatId, step2Infos(firstName, uname), step2Keyboard(true), DELAY_SHORT);
-        return new Response("ok", { status: 200 });
+        return;
       }
 
       if (data === "goto_1win") {
         const pack = await getPackByTgUser(supabase, tgUserId);
-        if (!pack) { await answerCallback(cb.id, "Session expirée — tape /start"); return new Response("ok", { status: 200 }); }
+        if (!pack) { await answerCallback(cb.id, "Session expirée — tape /start"); return; }
         const uname = username ?? pack.telegram_username ?? null;
-        if (!uname) { await answerCallback(cb.id, "Crée d'abord ton @username"); return new Response("ok", { status: 200 }); }
+        if (!uname) { await answerCallback(cb.id, "Crée d'abord ton @username"); return; }
         const partnerLink = await getPartnerLink(supabase);
         await answerCallback(cb.id);
         await sendHuman(chatId, step3Message(uname, partnerLink), step3Keyboard(partnerLink), DELAY_LONG);
-        return new Response("ok", { status: 200 });
+        return;
       }
 
       if (data === "done_1win") {
         const pack = await getPackByTgUser(supabase, tgUserId);
-        if (!pack) { await answerCallback(cb.id, "Session expirée — tape /start"); return new Response("ok", { status: 200 }); }
+        if (!pack) { await answerCallback(cb.id, "Session expirée — tape /start"); return; }
         const now = new Date().toISOString();
         await supabase.from("partner_packs").update({
           partner_clicked_at: now, software_unlocked_at: now,
@@ -1737,7 +1738,7 @@ Deno.serve(async (req) => {
         await sendHuman(chatId, unlockedMessage(firstName, true), {
           inline_keyboard: [[{ text:"📊 Ouvrir le Pack Officiel", web_app:{ url: softUrl } }],[{ text:"🎟 Voir les coupons disponibles", callback_data:"voir_pool" }]],
         }, DELAY_LONG);
-        return new Response("ok", { status: 200 });
+        return;
       }
 
 
@@ -1754,7 +1755,7 @@ Deno.serve(async (req) => {
             ``,
             `Contacte l'administrateur pour obtenir les droits pronostiqueur.`,
           ].join("\n"));
-          return new Response("ok", { status: 200 });
+          return;
         }
 
         const proKbBottom = {
@@ -1795,7 +1796,7 @@ Deno.serve(async (req) => {
               [{ text: "◀ Retour dashboard", callback_data: "pro_home" }],
             ],
           });
-          return new Response("ok", { status: 200 });
+          return;
         }
 
         // ── pro_analyses ────────────────────────────────────────────────────
@@ -1820,7 +1821,7 @@ Deno.serve(async (req) => {
               [{ text: "◀ Retour dashboard", callback_data: "pro_home" }],
             ],
           });
-          return new Response("ok", { status: 200 });
+          return;
         }
 
         // ── pro_resellers ───────��───────────────────────────────────────────
@@ -1841,7 +1842,7 @@ Deno.serve(async (req) => {
               [{ text: "🛒 Clients acheteurs", callback_data: "pro_clients" }, { text: "◀ Retour", callback_data: "pro_home" }],
             ],
           });
-          return new Response("ok", { status: 200 });
+          return;
         }
 
         // ── pro_clients ─────────────────────────────────────────────────────
@@ -1865,7 +1866,7 @@ Deno.serve(async (req) => {
               [{ text: "💰 Mon sous-wallet", callback_data: "pro_wallet" }, { text: "◀ Retour", callback_data: "pro_home" }],
             ],
           });
-          return new Response("ok", { status: 200 });
+          return;
         }
 
         // ── pro_home (default) ─────────────────���────────────────────────────
@@ -1887,7 +1888,7 @@ Deno.serve(async (req) => {
           `💰 Sous-wallet : <b>${wallet.total.toLocaleString("fr-FR")} FCFA</b>`,
           `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
         ].join("\n"), proKbBottom, DELAY_SHORT);
-        return new Response("ok", { status: 200 });
+        return;
       }
 
       // ── Dashboard home ────────────────────────────────────────────────────
@@ -1911,7 +1912,7 @@ Deno.serve(async (req) => {
             .eq("telegram_chat_id", chatId).maybeSingle();
           if (!freshProfile) {
             await sendMessage(chatId, "❌ Impossible de créer ton profil. Contacte l'administrateur.");
-            return new Response("ok", { status: 200 });
+            return;
           }
           // Continuer avec le profil créé (re-assign reseller)
           reseller = freshProfile;
@@ -1932,14 +1933,14 @@ Deno.serve(async (req) => {
           await sendMessage(chatId, [`💰 <b>Wallet</b> — Total : <b>${total.toLocaleString("fr-FR")} FCFA</b>`, "", ...(lines.length ? lines : ["<i>Aucune commission pour l'instant.</i>"])].join("\n"), {
             inline_keyboard: [[{ text: "◀ Dashboard", callback_data: "dashboard_home" }]],
           });
-          return new Response("ok", { status: 200 });
+          return;
         }
 
         if (data === "show_analyses") {
           const analyses = await getPendingAnalyses(supabase, reseller.id);
           if (!analyses.length) {
             await sendMessage(chatId, "✅ <b>Toutes les analyses ont un coupon.</b>\n\nNouvel arrivage bientôt !", { inline_keyboard: [[{ text: "◀ Dashboard", callback_data: "dashboard_home" }]] });
-            return new Response("ok", { status: 200 });
+            return;
           }
           const grouped = formatAnalysesGrouped(analyses, analyses.length);
           await sendMessage(chatId, grouped, {
@@ -1948,7 +1949,7 @@ Deno.serve(async (req) => {
               [{ text: "🔍 Rechercher un match", callback_data: "prompt_search" }, { text: "◀ Dashboard", callback_data: "dashboard_home" }],
             ],
           });
-          return new Response("ok", { status: 200 });
+          return;
         }
 
         if (data === "prompt_search") {
@@ -1957,7 +1958,7 @@ Deno.serve(async (req) => {
             "🔍 <b>Recherche d'analyses</b>\n\nTape ta recherche :\n<code>/rechercher Bayern</code>\n<code>/rechercher CAN</code>\n<code>/rechercher Champions League</code>\n<code>/rechercher France</code>\n\nTu peux chercher par équipe, compétition ou pays.",
             { inline_keyboard: [[{ text: "📋 Toutes les analyses", callback_data: "show_analyses" }, { text: "◀ Dashboard", callback_data: "dashboard_home" }]] }
           );
-          return new Response("ok", { status: 200 });
+          return;
         }
 
         if (data === "my_coupons") {
@@ -1969,7 +1970,7 @@ Deno.serve(async (req) => {
             .limit(10);
           if (!coupons?.length) {
             await sendMessage(chatId, "📭 <b>Aucun coupon publié pour l'instant.</b>\n\nTape /analyses pour voir les analyses disponibles.", { inline_keyboard: [[{ text: "◀ Dashboard", callback_data: "dashboard_home" }]] });
-            return new Response("ok", { status: 200 });
+            return;
           }
           const lines = (coupons as any[]).map((c, i) => {
             const name = c.analyses ? `${c.analyses.team_home} vs ${c.analyses.team_away}` : c.label || "Coupon";
@@ -1979,7 +1980,7 @@ Deno.serve(async (req) => {
           await sendMessage(chatId, [`🎟 <b>Mes coupons (${coupons.length})</b>`, "", ...lines].join("\n"), {
             inline_keyboard: [[{ text: "◀ Dashboard", callback_data: "dashboard_home" }]],
           });
-          return new Response("ok", { status: 200 });
+          return;
         }
 
         // dashboard_home — affiche wallet + liens de partage
@@ -2017,7 +2018,7 @@ Deno.serve(async (req) => {
             ...(analyses.length > 0 ? [[{ text: `🔔 Créer coupon analyse (${analyses.length})`, callback_data: "show_analyses" }]] : []),
           ],
         });
-        return new Response("ok", { status: 200 });
+        return;
       }
 
       // ── Wizard : créer coupon depuis analyse ───────��──────────────────────
@@ -2025,11 +2026,11 @@ Deno.serve(async (req) => {
         const analysisId = data.replace("create_coupon_", "");
         const reseller = await getResellerProfile(supabase, chatId);
         await answerCallback(cb.id);
-        if (!reseller) { await sendMessage(chatId, "🔒 Lie d'abord ton compte : /connect {uid}"); return new Response("ok", { status: 200 }); }
+        if (!reseller) { await sendMessage(chatId, "🔒 Lie d'abord ton compte : /connect {uid}"); return; }
         const { data: analysis } = await supabase.from("analyses")
           .select("id, team_home, team_away, league, result, confidence_pct, platform_suggestion")
           .eq("id", analysisId).maybeSingle();
-        if (!analysis) { await sendMessage(chatId, "❌ Analyse introuvable."); return new Response("ok", { status: 200 }); }
+        if (!analysis) { await sendMessage(chatId, "❌ Analyse introuvable."); return; }
         await setBotState(supabase, chatId, "awaiting_platform", { analysis_id: analysisId, reseller_id: reseller.id });
         const plat = (analysis as any).platform_suggestion?.toUpperCase() || null;
         await sendMessage(chatId, [
@@ -2043,7 +2044,7 @@ Deno.serve(async (req) => {
             [{ text: "❌ Annuler", callback_data: "show_analyses" }],
           ],
         });
-        return new Response("ok", { status: 200 });
+        return;
       }
 
       if (data.startsWith("plat_1xbet_") || data.startsWith("plat_1win_")) {
@@ -2051,7 +2052,7 @@ Deno.serve(async (req) => {
         const analysisId = data.replace(/^plat_(1xbet|1win)_/, "");
         const reseller = await getResellerProfile(supabase, chatId);
         await answerCallback(cb.id);
-        if (!reseller) { await sendMessage(chatId, "🔒 Lie d'abord ton compte : /connect {uid}"); return new Response("ok", { status: 200 }); }
+        if (!reseller) { await sendMessage(chatId, "🔒 Lie d'abord ton compte : /connect {uid}"); return; }
         await setBotState(supabase, chatId, "awaiting_booking_code", {
           analysis_id: analysisId, platform, reseller_id: reseller.id
         });
@@ -2062,7 +2063,7 @@ Deno.serve(async (req) => {
         ].join("\n"), {
           inline_keyboard: [[{ text: "❌ Annuler", callback_data: "show_analyses" }]],
         });
-        return new Response("ok", { status: 200 });
+        return;
       }
 
 
@@ -2077,7 +2078,7 @@ Deno.serve(async (req) => {
             [{ text: "◀ Dashboard", callback_data: "dashboard_home" }],
           ],
         }, DELAY_SHORT);
-        return new Response("ok", { status: 200 });
+        return;
       }
 
       if (data.startsWith("pub_start_")) {
@@ -2085,7 +2086,7 @@ Deno.serve(async (req) => {
         await answerCallback(cb.id);
         await setBotState(supabase, chatId, "pub_codes", { codes: [], total_codes: Math.min(n, 3) });
         await sendHuman(chatId, `📝 Entre le <b>code 1</b> sur ${n} :\n<i>(code de réservation exact)</i>`, undefined, DELAY_SHORT);
-        return new Response("ok", { status: 200 });
+        return;
       }
 
       if (data === "pub_confirm") {
@@ -2093,7 +2094,7 @@ Deno.serve(async (req) => {
         await answerCallback(cb.id, sess?.state === "pub_confirm" ? "⏳ Publication en cours…" : "Session expirée");
         if (sess?.state !== "pub_confirm") {
           await sendMessage(chatId, "❌ Session expirée. Recommence avec /publier");
-          return new Response("ok", { status: 200 });
+          return;
         }
         const { codes, odds, price, match_start } = sess.data as { codes: string[]; odds: number; price: number; match_start: string };
         let reseller = await getResellerProfile(supabase, chatId);
@@ -2116,7 +2117,7 @@ Deno.serve(async (req) => {
         await clearBotState(supabase, chatId);
         if (cpErr || !newCoupon) {
           await sendMessage(chatId, `❌ Erreur publication.\n<code>${cpErr?.message || "unknown"}</code>`);
-          return new Response("ok", { status: 200 });
+          return;
         }
         const BOT_UNAME  = "pack_officiel_expert_bot";
         const clientLink = `https://t.me/${BOT_UNAME}?start=c_${chatId}`;
@@ -2133,7 +2134,7 @@ Deno.serve(async (req) => {
             [{ text: "➕ Publier un autre coupon", callback_data: "start_pub" }],
           ],
         }, DELAY_SHORT);
-        return new Response("ok", { status: 200 });
+        return;
       }
 
       if (data === "voir_pool" || data === "catalogue") {
@@ -2145,7 +2146,7 @@ Deno.serve(async (req) => {
             callback_data: `acheter_${c.id}`,
           }]),
         } : undefined);
-        return new Response("ok", { status: 200 });
+        return;
       }
 
       // ── Sélection coupon → formulaire paiement ─────────────────────��───────
@@ -2157,7 +2158,7 @@ Deno.serve(async (req) => {
         await answerCallback(cb.id);
         if (!coupon || coupon.status !== "active") {
           await sendHuman(chatId, coupon ? "❌ Ce coupon n'est plus disponible. Tape /coupons pour voir les autres." : "❌ Coupon introuvable.", undefined, DELAY_SHORT);
-          return new Response("ok", { status: 200 });
+          return;
         }
         const cName    = couponDisplayName(coupon as any);
         const plat     = (coupon as any).platform?.toUpperCase() || "1Win";
@@ -2196,7 +2197,7 @@ Deno.serve(async (req) => {
         await sendHuman(chatId, lines + (fedaUrl ? "👇 Clique pour payer et recevoir les codes automatiquement :" : [`📲 Paiement Mobile Money :`,`   Numéro : <code>${mobileNum}</code>`,`   Montant : <code>${price} FCFA</code>`,shortRef ? `   Réf : <code>${shortRef}</code>` : ""].join("\n")), {
           inline_keyboard: payButtons,
         }, DELAY_LONG);
-        return new Response("ok", { status: 200 });
+        return;
       }
 
       // ── Client confirme avoir payé ─────────────────────────────────────────
@@ -2208,7 +2209,7 @@ Deno.serve(async (req) => {
         await answerCallback(cb.id, "⏳ Vérification en cours…");
         if (!order || order.status !== "pending") {
           await sendHuman(chatId, "⚠️ Cette commande a déjà été traitée.", undefined, DELAY_SHORT);
-          return new Response("ok", { status: 200 });
+          return;
         }
         const c = (order as any).coupons;
         const name = c ? (c.analyses ? `${c.analyses.team_home} vs ${c.analyses.team_away}` : c.label || "Coupon") : "Coupon";
@@ -2218,7 +2219,7 @@ Deno.serve(async (req) => {
           `Notre équipe vérifie ton paiement. Tu recevras le code complet <b>dans les prochaines minutes</b>.`, ``,
           `📌 Réf : <code>${orderId.slice(0,8).toUpperCase()}</code>`,
         ].join("\n"), undefined, DELAY_SHORT);
-        return new Response("ok", { status: 200 });
+        return;
       }
 
       // ── Admin confirme paiement ────────────────────────────────────────────
@@ -2228,11 +2229,11 @@ Deno.serve(async (req) => {
         const result = await confirmBotOrder(supabase, orderId);
         if (!result) {
           await editMessage(chatId, messageId, "⚠️ Commande introuvable ou déjà traitée.");
-          return new Response("ok", { status: 200 });
+          return;
         }
         await deliverCode(result.buyerChatId, result.couponCode, result.platform, result.amount);
         await editMessage(chatId, messageId, `✅ <b>Confirmé !</b>\nCode <code>${result.couponCode}</code> livré au client.`);
-        return new Response("ok", { status: 200 });
+        return;
       }
 
       // ── Admin refuse paiement ─────────────────────────────────────────────
@@ -2245,11 +2246,11 @@ Deno.serve(async (req) => {
         if (order?.buyer_chat_id) {
           await sendMessage(order.buyer_chat_id, "❌ <b>Paiement non confirmé.</b>\n\nContacte le support ou tape /coupons pour voir d'autres coupons.");
         }
-        return new Response("ok", { status: 200 });
+        return;
       }
 
       await answerCallback(cb.id);
-      return new Response("ok", { status: 200 });
+      return;
     }
 
 
@@ -2270,21 +2271,21 @@ Deno.serve(async (req) => {
           // Text is clearly not a UID — user is chatting normally, clear the state
           await clearBotState(supabase, chatId);
           await handleFreeText(chatId, rawText, firstName, tgUserId, supabase);
-          return new Response("ok", { status: 200 });
+          return;
         }
         const { data: profile, error } = await supabase
           .from("profiles").select("id, full_name, is_partner, is_admin").eq("id", uid).maybeSingle();
         if (!profile) {
           await sendMessage(chatId, "❌ UID introuvable. Vérifie bien le code copié depuis le site.");
-          return new Response("ok", { status: 200 });
+          return;
         }
         if (isProRole && !profile.is_admin) {
           await sendMessage(chatId, "❌ Ce compte n'a pas les droits pronostiqueur. Contacte l'administrateur.");
-          return new Response("ok", { status: 200 });
+          return;
         }
         if (!isProRole && !profile.is_partner && !profile.is_admin) {
           await sendMessage(chatId, "❌ Ce compte n'a pas les droits revendeur. Contacte l'administrateur.");
-          return new Response("ok", { status: 200 });
+          return;
         }
         await supabase.from("profiles").update({ telegram_chat_id: chatId }).eq("id", uid);
         await clearBotState(supabase, chatId);
@@ -2328,16 +2329,18 @@ Deno.serve(async (req) => {
             ];
           })(),
         }, DELAY_SHORT);
-        return new Response("ok", { status: 200 });
+        return;
       }
 
       await handleFreeText(chatId, rawText, firstName, tgUserId, supabase);
-      return new Response("ok", { status: 200 });
+      return;
     }
 
-    return new Response("ok", { status: 200 });
+    return;
   } catch (err: any) {
     console.error("telegram-bot error:", err?.message ?? err);
-    return new Response("ok", { status: 200 });
   }
+  })();
+  try { (globalThis as any).EdgeRuntime.waitUntil(bgTask); } catch {}
+  return new Response("ok", { status: 200 });
 });
