@@ -1299,6 +1299,36 @@ Deno.serve(async (req) => {
     }
 
 
+    // ── /auto-analyse — admin : lancer le pipeline IA automatique ────────────
+    if (update.message?.text?.startsWith("/auto-analyse") || update.message?.text?.startsWith("/autoanalyse")) {
+      const chatId = update.message.chat.id;
+      const profile = await getProfileByChatId(supabase, chatId);
+      if (!profile?.is_admin) {
+        await sendMessage(chatId, "⛔ Commande réservée à l'administrateur.");
+        return new Response("ok", { status: 200 });
+      }
+      await sendMessage(chatId, "🤖 <b>Pipeline analyses automatiques lancé…</b>\n\nJe récupère les matchs, génère les analyses IA et les publie. Patiente 30–60 secondes.");
+      try {
+        const res = await supabase.functions.invoke("auto-analyse", { body: {} });
+        const data = res.data as { success?: boolean; created?: number; analyses?: string[]; errors?: string[] } | null;
+        if (!data?.success) {
+          await sendMessage(chatId, `❌ Erreur dans le pipeline : ${JSON.stringify(data)}`);
+          return new Response("ok", { status: 200 });
+        }
+        const lines = [
+          `✅ <b>${data.created} analyse${(data.created ?? 0) > 1 ? "s" : ""} générée${(data.created ?? 0) > 1 ? "s" : ""} et publiées !</b>`,
+          ...(data.analyses ?? []).map((a: string) => `  • ${a}`),
+          ...(data.errors?.length ? [`\n⚠️ ${data.errors.length} erreur(s) : ${data.errors.join(", ")}`] : []),
+        ];
+        await sendMessage(chatId, lines.join("\n"), {
+          inline_keyboard: [[{ text: "📊 Voir les Analyses", callback_data: "show_analyses" }]],
+        });
+      } catch (err: any) {
+        await sendMessage(chatId, `❌ Échec : ${err?.message ?? "erreur inconnue"}`);
+      }
+      return new Response("ok", { status: 200 });
+    }
+
     // ── /coupons /catalogue ───────────────────────────────────────────────────
     if (update.message?.text?.match(/^\/coupons|^\/catalogue|^\/pool/i)) {
       const chatId = update.message.chat.id;
