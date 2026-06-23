@@ -12,8 +12,8 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 const TG_API = "https://api.telegram.org";
 const FALLBACK_1WIN = "https://1w.run/?p=YvTH";
 const FUNCTION_URL = `https://mqwrhiffrtbkizyuiytt.supabase.co/functions/v1/telegram-bot`;
-const DELAY_SHORT = 1200;
-const DELAY_LONG  = 2500;
+const DELAY_SHORT = 0;
+const DELAY_LONG  = 0;
 
 // ─── Helpers Telegram ────────────────────────────────────────────────────────
 async function tg(method: string, body: Record<string, unknown>) {
@@ -52,8 +52,7 @@ const sendAction = (chatId: number) =>
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 async function sendHuman(chatId: number, text: string, kb?: unknown, delay = DELAY_SHORT) {
-  await sendAction(chatId);
-  await sleep(delay);
+  // Réponse instantanée — typing indicator et sleep supprimés
   return sendMessage(chatId, text, kb);
 }
 
