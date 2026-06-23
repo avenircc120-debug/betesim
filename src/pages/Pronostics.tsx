@@ -169,9 +169,20 @@ const Pronostics = () => {
       return data?.analyses ?? [];
     },
     staleTime: 0,
-    refetchInterval: 60_000,
+    refetchInterval: 30_000,
     refetchOnWindowFocus: true,
   });
+
+  // Temps réel : actualise les analyses dès qu'elles changent en base
+  useEffect(() => {
+    const channel = supabase
+      .channel("analyses-realtime")
+      .on("postgres_changes", { event: "*", schema: "public", table: "analyses" }, () => {
+        refetchAnalyses();
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [refetchAnalyses]);
 
   const { data: coupons = [] } = useQuery<Coupon[]>({
     queryKey: ["coupons", user?.id],
@@ -204,7 +215,7 @@ const Pronostics = () => {
       const { data } = await supabase
         .from("commission_records")
         .select("net_amount, type, description, created_at")
-        .eq("partner_id", user.uid)
+        .eq("partner_id", user.id)
         .in("type", ["coupon_sale", "referral_commission"]);
       const total = (data ?? []).reduce((s: number, r: any) => s + (r.net_amount || 0), 0);
       return { total, count: (data ?? []).length, records: data ?? [] };
@@ -226,7 +237,7 @@ const Pronostics = () => {
       const { data: done } = await supabase
         .from("coupons")
         .select("analysis_id")
-        .eq("creator_id", user.uid)
+        .eq("creator_id", user.id)
         .in("analysis_id", allAnalyses.map((a: any) => a.id));
       const doneIds = new Set((done ?? []).map((c: any) => c.analysis_id));
       return allAnalyses.filter((a: any) => !doneIds.has(a.id)) as any[];
@@ -459,7 +470,7 @@ const Pronostics = () => {
   };
 
   const navTabs = [
-    { id: "analyses", label: "Pronostics" },
+    { id: "analyses", label: "Analyses" },
     ...(isPartner ? [{ id: "coupons", label: "Revendeur" }] : []),
     ...(isAdmin   ? [{ id: "publier", label: "Publier" }] : []),
   ] as { id: string; label: string }[];
@@ -471,7 +482,7 @@ const Pronostics = () => {
         <motion.div initial={{ opacity:0, y:10 }} animate={{ opacity:1, y:0 }}>
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-2xl font-bold text-foreground">Pronostics</h1>
+              <h1 className="text-2xl font-bold text-foreground">Analyse</h1>
               {!isTelegramMode && <p className="text-sm text-muted-foreground">Tableau de bord partenaire</p>}
             </div>
             <div className="flex items-center gap-2">
