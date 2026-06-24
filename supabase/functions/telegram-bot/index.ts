@@ -2645,22 +2645,21 @@ Deno.serve(async (req) => {
 
       // ── Share links (native inline — no web redirect) ─────────────────────
       if (data === "share_links") {
-        const { data: usr } = await supabase.from("telegram_users").select("client_link,reseller_link").eq("chat_id", chatId).maybeSingle();
         await answerCallback(cb.id);
-        const cLink = usr?.client_link ?? "";
-        const rLink = usr?.reseller_link ?? "";
-        const lines = [
-          "🔗 <b>Partager mes liens</b>", "",
-          "👇 Voici tes liens à partager :", "",
-        ];
-        if (cLink) lines.push("🏟 <b>Lien Client :</b>\n" + cLink); else lines.push("❌ Lien client non disponible.");
-        lines.push("");
-        if (rLink) lines.push("💼 <b>Lien Revendeur :</b>\n" + rLink); else lines.push("❌ Lien revendeur non disponible.");
-        await sendHuman(chatId, lines.join("\n"), {
+        const _botUn   = Deno.env.get("BOT_USERNAME") || "pack_officiel_expert_bot";
+        const cLink    = `https://t.me/${_botUn}?start=c_${chatId}`;
+        const rLink    = `https://t.me/${_botUn}?start=r_${chatId}`;
+        const shareMsg = [
+          "\u{1F517} <b>Partager mes liens</b>", "",
+          "\u{1F447} Voici tes liens \u00E0 partager :", "",
+          "\u{1F3DF} <b>Lien Client :</b>", cLink, "",
+          "\u{1F4BC} <b>Lien Revendeur :</b>", rLink,
+        ].join("\n");
+        await sendHuman(chatId, shareMsg, {
           inline_keyboard: [
-            ...(cLink ? [[{ text: "📤 Partager lien client",    url: "https://t.me/share/url?url=" + encodeURIComponent(cLink)    + "&text=" + encodeURIComponent("🏟 Rejoins-moi sur Betesim ! " + cLink) }]] : []),
-            ...(rLink ? [[{ text: "📤 Partager lien revendeur", url: "https://t.me/share/url?url=" + encodeURIComponent(rLink)    + "&text=" + encodeURIComponent("💼 Deviens revendeur Betesim ! " + rLink) }]] : []),
-            [{ text: "🔙 Retour dashboard", callback_data: "dashboard_home" }],
+            [{ text: "\u{1F4E4} Partager lien client",    url: "https://t.me/share/url?url=" + encodeURIComponent(cLink) + "&text=" + encodeURIComponent("\u{1F3DF} Rejoins-moi sur Betesim ! " + cLink) }],
+            [{ text: "\u{1F4E4} Partager lien revendeur", url: "https://t.me/share/url?url=" + encodeURIComponent(rLink) + "&text=" + encodeURIComponent("\u{1F4BC} Deviens revendeur Betesim ! " + rLink) }],
+            [{ text: "\u{1F519} Retour dashboard", callback_data: "dashboard_home" }],
           ],
         }, DELAY_SHORT);
         return;
