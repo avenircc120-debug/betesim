@@ -2649,18 +2649,16 @@ Deno.serve(async (req) => {
         await answerCallback(cb.id);
         const cLink = usr?.client_link ?? "";
         const rLink = usr?.reseller_link ?? "";
-        await sendHuman(chatId, [
+        const lines = [
           "🔗 <b>Partager mes liens</b>", "",
           "👇 Voici tes liens à partager :", "",
-          cLink ? "🎟 <b>Lien Client :</b>
-" + cLink : "❌ Lien client non disponible.",
-          "",
-          rLink ? "💼 <b>Lien Revendeur :</b>
-" + rLink : "❌ Lien revendeur non disponible.",
-        ].join("
-"), {
+        ];
+        if (cLink) lines.push("🏟 <b>Lien Client :</b>\n" + cLink); else lines.push("❌ Lien client non disponible.");
+        lines.push("");
+        if (rLink) lines.push("💼 <b>Lien Revendeur :</b>\n" + rLink); else lines.push("❌ Lien revendeur non disponible.");
+        await sendHuman(chatId, lines.join("\n"), {
           inline_keyboard: [
-            ...(cLink ? [[{ text: "📤 Partager lien client",    url: "https://t.me/share/url?url=" + encodeURIComponent(cLink)    + "&text=" + encodeURIComponent("🎟 Rejoins-moi sur Betesim ! " + cLink) }]] : []),
+            ...(cLink ? [[{ text: "📤 Partager lien client",    url: "https://t.me/share/url?url=" + encodeURIComponent(cLink)    + "&text=" + encodeURIComponent("🏟 Rejoins-moi sur Betesim ! " + cLink) }]] : []),
             ...(rLink ? [[{ text: "📤 Partager lien revendeur", url: "https://t.me/share/url?url=" + encodeURIComponent(rLink)    + "&text=" + encodeURIComponent("💼 Deviens revendeur Betesim ! " + rLink) }]] : []),
             [{ text: "🔙 Retour dashboard", callback_data: "dashboard_home" }],
           ],
@@ -2668,12 +2666,10 @@ Deno.serve(async (req) => {
         return;
       }
 
-      // ── Main menu (native — no web redirect) ─────────────────────────────
+      // ── Main menu (native — no web redirect) ─────────────────────────────────────
       if (data === "main_menu") {
         await answerCallback(cb.id);
-        await sendHuman(chatId, "🏠 <b>Menu principal</b>
-
-Choisis une section :", {
+        await sendHuman(chatId, "🏠 <b>Menu principal</b>\n\nChoisis une section :", {
           inline_keyboard: [
             [{ text: "📊 Analyses du jour", callback_data: "show_analyses" }],
             [{ text: "📋 Mon Dashboard",    callback_data: "dashboard_home" }],
@@ -2681,6 +2677,7 @@ Choisis une section :", {
         }, DELAY_SHORT);
         return;
       }
+
 
       if (data === "voir_pool" || data === "catalogue") {
         const coupons = await fetchPoolCoupons(supabase);
