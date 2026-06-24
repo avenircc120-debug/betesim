@@ -461,7 +461,6 @@ async function handleFreeText(chatId: number, text: string, firstName: string, t
       return new Response("ok", { status: 200 });
     }
   } catch (_pubErr) { /* ignore, fall through */ }
-  } catch (_pubErr) { /* ignore, fall through */ }
 
   const isGreet = greetKw.some(k => lower.includes(k));
   const isOpen  = openKw.some(k => lower.includes(k));
@@ -1838,12 +1837,15 @@ Deno.serve(async (req) => {
         reseller = fp;
       }
       await clearBotState(supabase, chatId);
-      await sendHuman(chatId, [`📤 <b>Publier un coupon</b>`,``,`Combien de codes veux-tu publier dans ce coupon ?`,`<i>Tu peux publier jusqu'à 3 codes différents.</i>`].join("\n"), {
-        inline_keyboard: [
-          [{ text: "1 code", callback_data: "pub_start_1" }, { text: "2 codes", callback_data: "pub_start_2" }, { text: "3 codes", callback_data: "pub_start_3" }],
-          [{ text: "❌ Annuler", callback_data: "dashboard_home" }],
-        ],
-      });
+      await setBotState(supabase, chatId, "pub_step_code", {});
+      await sendHuman(chatId, [
+        `🎫 <b>Publier un coupon</b>`, ``,
+        `<b>Étape 1/4 — Code</b>`, ``,
+        `Entre ton code coupon (1xBet / 1Win) :`,
+        `<i>Exemple : ABC123456</i>`,
+      ].join("\n"), {
+        inline_keyboard: [[{ text: "❌ Annuler", callback_data: "dashboard_home" }]],
+      }, DELAY_SHORT);
       return;
     }
 
@@ -2565,20 +2567,31 @@ Deno.serve(async (req) => {
       if (data === "start_pub") {
         await answerCallback(cb.id);
         await clearBotState(supabase, chatId);
-        await sendHuman(chatId, [`📤 <b>Publier un coupon</b>`,``,`Combien de codes veux-tu publier ?`].join("\n"), {
-          inline_keyboard: [
-            [{ text: "1 code", callback_data: "pub_start_1" }, { text: "2 codes", callback_data: "pub_start_2" }, { text: "3 codes", callback_data: "pub_start_3" }],
-            [{ text: "◀ Dashboard", callback_data: "dashboard_home" }],
-          ],
+        await setBotState(supabase, chatId, "pub_step_code", {});
+        await sendHuman(chatId, [
+          `🎫 <b>Publier un coupon</b>`, ``,
+          `<b>Étape 1/4 — Code</b>`, ``,
+          `Entre ton code coupon (1xBet / 1Win) :`,
+          `<i>Exemple : ABC123456</i>`,
+        ].join("\n"), {
+          inline_keyboard: [[{ text: "❌ Annuler", callback_data: "dashboard_home" }]],
         }, DELAY_SHORT);
         return;
       }
 
+      // pub_start_N (legacy) → redirect to new 4-step form
       if (data.startsWith("pub_start_")) {
-        const n = parseInt(data.replace("pub_start_", "")) || 1;
         await answerCallback(cb.id);
-        await setBotState(supabase, chatId, "pub_codes", { codes: [], total_codes: Math.min(n, 3) });
-        await sendHuman(chatId, `📝 Entre le <b>code 1</b> sur ${n} :\n<i>(code de réservation exact)</i>`, undefined, DELAY_SHORT);
+        await clearBotState(supabase, chatId);
+        await setBotState(supabase, chatId, "pub_step_code", {});
+        await sendHuman(chatId, [
+          `🎫 <b>Publier un coupon</b>`, ``,
+          `<b>Étape 1/4 — Code</b>`, ``,
+          `Entre ton code coupon (1xBet / 1Win) :`,
+          `<i>Exemple : ABC123456</i>`,
+        ].join("\n"), {
+          inline_keyboard: [[{ text: "❌ Annuler", callback_data: "dashboard_home" }]],
+        }, DELAY_SHORT);
         return;
       }
 
