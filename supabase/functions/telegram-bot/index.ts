@@ -261,49 +261,39 @@ async function handleFreeText(chatId: number, text: string, firstName: string, t
   // ─── Wizard state: revendeur en train d'entrer un code booking ─────────────
   try {
     const session = await getBotState(supabase, chatId);
-    // ─── État : recherche de match par texte ─────────────────────────────────
+    // ─── État : recherche compétition → scraping TheSportsDB à la demande ───────
     if (session?.state === "awaiting_search") {
       const query = text.trim().toLowerCase();
+      await clearBotState(supabase, chatId);
       if (query.length < 2) {
         await sendMessage(chatId, "⚠️ Tape au moins 2 caractères pour chercher.");
         return new Response("ok", { status: 200 });
       }
-      const now = new Date().toISOString();
-      const { data: results } = await supabase
-        .from("analyses")
-        .select("id, team_home, team_away, league, match_date, confidence")
-        .gte("match_date", now)
-        .or(`team_home.ilike.%${query}%,team_away.ilike.%${query}%,league.ilike.%${query}%`)
-        .order("match_date", { ascending: true })
-        .limit(10);
-      await clearBotState(supabase, chatId);
-      if (!results || results.length === 0) {
-        await sendMessage(chatId, `🔍 Aucun match trouvé pour "<b>${escapeHtml(text.trim())}</b>".`, {
+      const matched = ALL_COMPS.filter((c: any) =>
+        c.name.toLowerCase().includes(query) || query.includes(c.name.toLowerCase().slice(0, 4))
+      );
+      if (matched.length === 1) {
+        await sendMatchesList(chatId, matched[0].id, supabase);
+      } else if (matched.length > 1) {
+        const buttons = [
+          ...matched.slice(0, 6).map((c: any) => [{ text: `${c.flag} ${c.name}`, callback_data: `comp:${c.id}` }]),
+          [{ text: "🔍 Nouvelle recherche", callback_data: "search_match" }],
+        ];
+        await sendMessage(chatId, `🔍 <b>Compétitions trouvées pour "${escapeHtml(text.trim())}"</b>`, { inline_keyboard: buttons });
+      } else {
+        await sendMessage(chatId, [
+          `🔍 Aucune compétition trouvée pour "<b>${escapeHtml(text.trim())}</b>".`, ``,
+          `💡 Essaie : Ligue 1 · Premier League · CAN · Champions League · Copa America`,
+        ].join("\n"), {
           inline_keyboard: [
-            [{ text: "🔍 Nouvelle recherche", callback_data: "search_match" }],
-            [{ text: "🏠 Retour aux compétitions", callback_data: "pronostics_menu" }],
+            [{ text: "🔍 Nouvelle recherche",       callback_data: "search_match"     }],
+            [{ text: "🏠 Voir compétitions actives", callback_data: "pronostics_menu" }],
           ],
         });
-        return new Response("ok", { status: 200 });
       }
-      const buttons = [
-        ...results.map((m: any) => {
-          const time = m.match_date
-            ? new Date(m.match_date).toLocaleString("fr-FR", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" })
-            : "";
-          return [{ text: `⚽ ${m.team_home} vs ${m.team_away} (${m.league || "?"}) ${time}`, callback_data: `mat:${m.id}` }];
-        }),
-        [{ text: "🔍 Nouvelle recherche", callback_data: "search_match" }],
-        [{ text: "◀ Menu compétitions",  callback_data: "pronostics_menu" }],
-      ];
-      await sendMessage(chatId, [
-        `🔍 <b>Résultats pour "${escapeHtml(text.trim())}"</b>`,``,
-        `${results.length} match${results.length > 1 ? "s" : ""} trouvé${results.length > 1 ? "s" : ""} :`,
-      ].join("\n"), { inline_keyboard: buttons });
       return new Response("ok", { status: 200 });
     }
 
-    // ─── État : revendeur publie un coupon communautaire ────────────────────
     if (session?.state === "awaiting_coupon_partage") {
       const { analysis_id, match_label, league } = session.data as any;
       const code = text.trim().replace(/\s+/g, "").toUpperCase();
@@ -904,268 +894,366 @@ async function askGroq(userMessage: string, firstName: string): Promise<string |
 
 
 // ─────────────────────────────────────────────────────────────────────────────
-// BOT PRONOSTICS TOUT-EN-UN v2 — Double lecture, tous marchés, typing systématique
+// BOT PRONOSTICS v3 — Scraping à la demande, TheSportsDB, Zéro DB fixe
 // ─────────────────────────────────────────────────────────────────────────────
 
-type Market = "win" | "goals" | "corners" | "cards" | "full";
-
-const MARKET_LABELS: Record<Market, string> = {
+const MARKET_LABELS: Record<string, string> = {
   win:     "🏆 Vainqueur (1N2)",
   goals:   "⚽ Buts / Over-Under",
   corners: "🔢 Corners",
   cards:   "🟨 Cartons",
-  full:    "📊 Analyse Totale",
+  full:    "📊 Analyse Totale (tous marchés)",
 };
 
-const MARKET_PROMPTS: Record<Market, string> = {
-  win: `Concentre-toi UNIQUEMENT sur le marché Résultat (1N2/Double chance/Vainqueur).
-Format:
-🏆 VAINQUEUR: [équipe ou nul] | Cote estimée: [X.XX]
-📜 Historique H2H: [bilan succinct sur 3-5 dernières rencontres]
-📈 Forme récente: [5 derniers matchs de chaque équipe]
-🧮 Probabilité: Domicile [X%] / Nul [X%] / Extérieur [X%]
-✅ Le Pro mise sur: [choix + explication 1 phrase]`,
+const MARKET_PROMPTS: Record<string, string> = {
+  win:
+    "Marché EXCLUSIF : Résultat final (1N2 / Double chance).\n" +
+    "Format obligatoire:\n" +
+    "🏆 VAINQUEUR : [équipe ou Nul] | Cote : [X.XX]\n" +
+    "📜 H2H (5 derniers) : [bilan confrontations directes]\n" +
+    "📈 Forme récente : [5 derniers matchs chaque équipe]\n" +
+    "🧮 Proba : Dom [X%] / Nul [X%] / Ext [X%]\n" +
+    "✅ Le Pro mise sur : [choix + 1 phrase d'explication]\n" +
+    "⚠️ Paris = risque.",
 
-  goals: `Concentre-toi UNIQUEMENT sur les marchés Buts (Over/Under 2.5, BTTS, Score exact probable).
-Format:
-⚽ TOTAL BUTS: Over ou Under [X.5] | Cote estimée: [X.XX]
-📜 Historique H2H buts: [moyenne buts sur 5 derniers H2H]
-📈 Forme offensive/défensive récente: [attaque + défense chaque équipe]
-🎯 Score exact le plus probable: [X-X]
-✅ Le Pro mise sur: [marché + cote]`,
+  goals:
+    "Marché EXCLUSIF : Buts (Over/Under 2.5, BTTS, Score exact).\n" +
+    "Format obligatoire:\n" +
+    "⚽ TOTAL BUTS : [Over/Under X.5] | Cote : [X.XX]\n" +
+    "📜 H2H buts : [moyenne buts sur 5 derniers H2H]\n" +
+    "📈 Attaque/Défense récente : [buts marqués/encaissés par match]\n" +
+    "🎯 Score exact probable : [X-X]\n" +
+    "✅ Le Pro mise sur : [marché + cote]\n" +
+    "⚠️ Paris = risque.",
 
-  corners: `Concentre-toi UNIQUEMENT sur les marchés Corners (Total, Over/Under, équipe dominante).
-Format:
-🔢 CORNERS: Over ou Under [X.5] | Cote estimée: [X.XX]
-📜 Historique H2H corners: [tendance sur 5 derniers matchs]
-📈 Style de jeu récent: [largeur de jeu, pressing, possession]
-✅ Le Pro mise sur: [marché corners + cote]`,
+  corners:
+    "Marché EXCLUSIF : Corners (Total, Over/Under, équipe dominante).\n" +
+    "Format obligatoire:\n" +
+    "🔢 CORNERS : [Over/Under X.5] | Cote : [X.XX]\n" +
+    "📜 H2H corners : [tendance sur 5 derniers matchs]\n" +
+    "📈 Style de jeu : [pressing, possession, largeur de jeu]\n" +
+    "✅ Le Pro mise sur : [marché corners + cote]\n" +
+    "⚠️ Paris = risque.",
 
-  cards: `Concentre-toi UNIQUEMENT sur les marchés Cartons (Total, joueurs à risque, arbitre).
-Format:
-🟨 CARTONS: Over ou Under [X.5] | Cote estimée: [X.XX]
-📜 Historique H2H cartons: [matchs chauds? fair-play?]
-📈 Forme disciplinaire récente: [cartons moyens par match]
-✅ Le Pro mise sur: [marché cartons + cote]`,
+  cards:
+    "Marché EXCLUSIF : Cartons (Total, joueurs à risque, arbitre).\n" +
+    "Format obligatoire:\n" +
+    "🟨 CARTONS : [Over/Under X.5] | Cote : [X.XX]\n" +
+    "📜 H2H cartons : [matchs chauds? fair-play?]\n" +
+    "📈 Discipline récente : [cartons moyens/match chaque équipe]\n" +
+    "✅ Le Pro mise sur : [marché cartons + cote]\n" +
+    "⚠️ Paris = risque.",
 
-  full: `Tu es un analyste sportif expert. Analyse complète et sophistiquée tous marchés.
-Format STRICT (respecte chaque section):
-
-🔥 PRÉDICTION EXPERT — [Match]
-
-📜 DOUBLE LECTURE
-• H2H (5 derniers): [bilan confrontations directes]
-• Forme actuelle: [5 derniers matchs chaque équipe]
-• Synthèse: [comment le passé influence-t-il le présent?]
-
-🎯 MARCHÉS CLÉS
-• 1N2: [favori + cote]
-• Over/Under 2.5: [tendance + cote]  
-• BTTS: [Oui/Non + cote]
-• Corners: [Over/Under + seuil]
-• Cartons: [Over/Under + seuil]
-
-✅ LE CHOIX DU PRO
-[2-3 marchés combinables, cotes indicatives]
-
-⚠️ Paris sportifs = risque. Jouer responsable.`,
+  full:
+    "Analyse COMPLÈTE tous marchés. Format STRICT :\n\n" +
+    "🔥 PRÉDICTION EXPERT — [Match]\n\n" +
+    "📜 DOUBLE LECTURE\n" +
+    "• H2H (5 derniers) : [bilan confrontations directes]\n" +
+    "• Forme actuelle : [5 derniers matchs chaque équipe]\n" +
+    "• Synthèse : [comment le passé influence-t-il le présent ?]\n\n" +
+    "🎯 TOUS LES MARCHÉS\n" +
+    "• 1N2 : [favori + cote indicative]\n" +
+    "• Over/Under 2.5 buts : [tendance + cote]\n" +
+    "• BTTS (Les deux marquent) : [Oui/Non + cote]\n" +
+    "• Corners : [Over/Under + seuil]\n" +
+    "• Cartons : [Over/Under + seuil]\n" +
+    "• Score exact le plus probable : [X-X]\n\n" +
+    "✅ LE CHOIX DU PRO\n" +
+    "[2-3 marchés combinables avec cotes indicatives]\n\n" +
+    "⚠️ Paris sportifs = risque. Jouer responsable.",
 };
 
-async function generateMatchAnalysis(match: any, market: Market = "full"): Promise<string> {
-  const apiKey = Deno.env.get("GROQ_API_KEY");
-  const home   = match.team_home  || "?";
-  const away   = match.team_away  || "?";
-  const league = match.league || match.country || "Compétition";
-  const pred   = match.prediction || "Non définie";
-  const conf   = match.confidence ? `${match.confidence}%` : "N/A";
-  const odds   = match.odds       ? `${match.odds}`        : "N/A";
-  const notes  = (match.notes || match.stats || "").toString().slice(0, 200);
-  const date   = match.match_date
-    ? new Date(match.match_date).toLocaleString("fr-FR", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" })
-    : "";
-  const marketLabel = MARKET_LABELS[market];
+// Toutes les compétitions disponibles (IDs TheSportsDB — gratuit, sans clé)
+const ALL_COMPS = [
+  { id:"4443", name:"Coupe du Monde FIFA",    flag:"🌍" },
+  { id:"4418", name:"Euro UEFA",              flag:"🇪🇺" },
+  { id:"4415", name:"Copa America",           flag:"🌎" },
+  { id:"4517", name:"CAN Afrique",            flag:"🌍" },
+  { id:"4635", name:"Nations League UEFA",    flag:"🇪🇺" },
+  { id:"4408", name:"AFC Asian Cup",          flag:"🌏" },
+  { id:"4480", name:"Ligue des Champions",    flag:"⭐" },
+  { id:"4481", name:"Europa League",          flag:"🟠" },
+  { id:"4882", name:"Conference League",      flag:"⚪" },
+  { id:"4737", name:"CAF Champions League",   flag:"🌍" },
+  { id:"4738", name:"CAF Confederation Cup",  flag:"🌍" },
+  { id:"4334", name:"Ligue 1",                flag:"🇫🇷" },
+  { id:"4328", name:"Premier League",         flag:"🏴" },
+  { id:"4335", name:"La Liga",                flag:"🇪🇸" },
+  { id:"4332", name:"Serie A",                flag:"🇮🇹" },
+  { id:"4331", name:"Bundesliga",             flag:"🇩🇪" },
+  { id:"4350", name:"Eredivisie",             flag:"🇳🇱" },
+  { id:"4351", name:"Liga NOS",               flag:"🇵🇹" },
+  { id:"4397", name:"Super Lig",              flag:"🇹🇷" },
+  { id:"4536", name:"MLS",                    flag:"🇺🇸" },
+  { id:"4346", name:"Brasileirao",            flag:"🇧🇷" },
+  { id:"4501", name:"Saudi Pro League",       flag:"🇸🇦" },
+  { id:"4507", name:"Egyptian Premier League",flag:"🇪🇬" },
+  { id:"4337", name:"Coupe de France",        flag:"🇫🇷" },
+  { id:"4338", name:"FA Cup",                 flag:"🏴" },
+  { id:"4340", name:"Copa del Rey",           flag:"🇪🇸" },
+  { id:"4543", name:"Coupe d'Algerie",        flag:"🇩🇿" },
+  { id:"4575", name:"Coupe du Senegal",       flag:"🇸🇳" },
+];
+
+const SDB_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
+
+// Scraping : prochains matchs d'une compétition (TheSportsDB gratuit)
+async function fetchEventsForLeague(leagueId: string): Promise<any[]> {
+  try {
+    const res = await fetch(
+      `https://www.thesportsdb.com/api/v1/json/3/eventsnextleague.php?id=${leagueId}`,
+      { headers: { "User-Agent": SDB_UA, Accept: "application/json" }, signal: AbortSignal.timeout(7000) }
+    );
+    if (!res.ok) return [];
+    const json = await res.json() as any;
+    const now  = Date.now();
+    const week = now + 7 * 24 * 3600 * 1000;
+    return (json?.events ?? []).filter((e: any) => {
+      if (!e.dateEvent) return true;
+      const t = new Date(`${e.dateEvent}T${e.strTime || "12:00:00"}Z`).getTime();
+      return t >= now && t <= week;
+    }).slice(0, 8);
+  } catch { return []; }
+}
+
+// Lookup d'un événement par ID TheSportsDB
+async function fetchEventById(eventId: string): Promise<any | null> {
+  try {
+    const res = await fetch(
+      `https://www.thesportsdb.com/api/v1/json/3/lookupevent.php?id=${eventId}`,
+      { headers: { "User-Agent": SDB_UA, Accept: "application/json" }, signal: AbortSignal.timeout(6000) }
+    );
+    if (!res.ok) return null;
+    const json = await res.json() as any;
+    return json?.events?.[0] ?? null;
+  } catch { return null; }
+}
+
+// Génère l'analyse Groq — double lecture H2H + forme récente + marché ciblé
+async function generateMatchAnalysis(match: any, market = "full"): Promise<string> {
+  const apiKey  = Deno.env.get("GROQ_API_KEY");
+  const home    = match.team_home   || match.strHomeTeam || "?";
+  const away    = match.team_away   || match.strAwayTeam || "?";
+  const league  = match.league      || match.strLeague   || "Compétition";
+  const pred    = match.prediction  || "";
+  const notes   = String(match.notes || match.stats || "").slice(0, 150);
+  const rawDate = match.match_date  || (match.dateEvent && match.strTime ? `${match.dateEvent}T${match.strTime}Z` : null);
+  const date    = rawDate ? new Date(rawDate).toLocaleString("fr-FR", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" }) : "";
+  const mLabel  = MARKET_LABELS[market] ?? market;
+  const mPrompt = MARKET_PROMPTS[market] ?? MARKET_PROMPTS.full;
 
   const fallback = [
     `🔥 <b>PRÉDICTION EXPERT</b> — ${escapeHtml(home)} vs ${escapeHtml(away)}`,
     `🏆 ${escapeHtml(league)}${date ? ` · ${date}` : ""}`,
-    `📌 Marché : ${marketLabel}`,``,
-    `✅ <b>Le Choix du Pro :</b> ${escapeHtml(pred)}`,
-    `📈 Cote : <b>${odds}</b> · Confiance : <b>${conf}</b>`,
-    notes ? `📝 ${escapeHtml(notes)}` : "",
+    `📌 Marché : ${mLabel}`,
+    ``,
+    pred ? `✅ Prédiction indicative : ${escapeHtml(pred)}` : "⚙️ Analyse en cours...",
   ].filter(Boolean).join("\n");
 
   if (!apiKey) return fallback;
-  const maxTok = market === "full" ? 350 : 200;
+  const maxTok = market === "full" ? 400 : 220;
   try {
     const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-      signal: AbortSignal.timeout(6000),
+      signal: AbortSignal.timeout(8000),
       body: JSON.stringify({
         model: "llama-3.1-8b-instant",
         messages: [
           {
             role: "system",
-            content: `Tu es un analyste sportif expert en paris. Réponds en français avec le format demandé. MARCHÉ CIBLE: ${marketLabel}.\n\n${MARKET_PROMPTS[market]}`,
+            content: `Tu es un analyste expert en paris sportifs. Réponds UNIQUEMENT en français. MARCHÉ CIBLE : ${mLabel}.\n\n${mPrompt}`,
           },
           {
             role: "user",
-            content: `Match: ${home} vs ${away} | Compétition: ${league}${date ? ` | Date: ${date}` : ""} | Prédiction base: ${pred} | Cote indicative: ${odds} | Confiance: ${conf} | Données supplémentaires: ${notes || "standard"}`,
+            content: `Match : ${home} vs ${away} | Compétition : ${league}${date ? ` | Date : ${date}` : ""}\nContexte : ${(pred + " " + notes).trim() || "données standards"}`,
           },
         ],
         max_tokens: maxTok,
         temperature: 0.35,
       }),
     });
-    const d = await res.json() as any;
-    const aiText = d?.choices?.[0]?.message?.content?.trim();
-    if (aiText) {
-      return aiText + `\n\n🗓 <i>${date ? date + " · " : ""}${escapeHtml(league)}</i>`;
-    }
+    const d  = await res.json() as any;
+    const ai = d?.choices?.[0]?.message?.content?.trim();
+    if (ai) return ai + `\n\n🗓 <i>${date ? date + " · " : ""}${escapeHtml(league)}</i>`;
   } catch (_) { /* fallback */ }
   return fallback;
 }
 
-async function sendCompetitionList(chatId: number, supabase: any) {
-  const now = new Date().toISOString();
-  // Purge auto matchs passés
-  await supabase.from("analyses").delete().not("match_date","is",null).lt("match_date", now);
+// Menu intelligent : compétitions actives (scraping parallèle top-12)
+async function sendCompetitionList(chatId: number, _supabase: any) {
+  await sendAction(chatId);
 
-  const { data: rows } = await supabase
-    .from("analyses")
-    .select("league, match_date")
-    .gte("match_date", now)
-    .order("match_date", { ascending: true });
+  const TOP12 = ALL_COMPS.slice(0, 12);
+  const results = await Promise.allSettled(
+    TOP12.map(async (comp) => ({ comp, events: await fetchEventsForLeague(comp.id) }))
+  );
 
-  if (!rows || rows.length === 0) {
+  const active = results
+    .filter((r): r is PromiseFulfilledResult<any> => r.status === "fulfilled" && r.value.events.length > 0)
+    .map(r => r.value)
+    .sort((a: any, b: any) => b.events.length - a.events.length)
+    .slice(0, 4);
+
+  if (active.length === 0) {
     await sendMessage(chatId, [
-      `🏆 <b>Analyses disponibles</b>`,``,
-      `📭 Aucun match disponible pour le moment.`,
-      `Les analyses arrivent bientôt — reviens dans quelques heures !`,
+      `🏆 <b>Analyses & Pronostics</b>`, ``,
+      `📭 Aucun match trouvé dans les 7 prochains jours.`, ``,
+      `💡 Utilise la recherche pour trouver ta compétition :`,
     ].join("\n"), {
-      inline_keyboard: [[{ text: "🔄 Rafraîchir", callback_data: "pronostics_menu" }]],
+      inline_keyboard: [
+        [{ text: "🔍 Chercher une compétition", callback_data: "search_match" }],
+        [{ text: "🔄 Rafraîchir", callback_data: "pronostics_menu" }],
+      ],
     });
     return;
   }
-  const leagues = new Map<string, number>();
-  for (const r of rows) leagues.set(r.league || "Autres", (leagues.get(r.league || "Autres") || 0) + 1);
 
-  const buttons = Array.from(leagues.entries()).map(([l, n]) => [{
-    text: `🏆 ${l} (${n} match${n > 1 ? "s" : ""})`,
-    callback_data: `comp:${l}`.slice(0, 64),
-  }]);
+  const fmtDate = (events: any[]) => {
+    const e = events[0];
+    if (!e?.dateEvent) return "";
+    try { return new Date(`${e.dateEvent}T${e.strTime || "12:00:00"}Z`)
+      .toLocaleString("fr-FR", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" }); }
+    catch { return ""; }
+  };
 
-  buttons.push([{ text: "🔍 Chercher par équipe ou compétition", callback_data: "search_match" }]);
+  const buttons = [
+    ...active.map(({ comp, events }: any) => [{
+      text: `${comp.flag} ${comp.name} — ${events.length} match${events.length > 1 ? "s" : ""} (prochain : ${fmtDate(events)})`,
+      callback_data: `comp:${comp.id}`,
+    }]),
+    [{ text: "🔍 Autre compétition — écrire le nom", callback_data: "search_match" }],
+  ];
 
   await sendMessage(chatId, [
-    `🏆 <b>Pronostics — Sélectionne une compétition</b>`,``,
-    `${leagues.size} compétition${leagues.size > 1 ? "s" : ""} · ${rows.length} match${rows.length > 1 ? "s" : ""} disponible${rows.length > 1 ? "s" : ""}`,
-    ``,
-    `💡 <i>Clique sur une compétition ou utilise la recherche</i>`,
+    `🏆 <b>Compétitions actives en ce moment</b>`, ``,
+    `Voici les compétitions qui se jouent actuellement.\nLaquelle souhaites-tu analyser ?`,
   ].join("\n"), { inline_keyboard: buttons });
 }
 
-async function sendMatchesList(chatId: number, league: string, supabase: any) {
-  const now = new Date().toISOString();
-  const { data: matches } = await supabase
-    .from("analyses")
-    .select("id, team_home, team_away, match_date, confidence, prediction")
-    .eq("league", league)
-    .gte("match_date", now)
-    .order("match_date", { ascending: true })
-    .limit(20);
+// Liste des matchs d'une compétition (scraping TheSportsDB à la demande)
+async function sendMatchesList(chatId: number, leagueId: string, _supabase: any) {
+  await sendAction(chatId);
+  const comp   = ALL_COMPS.find(c => c.id === leagueId);
+  const events = await fetchEventsForLeague(leagueId);
 
-  if (!matches || matches.length === 0) {
-    await sendMessage(chatId, `📭 Aucun match disponible pour <b>${escapeHtml(league)}</b>.`, {
-      inline_keyboard: [[{ text: "◀ Retour aux compétitions", callback_data: "pronostics_menu" }]],
+  if (!events.length) {
+    await sendMessage(chatId, [
+      `📭 Aucun match trouvé pour <b>${escapeHtml(comp?.name ?? leagueId)}</b> dans les 7 prochains jours.`, ``,
+      `Les données sont issues de TheSportsDB et mises à jour en temps réel.`,
+    ].join("\n"), {
+      inline_keyboard: [
+        [{ text: "🔍 Chercher une autre compétition", callback_data: "search_match" }],
+        [{ text: "◀ Retour", callback_data: "pronostics_menu" }],
+      ],
     });
     return;
   }
+
   const buttons = [
-    ...matches.map((m: any) => {
-      const time = m.match_date
-        ? new Date(m.match_date).toLocaleString("fr-FR", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" })
-        : "";
-      const conf = m.confidence ? ` · ${m.confidence}%` : "";
-      return [{ text: `⚽ ${m.team_home} vs ${m.team_away}${time ? ` (${time})` : ""}${conf}`, callback_data: `mat:${m.id}` }];
+    ...events.map((e: any) => {
+      let d = "";
+      try {
+        if (e.dateEvent && e.strTime)
+          d = new Date(`${e.dateEvent}T${e.strTime.endsWith("Z") ? e.strTime : e.strTime + "Z"}`)
+            .toLocaleString("fr-FR", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" });
+      } catch { d = e.dateEvent ?? ""; }
+      return [{ text: `⚽ ${e.strHomeTeam} vs ${e.strAwayTeam}${d ? ` · ${d}` : ""}`, callback_data: `mat:${e.idEvent}` }];
     }),
     [{ text: "◀ Retour aux compétitions", callback_data: "pronostics_menu" }],
   ];
+
   await sendMessage(chatId, [
-    `🏆 <b>${escapeHtml(league)}</b>`,``,
-    `Clique sur un match pour voir l'analyse complète :`,
+    `${comp?.flag ?? "🏆"} <b>${escapeHtml(comp?.name ?? leagueId)}</b>`, ``,
+    `${events.length} match${events.length > 1 ? "s" : ""} à venir — clique pour analyser :`,
   ].join("\n"), { inline_keyboard: buttons });
 }
 
-// Étape 1 : Afficher la sélection de marché
-async function sendMatchAnalysis(chatId: number, analysisId: string, supabase: any) {
-  const { data: match } = await supabase
-    .from("analyses")
-    .select("id, team_home, team_away, league, match_date, confidence")
-    .eq("id", analysisId).maybeSingle();
-  if (!match) {
-    await sendMessage(chatId, "❌ Analyse introuvable ou expirée.", {
-      inline_keyboard: [[{ text: "◀ Menu compétitions", callback_data: "pronostics_menu" }]],
-    });
-    return;
+// Étape 1 : sélection du marché (instantané, sans Groq)
+async function sendMatchAnalysis(chatId: number, eventId: string, supabase: any) {
+  await sendAction(chatId);
+  const isUUID = eventId.includes("-");
+  let home = "?", away = "?", league = "Compétition", date = "", backCb = "pronostics_menu";
+
+  if (isUUID) {
+    const { data: m } = await supabase.from("analyses")
+      .select("team_home, team_away, league, match_date").eq("id", eventId).maybeSingle();
+    if (m) {
+      home = m.team_home; away = m.team_away; league = m.league ?? league;
+      if (m.match_date) date = new Date(m.match_date).toLocaleString("fr-FR", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" });
+    }
+    const c = ALL_COMPS.find(x => x.name === league);
+    if (c) backCb = `comp:${c.id}`;
+  } else {
+    const e = await fetchEventById(eventId);
+    if (!e) {
+      await sendMessage(chatId, "❌ Match introuvable. Essaie à nouveau.", { inline_keyboard: [[{ text: "◀ Retour", callback_data: "pronostics_menu" }]] });
+      return;
+    }
+    home = e.strHomeTeam ?? "?"; away = e.strAwayTeam ?? "?"; league = e.strLeague ?? "Compétition";
+    try {
+      if (e.dateEvent && e.strTime)
+        date = new Date(`${e.dateEvent}T${e.strTime.endsWith("Z") ? e.strTime : e.strTime + "Z"}`)
+          .toLocaleString("fr-FR", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" });
+    } catch { date = e.dateEvent ?? ""; }
+    const c = ALL_COMPS.find(x => x.name === league || league.toLowerCase().includes(x.name.toLowerCase().slice(0, 4)));
+    if (c) backCb = `comp:${c.id}`;
   }
-  const home   = escapeHtml(match.team_home || "?");
-  const away   = escapeHtml(match.team_away || "?");
-  const league = escapeHtml((match.league || "Compétition").slice(0, 40));
-  const date   = match.match_date
-    ? new Date(match.match_date).toLocaleString("fr-FR", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" })
-    : "";
-  const conf   = match.confidence ? ` · ${match.confidence}% confiance` : "";
-  const id     = analysisId;
 
   await sendMessage(chatId, [
-    `⚽ <b>${home} vs ${away}</b>`,
-    `🏆 ${league}${date ? ` · ${date}` : ""}${conf}`,``,
+    `⚽ <b>${escapeHtml(home)} vs ${escapeHtml(away)}</b>`,
+    `🏆 ${escapeHtml(league)}${date ? ` · ${date}` : ""}`, ``,
     `<b>Sur quel marché porte ton analyse ?</b>`,
-    `<i>L'IA va adapter toute sa puissance de calcul au marché choisi.</i>`,
+    `<i>L'IA adapte toute sa puissance de calcul au marché choisi.</i>`,
   ].join("\n"), {
     inline_keyboard: [
-      [{ text: "🏆 Vainqueur (1N2)",       callback_data: `mkt:${id}:win`     }],
-      [{ text: "⚽ Buts / Over-Under",      callback_data: `mkt:${id}:goals`   }],
-      [{ text: "🔢 Corners",               callback_data: `mkt:${id}:corners` }],
-      [{ text: "🟨 Cartons",               callback_data: `mkt:${id}:cards`   }],
-      [{ text: "📊 Analyse Totale (tous marchés)", callback_data: `mkt:${id}:full` }],
-      [{ text: "◀ Retour", callback_data: `comp:${(match.league || "Autres").slice(0,58)}` }],
+      [{ text: "🏆 Vainqueur (1N2)",              callback_data: `mkt:${eventId}:win`     }],
+      [{ text: "⚽ Buts / Over-Under",             callback_data: `mkt:${eventId}:goals`   }],
+      [{ text: "🔢 Corners",                       callback_data: `mkt:${eventId}:corners` }],
+      [{ text: "🟨 Cartons",                       callback_data: `mkt:${eventId}:cards`   }],
+      [{ text: "📊 Analyse Totale (tous marchés)", callback_data: `mkt:${eventId}:full`    }],
+      [{ text: "◀ Retour",                         callback_data: backCb                   }],
     ],
   });
 }
 
-// Étape 2 : Générer et afficher l'analyse pour le marché choisi
-async function sendMarketAnalysis(chatId: number, analysisId: string, market: Market, supabase: any) {
-  await sendAction(chatId); // ⌨️ typing systématique pendant que Groq réfléchit
+// Étape 2 : génère l'analyse Groq pour le marché choisi
+async function sendMarketAnalysis(chatId: number, eventId: string, market: string, supabase: any) {
+  await sendAction(chatId);
+  const isUUID = eventId.includes("-");
+  let matchData: any = {};
 
-  const { data: match } = await supabase.from("analyses").select("*").eq("id", analysisId).maybeSingle();
-  if (!match) {
-    await sendMessage(chatId, "❌ Analyse introuvable ou expirée.", {
-      inline_keyboard: [[{ text: "◀ Menu", callback_data: "pronostics_menu" }]],
-    });
+  if (isUUID) {
+    const { data: m } = await supabase.from("analyses").select("*").eq("id", eventId).maybeSingle();
+    if (m) matchData = { team_home: m.team_home, team_away: m.team_away, league: m.league, match_date: m.match_date, prediction: m.prediction, notes: m.notes ?? m.stats };
+  } else {
+    const e = await fetchEventById(eventId);
+    if (e) matchData = {
+      team_home: e.strHomeTeam, team_away: e.strAwayTeam, league: e.strLeague,
+      match_date: e.dateEvent && e.strTime ? `${e.dateEvent}T${e.strTime}Z` : null,
+    };
+  }
+
+  if (!matchData.team_home) {
+    await sendMessage(chatId, "❌ Match introuvable.", { inline_keyboard: [[{ text: "◀ Menu", callback_data: "pronostics_menu" }]] });
     return;
   }
 
-  const analysisText = await generateMatchAnalysis(match, market);
-  const league       = (match.league || "Compétition").slice(0, 58);
-
-  const { count } = await supabase
-    .from("coupons_partages")
-    .select("id", { count: "exact", head: true })
-    .eq("analysis_id", analysisId);
-  const couponsCount = (count as number) || 0;
+  const analysisText = await generateMatchAnalysis(matchData, market);
+  const cpId = isUUID ? eventId : null;
+  const { count } = await supabase.from("coupons_partages").select("id", { count:"exact", head:true }).eq("analysis_id", cpId);
+  const n = (count as number) ?? 0;
 
   await sendMessage(chatId, analysisText, {
     inline_keyboard: [
-      [{ text: "📤 Publier mon coupon ✅",   callback_data: `pub_coupon:${analysisId}` }],
-      ...(couponsCount > 0 ? [[{ text: `👀 ${couponsCount} coupon${couponsCount > 1 ? "s" : ""} partagé${couponsCount > 1 ? "s" : ""}`, callback_data: `see_coupons:${analysisId}` }]] : []),
-      [{ text: "🔄 Changer de marché",       callback_data: `mat:${analysisId}` }],
-      [{ text: `◀ ${escapeHtml(league)}`, callback_data: `comp:${league}` }],
-      [{ text: "🏠 Menu compétitions",       callback_data: "pronostics_menu" }],
+      [{ text: "📤 Publier mon coupon ✅",  callback_data: `pub_coupon:${eventId}` }],
+      ...(n > 0 ? [[{ text: `👀 ${n} coupon${n>1?"s":""} partagé${n>1?"s":""}`, callback_data: `see_coupons:${eventId}` }]] : []),
+      [{ text: "🔄 Changer de marché",      callback_data: `mat:${eventId}`        }],
+      [{ text: "🏠 Menu compétitions",      callback_data: "pronostics_menu"       }],
     ],
   });
 }
+
 
 // ─── Pool Commun helpers ─────────────────────────────────────────────────────
 
@@ -2622,9 +2710,9 @@ Deno.serve(async (req) => {
       }
 
       if (data.startsWith("comp:")) {
-        const league = data.slice(5);
+        const leagueId = data.slice(5); // ID TheSportsDB numérique
         await answerCallback(cb.id);
-        await sendMatchesList(chatId, league, supabase);
+        await sendMatchesList(chatId, leagueId, supabase);
         return;
       }
 
