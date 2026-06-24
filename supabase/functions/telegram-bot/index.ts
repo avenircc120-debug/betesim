@@ -251,7 +251,7 @@ async function handleFreeText(chatId: number, text: string, firstName: string, t
 
   const lower = text.toLowerCase();
   const proUrl = await pronosticsUrl(supabase);
-  const proKb = { inline_keyboard: [[{ text: "📊 Voir les Analyses", web_app: { url: proUrl } }]] };
+  const proKb = { inline_keyboard: [[{ text: "➕ Ajouter un coupon", callback_data: "pronostics_menu" }]] };
 
   const greetKw = ["salut","bonjour","hello","hi","allo","allô","bonsoir","yo","slt","bjr","bj","coucou","cc","cv","ça va","ca va","wesh","bsr","bien","bien?","koi","quoi de neuf","quoi de 9"];
   const openKw  = ["pronostic","prono","match","voir","logiciel","coupon","pack","ouvrir","start","analyse"];
@@ -472,9 +472,9 @@ async function handleFreeText(chatId: number, text: string, firstName: string, t
   if (isGreet && !isOpen) {
     kb = {
       inline_keyboard: [
-        [{ text: "📊 Voir les Analyses", web_app: { url: proUrl } }],
+        [{ text: "➕ Ajouter un coupon",          callback_data: "pronostics_menu" }],
         [{ text: "🎟 Voir les coupons disponibles", callback_data: "voir_pool" }],
-        [{ text: "📋 Mon Dashboard Revendeur", callback_data: "dashboard_home" }],
+        [{ text: "📋 Mon Dashboard Revendeur",      callback_data: "dashboard_home" }],
       ],
     };
     reply = [
@@ -508,14 +508,14 @@ async function handleFreeText(chatId: number, text: string, firstName: string, t
     if (groqReply) {
       await sendMessage(chatId, groqReply, {
         inline_keyboard: [
-          [{ text: "🎟 Voir les coupons", callback_data: "voir_pool" }, { text: "📊 Analyses", web_app: { url: proUrl } }],
+          [{ text: "🎟 Voir les coupons disponibles", callback_data: "voir_pool" }, { text: "➕ Ajouter un coupon", callback_data: "pronostics_menu" }],
         ],
       });
       return new Response("ok", { status: 200 });
     }
     kb = {
       inline_keyboard: [
-        [{ text: "📊 Voir les Analyses", web_app: { url: proUrl } }],
+        [{ text: "➕ Ajouter un coupon",          callback_data: "pronostics_menu" }],
         [{ text: "🎟 Voir les coupons disponibles", callback_data: "voir_pool" }],
       ],
     };
@@ -1624,9 +1624,8 @@ Deno.serve(async (req) => {
       const pUrl = await pronosticsUrl(supabase);
       await sendMessage(chatId, `🎯 Ouvre <b>Pack Officiel</b> en plein écran :`, {
         inline_keyboard: [
-          [{ text:"📊 Voir les Analyses", web_app:{ url: pUrl } }],
+          [{ text:"➕ Ajouter un coupon",           callback_data:"pronostics_menu" }],
           [{ text:"🎟 Voir les coupons disponibles", callback_data:"voir_pool" }],
-          [{ text:"🏆 Analyses & Pronostics", callback_data:"pronostics_menu" }],
         ],
       });
       return;
@@ -1748,8 +1747,8 @@ Deno.serve(async (req) => {
           : `✅ Toutes les analyses ont un coupon.`,
       ].join("\n"), {
         inline_keyboard: [
-          [{ text: "💰 Détail wallet", callback_data: "wallet_detail" }, { text: "📋 Voir analyses", callback_data: "show_analyses" }],
-          pendingCount > 0 ? [{ text: `🔔 Créer coupon maintenant (${pendingCount})`, callback_data: "show_analyses" }] : [],
+          [{ text: "💰 Détail wallet", callback_data: "wallet_detail" }, { text: "➕ Ajouter un coupon", callback_data: "pronostics_menu" }],
+          pendingCount > 0 ? [{ text: `🔔 Ajouter un coupon maintenant (${pendingCount})`, callback_data: "pronostics_menu" }] : [],
           [{ text: "🎟 Voir mes coupons", callback_data: "my_coupons" }],
         ].filter((row: any[]) => row.length > 0),
       });
@@ -1791,7 +1790,7 @@ Deno.serve(async (req) => {
       if (!term) {
         await sendMessage(chatId,
           "🔍 <b>Recherche d'analyses</b>\n\nTape : <code>/rechercher Bayern</code> ou <code>/rechercher Ligue 1</code>\n\nTu peux chercher par :\n• Nom d'équipe (ex: <code>PSG</code>, <code>Real Madrid</code>)\n• Compétition (ex: <code>Champions League</code>, <code>CAN</code>)\n• Pays (ex: <code>France</code>, <code>Afrique</code>)",
-          { inline_keyboard: [[{ text: "📋 Toutes les analyses", callback_data: "show_analyses" }]] }
+          { inline_keyboard: [[{ text: "➕ Ajouter un coupon", callback_data: "pronostics_menu" }]] }
         );
         return;
       }
@@ -1809,7 +1808,7 @@ Deno.serve(async (req) => {
         {
           inline_keyboard: [
             ...analyses.slice(0, 6).map((a: any) => [{ text: `➕ ${a.team_home} vs ${a.team_away}`, callback_data: `create_coupon_${a.id}` }]),
-            [{ text: "📋 Toutes les analyses", callback_data: "show_analyses" }, { text: "◀ Dashboard", callback_data: "dashboard_home" }],
+            [{ text: "➕ Ajouter un coupon",   callback_data: "pronostics_menu" }, { text: "◀ Dashboard", callback_data: "dashboard_home" }],
           ],
         }
       );
@@ -2136,7 +2135,7 @@ Deno.serve(async (req) => {
           ``,
           `🎯 Touche le bouton ci-dessous pour démarrer.`,
         ].join("\n"), {
-          inline_keyboard: [[{ text:"📊 Voir les Analyses", web_app:{ url: pUrl } }]],
+          inline_keyboard: [[{ text:"➕ Ajouter un coupon", callback_data:"pronostics_menu" }], [{ text:"🎟 Voir les coupons disponibles", callback_data:"voir_pool" }]],
         });
         return;
       }
@@ -2434,18 +2433,8 @@ Deno.serve(async (req) => {
         }
 
         if (data === "show_analyses") {
-          const analyses = await getPendingAnalyses(supabase, reseller.id);
-          if (!analyses.length) {
-            await sendMessage(chatId, "✅ <b>Toutes les analyses ont un coupon.</b>\n\nNouvel arrivage bientôt !", { inline_keyboard: [[{ text: "◀ Dashboard", callback_data: "dashboard_home" }]] });
-            return;
-          }
-          const grouped = formatAnalysesGrouped(analyses, analyses.length);
-          await sendMessage(chatId, grouped, {
-            inline_keyboard: [
-              ...analyses.slice(0, 5).map((a: any) => [{ text: `➕ ${a.team_home} vs ${a.team_away}`, callback_data: `create_coupon_${a.id}` }]),
-              [{ text: "🔍 Rechercher un match", callback_data: "prompt_search" }, { text: "◀ Dashboard", callback_data: "dashboard_home" }],
-            ],
-          });
+          // Redirect to native competition list (same as pronostics_menu)
+          await sendCompetitionList(chatId, supabase);
           return;
         }
 
@@ -2536,7 +2525,7 @@ Deno.serve(async (req) => {
         ].join("\n"), {
           inline_keyboard: [
             [{ text: "1️⃣ 1xBet", callback_data: `plat_1xbet_${analysisId}` }, { text: "2️⃣ 1Win", callback_data: `plat_1win_${analysisId}` }],
-            [{ text: "❌ Annuler", callback_data: "show_analyses" }],
+            [{ text: "❌ Annuler", callback_data: "pronostics_menu" }],
           ],
         });
         return;
