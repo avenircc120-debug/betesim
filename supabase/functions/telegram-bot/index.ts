@@ -261,6 +261,40 @@ async function handleFreeText(chatId: number, text: string, firstName: string, t
   // ─── Wizard state: revendeur en train d'entrer un code booking ─────────────
   try {
     const session = await getBotState(supabase, chatId);
+    // ─── État : revendeur publie un coupon communautaire ────────────────────
+    if (session?.state === "awaiting_coupon_partage") {
+      const { analysis_id, match_label, league } = session.data as any;
+      const code = text.trim().replace(/\s+/g, "").toUpperCase();
+      if (code.length < 4 || code.length > 50) {
+        await sendMessage(chatId, "⚠️ Code invalide (4-50 caractères). Réessaie :\n\nExemple : <code>ABC123456</code>");
+        return new Response("ok", { status: 200 });
+      }
+      await supabase.from("coupons_partages").insert({
+        analysis_id, user_id: tgUserId,
+        username: null, first_name: firstName,
+        code_coupon: code, match_label, league,
+      });
+      await clearBotState(supabase, chatId);
+      const { count } = await supabase
+        .from("coupons_partages")
+        .select("id", { count: "exact", head: true })
+        .eq("analysis_id", analysis_id);
+      const total = (count as number) || 1;
+      await sendMessage(chatId, [
+        `✅ <b>Coupon publié avec succès ! 🔥</b>`,``,
+        `🎟 Code <code>${escapeHtml(code)}</code> ajouté à la liste communautaire.`,
+        `👥 ${total} revendeur${total > 1 ? "s" : ""} ont partagé un coupon pour ce match.`,
+        ``,
+        `Merci pour ta contribution !`,
+      ].join("\n"), {
+        inline_keyboard: [
+          [{ text: "🏆 Voir d'autres analyses", callback_data: "pronostics_menu" }],
+          [{ text: `👀 Voir les coupons de ce match`, callback_data: `see_coupons:${analysis_id}` }],
+        ],
+      });
+      return new Response("ok", { status: 200 });
+    }
+
     if (session?.state === "awaiting_booking_code") {
       const { analysis_id, platform, reseller_id } = session.data as any;
       const code = lower.trim().toUpperCase().replace(/\s+/g, "");
@@ -826,6 +860,152 @@ async function askGroq(userMessage: string, firstName: string): Promise<string |
 }
 
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ██████╗ ██████╗  ██████╗ ███╗   ██╗ ██████╗ ███████╗████████╗██╗ ██████╗███████╗
+// BOT PRONOSTICS TOUT-EN-UN — Lazy loading, zéro web_app, purge auto
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function generateMatchAnalysis(match: any): Promise<string> {
+  const apiKey = Deno.env.get("GROQ_API_KEY");
+  const home   = escapeHtml(match.team_home  || "?");
+  const away   = escapeHtml(match.team_away  || "?");
+  const league = escapeHtml(match.league || match.country || "Compétition");
+  const pred   = match.prediction || "Non définie";
+  const conf   = match.confidence ? `${match.confidence}%` : "N/A";
+  const odds   = match.odds       ? `${match.odds}`        : "N/A";
+  const notes  = (match.notes || match.stats || "").toString().slice(0, 120);
+  const date   = match.match_date
+    ? new Date(match.match_date).toLocaleString("fr-FR", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" })
+    : "";
+
+  const fallback = [
+    `🔥 <b>PRÉDICTION EXPERT</b> — ${home} vs ${away}`,
+    `🏆 ${league}${date ? ` · ${date}` : ""}`,
+    ``,
+    `✅ <b>Le Choix du Pro :</b> ${escapeHtml(pred)}`,
+    `📈 Cote : <b>${odds}</b> · Confiance : <b>${conf}</b>`,
+    notes ? `📝 ${escapeHtml(notes)}` : "",
+  ].filter(Boolean).join("\n");
+
+  if (!apiKey) return fallback;
+  try {
+    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      signal: AbortSignal.timeout(4000),
+      body: JSON.stringify({
+        model: "llama-3.1-8b-instant",
+        messages: [
+          { role: "system", content: "Expert pronostics sportifs, concis, en français. Format STRICT:\n🔥 PRÉDICTION EXPERT - [Match]\n✅ Le Choix du Pro: [2-3 marchés séparés par ·]\n📊 Analyse: [1 phrase max]\n⚠️ Paris = risque, jouer responsable." },
+          { role: "user", content: `Match: ${match.team_home} vs ${match.team_away} | Ligue: ${match.league} | Prédiction: ${pred} | Cote: ${odds} | Confiance: ${conf} | Notes: ${notes}` },
+        ],
+        max_tokens: 120,
+        temperature: 0.4,
+      }),
+    });
+    const d = await res.json() as any;
+    const aiText = d?.choices?.[0]?.message?.content?.trim();
+    if (aiText) return aiText + (date ? `\n\n🗓 <i>${date} · ${league}</i>` : `\n\n🏆 <i>${league}</i>`);
+  } catch (_) { /* fallback */ }
+  return fallback;
+}
+
+async function sendCompetitionList(chatId: number, supabase: any) {
+  const now = new Date().toISOString();
+  // Purge auto matchs passés
+  await supabase.from("analyses").delete().not("match_date","is",null).lt("match_date", now);
+
+  const { data: rows } = await supabase
+    .from("analyses")
+    .select("league, match_date")
+    .gte("match_date", now)
+    .order("match_date", { ascending: true });
+
+  if (!rows || rows.length === 0) {
+    await sendMessage(chatId, [
+      `🏆 <b>Analyses disponibles</b>`,``,
+      `📭 Aucun match disponible pour le moment.`,
+      `Les analyses arrivent bientôt — reviens dans quelques heures !`,
+    ].join("\n"), {
+      inline_keyboard: [[{ text: "🔄 Rafraîchir", callback_data: "pronostics_menu" }]],
+    });
+    return;
+  }
+  const leagues = new Map<string, number>();
+  for (const r of rows) leagues.set(r.league || "Autres", (leagues.get(r.league || "Autres") || 0) + 1);
+
+  const buttons = Array.from(leagues.entries()).map(([l, n]) => [{
+    text: `🏆 ${l} (${n} match${n > 1 ? "s" : ""})`,
+    callback_data: `comp:${l}`.slice(0, 64),
+  }]);
+
+  await sendMessage(chatId, [
+    `🏆 <b>Pronostics — Sélectionne une compétition</b>`,``,
+    `${leagues.size} compétition${leagues.size > 1 ? "s" : ""} · ${rows.length} match${rows.length > 1 ? "s" : ""} disponible${rows.length > 1 ? "s" : ""}`,
+  ].join("\n"), { inline_keyboard: buttons });
+}
+
+async function sendMatchesList(chatId: number, league: string, supabase: any) {
+  const now = new Date().toISOString();
+  const { data: matches } = await supabase
+    .from("analyses")
+    .select("id, team_home, team_away, match_date, confidence, prediction")
+    .eq("league", league)
+    .gte("match_date", now)
+    .order("match_date", { ascending: true })
+    .limit(20);
+
+  if (!matches || matches.length === 0) {
+    await sendMessage(chatId, `📭 Aucun match disponible pour <b>${escapeHtml(league)}</b>.`, {
+      inline_keyboard: [[{ text: "◀ Retour aux compétitions", callback_data: "pronostics_menu" }]],
+    });
+    return;
+  }
+  const buttons = [
+    ...matches.map((m: any) => {
+      const time = m.match_date
+        ? new Date(m.match_date).toLocaleString("fr-FR", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" })
+        : "";
+      const conf = m.confidence ? ` · ${m.confidence}%` : "";
+      return [{ text: `⚽ ${m.team_home} vs ${m.team_away}${time ? ` (${time})` : ""}${conf}`, callback_data: `mat:${m.id}` }];
+    }),
+    [{ text: "◀ Retour aux compétitions", callback_data: "pronostics_menu" }],
+  ];
+  await sendMessage(chatId, [
+    `🏆 <b>${escapeHtml(league)}</b>`,``,
+    `Clique sur un match pour voir l'analyse complète :`,
+  ].join("\n"), { inline_keyboard: buttons });
+}
+
+async function sendMatchAnalysis(chatId: number, analysisId: string, supabase: any) {
+  await sendAction(chatId); // typing pendant génération Groq
+  const { data: match } = await supabase.from("analyses").select("*").eq("id", analysisId).maybeSingle();
+  if (!match) {
+    await sendMessage(chatId, "❌ Analyse introuvable ou expirée.", {
+      inline_keyboard: [[{ text: "◀ Menu compétitions", callback_data: "pronostics_menu" }]],
+    });
+    return;
+  }
+  const analysisText = await generateMatchAnalysis(match);
+  const league = (match.league || "Compétition").slice(0, 58);
+  const { count } = await supabase
+    .from("coupons_partages")
+    .select("id", { count: "exact", head: true })
+    .eq("analysis_id", analysisId);
+  const couponsCount = (count as number) || 0;
+
+  const kb = {
+    inline_keyboard: [
+      [{ text: "📤 Publier mon coupon ✅", callback_data: `pub_coupon:${analysisId}` }],
+      ...(couponsCount > 0 ? [[{ text: `👀 Voir les ${couponsCount} coupon${couponsCount > 1 ? "s" : ""} partagé${couponsCount > 1 ? "s" : ""}`, callback_data: `see_coupons:${analysisId}` }]] : []),
+      [{ text: `◀ Retour à ${escapeHtml(league)}`, callback_data: `comp:${league}` }],
+      [{ text: "🏠 Menu compétitions", callback_data: "pronostics_menu" }],
+    ],
+  };
+  await sendMessage(chatId, analysisText, kb);
+}
+
 // ─── Pool Commun helpers ─────────────────────────────────────────────────────
 
 async function getAdminChatId(supabase: any): Promise<number | null> {
@@ -1156,6 +1336,7 @@ Deno.serve(async (req) => {
         inline_keyboard: [
           [{ text:"📊 Voir les Analyses", web_app:{ url: pUrl } }],
           [{ text:"🎟 Voir les coupons disponibles", callback_data:"voir_pool" }],
+          [{ text:"🏆 Analyses & Pronostics", callback_data:"pronostics_menu" }],
         ],
       });
       return;
@@ -1345,23 +1526,10 @@ Deno.serve(async (req) => {
       return;
     }
 
-    // ── /analyses — analyses groupées par compétition ─────────────────────────
+    // ── /analyses — Menu pronostics tout-en-un ───────────────────────────────
     if (update.message?.text?.startsWith("/analyses")) {
       const chatId = update.message.chat.id;
-      const reseller = await getResellerProfile(supabase, chatId);
-      if (!reseller) { await sendMessage(chatId, "🔒 Lie d'abord ton compte avec <code>/connect {uid}</code>"); return; }
-      const analyses = await getPendingAnalyses(supabase, reseller.id);
-      if (!analyses.length) {
-        await sendMessage(chatId, "✅ <b>Toutes les analyses ont déjà un coupon.</b>\n\nNouvel arrivage bientôt !", { inline_keyboard: [[{ text: "◀ Dashboard", callback_data: "dashboard_home" }]] });
-        return;
-      }
-      const grouped = formatAnalysesGrouped(analyses, analyses.length);
-      await sendMessage(chatId, grouped, {
-        inline_keyboard: [
-          ...analyses.slice(0, 5).map((a: any) => [{ text: `➕ ${a.team_home} vs ${a.team_away}`, callback_data: `create_coupon_${a.id}` }]),
-          [{ text: "🔍 Rechercher un match", callback_data: "prompt_search" }, { text: "◀ Dashboard", callback_data: "dashboard_home" }],
-        ],
-      });
+      await sendCompetitionList(chatId, supabase);
       return;
     }
 
@@ -2282,6 +2450,81 @@ Deno.serve(async (req) => {
         if (order?.buyer_chat_id) {
           await sendMessage(order.buyer_chat_id, "❌ <b>Paiement non confirmé.</b>\n\nContacte le support ou tape /coupons pour voir d'autres coupons.");
         }
+        return;
+      }
+
+      // ── PRONOSTICS TOUT-EN-UN callbacks ─────────────────────────────────────
+      if (data === "pronostics_menu" || data === "analyses_menu") {
+        await answerCallback(cb.id);
+        await sendCompetitionList(chatId, supabase);
+        return;
+      }
+
+      if (data.startsWith("comp:")) {
+        const league = data.slice(5);
+        await answerCallback(cb.id);
+        await sendMatchesList(chatId, league, supabase);
+        return;
+      }
+
+      if (data.startsWith("mat:")) {
+        const analysisId = data.slice(4);
+        await answerCallback(cb.id);
+        await sendMatchAnalysis(chatId, analysisId, supabase);
+        return;
+      }
+
+      if (data.startsWith("pub_coupon:")) {
+        const analysisId = data.slice(11);
+        await answerCallback(cb.id);
+        const { data: match } = await supabase
+          .from("analyses").select("team_home, team_away, league").eq("id", analysisId).maybeSingle();
+        const matchLabel = match ? `${match.team_home} vs ${match.team_away}` : "Match";
+        const lg = (match?.league || "Compétition").slice(0, 58);
+        await setBotState(supabase, chatId, "awaiting_coupon_partage", {
+          analysis_id: analysisId, match_label: matchLabel, league: lg,
+        });
+        await sendMessage(chatId, [
+          `📤 <b>Publication de coupon</b>`,``,
+          `🎯 Match : <b>${escapeHtml(matchLabel)}</b>`,``,
+          `Copie et colle ici ton code coupon <b>OneWin / 1xBet</b> :`,``,
+          `<i>Exemple : ABC123456 ou 1WIN-XYZ99</i>`,
+        ].join("\n"), {
+          inline_keyboard: [[{ text: "❌ Annuler", callback_data: `mat:${analysisId}` }]],
+        });
+        return;
+      }
+
+      if (data.startsWith("see_coupons:")) {
+        const analysisId = data.slice(12);
+        await answerCallback(cb.id);
+        const { data: coupons } = await supabase
+          .from("coupons_partages")
+          .select("code_coupon, first_name, username, created_at")
+          .eq("analysis_id", analysisId)
+          .order("created_at", { ascending: false })
+          .limit(10);
+        if (!coupons || coupons.length === 0) {
+          await sendMessage(chatId, "📭 Aucun coupon partagé pour ce match encore.", {
+            inline_keyboard: [[{ text: "📤 Publier le premier !", callback_data: `pub_coupon:${analysisId}` }]],
+          });
+          return;
+        }
+        const lines = (coupons as any[]).map((c, i) => {
+          const who = c.username ? `@${c.username}` : escapeHtml(c.first_name || "Revendeur");
+          return `${i + 1}. <code>${escapeHtml(c.code_coupon)}</code> — ${who}`;
+        });
+        await sendMessage(chatId, [
+          `🎟 <b>Coupons partagés par la communauté</b>`,``,
+          ...lines,``,
+          `⚠️ <i>Codes partagés par les revendeurs. Vérifie avant utilisation.</i>`,
+        ].join("\n"), {
+          inline_keyboard: [
+            [{ text: "📤 Ajouter mon coupon", callback_data: `pub_coupon:${analysisId}` }],
+            [{ text: "◀ Retour au match", callback_data: `mat:${analysisId}` }],
+            [{ text: "🏠 Menu compétitions", callback_data: "pronostics_menu" }],
+          ],
+        });
         return;
       }
 
