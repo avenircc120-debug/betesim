@@ -1006,13 +1006,19 @@ async function fetchEventsForLeague(leagueId: string): Promise<any[]> {
     );
     if (!res.ok) return [];
     const json = await res.json() as any;
-    const now  = Date.now();
-    const week = now + 7 * 24 * 3600 * 1000;
-    return (json?.events ?? []).filter((e: any) => {
+    const now    = Date.now();
+    const month30 = now + 30 * 24 * 3600 * 1000;
+    const all = (json?.events ?? []).filter((e: any) => {
       if (!e.dateEvent) return true;
       const t = new Date(`${e.dateEvent}T${e.strTime || "12:00:00"}Z`).getTime();
-      return t >= now && t <= week;
-    }).slice(0, 8);
+      return t >= now && t <= month30;
+    });
+    // Fallback : si rien dans 30j, retourner le 1er match futur
+    if (all.length === 0) {
+      const future = (json?.events ?? []).filter((e: any) => !e.dateEvent || new Date(`${e.dateEvent}T${e.strTime || "12:00:00"}Z`).getTime() >= now);
+      return future.slice(0, 4);
+    }
+    return all.slice(0, 8);
   } catch { return []; }
 }
 
@@ -1098,7 +1104,7 @@ async function sendCompetitionList(chatId: number, _supabase: any) {
   if (active.length === 0) {
     await sendMessage(chatId, [
       `🏆 <b>Analyses & Pronostics</b>`, ``,
-      `📭 Aucun match trouvé dans les 7 prochains jours.`, ``,
+      `📭 Aucun match trouvé dans les 30 prochains jours.`, ``,
       `💡 Utilise la recherche pour trouver ta compétition :`,
     ].join("\n"), {
       inline_keyboard: [
@@ -1139,7 +1145,7 @@ async function sendMatchesList(chatId: number, leagueId: string, _supabase: any)
 
   if (!events.length) {
     await sendMessage(chatId, [
-      `📭 Aucun match trouvé pour <b>${escapeHtml(comp?.name ?? leagueId)}</b> dans les 7 prochains jours.`, ``,
+      `📭 Aucun match trouvé pour <b>${escapeHtml(comp?.name ?? leagueId)}</b> dans les 30 prochains jours.`, ``,
       `Les données sont issues de TheSportsDB et mises à jour en temps réel.`,
     ].join("\n"), {
       inline_keyboard: [
