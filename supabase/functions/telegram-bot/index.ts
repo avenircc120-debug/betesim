@@ -367,39 +367,51 @@ async function handleFreeText(chatId: number, text: string, firstName: string, t
   try {
     const pubSess = await getBotState(supabase, chatId);
 
-    if (pubSess?.state === "pub_codes") {
-      const { codes, total_codes } = pubSess.data as { codes: string[]; total_codes: number };
-      const rawCode = text.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+    if (pubSess?.state === "pub_step_code") {
+      const rawCode = text.trim().toUpperCase().replace(/[^A-Z0-9\-]/g, "");
       if (rawCode.length < 4 || rawCode.length > 40) {
-        await sendHuman(chatId, "⚠️ Code invalide (4-40 caractères alphanumériques). Entre le code exact :", undefined, DELAY_SHORT);
+        await sendHuman(chatId, "⚠️ Code invalide (4-40 caractères). Entre le code exact :\n<i>Exemple : ABC123456</i>", undefined, DELAY_SHORT);
         return new Response("ok", { status: 200 });
       }
-      const newCodes = [...codes, rawCode];
-      if (newCodes.length < total_codes) {
-        await setBotState(supabase, chatId, "pub_codes", { codes: newCodes, total_codes });
-        await sendHuman(chatId, `✅ Code ${newCodes.length} enregistré !\n\nEntre maintenant le <b>code ${newCodes.length + 1}</b> sur ${total_codes} :`, undefined, DELAY_SHORT);
-      } else {
-        await setBotState(supabase, chatId, "pub_odds", { codes: newCodes });
-        await sendHuman(chatId, [`✅ ${total_codes} code${total_codes>1?"s":""} enregistré${total_codes>1?"s":""} !`,``,`📊 <b>Quelle est la cote totale du coupon ?</b>`,`<i>Exemple : 4.50 ou 12.5 (minimum 2.00)</i>`,``,`💡 Prix auto-calculé : 2.00-5.49 → 250 F · 5.50-15.99 → 500 F · 16.00+ → 1000 F`].join("\n"), undefined, DELAY_SHORT);
-      }
+      await setBotState(supabase, chatId, "pub_step_cote", { code: rawCode });
+      await sendHuman(chatId, [
+        `✅ Code : <code>${rawCode}</code>`, ``,
+        `<b>Étape 2/4 — Cote</b>`, ``,
+        `Entre la cote totale du coupon :`,
+        `<i>Exemple : 4.50 ou 12.5</i>`, ``,
+        `💡 Gains selon la cote :`,
+        `• 1.00 – 5.50 → 250 FCFA`,
+        `• 5.51 – 16.00 → 500 FCFA`,
+        `• > 16.00 → 1000 FCFA`,
+      ].join("\n"), {
+        inline_keyboard: [[{ text: "❌ Annuler", callback_data: "dashboard_home" }]],
+      }, DELAY_SHORT);
       return new Response("ok", { status: 200 });
     }
 
-    if (pubSess?.state === "pub_odds") {
-      const { codes } = pubSess.data as { codes: string[] };
+    if (pubSess?.state === "pub_step_cote") {
+      const { code } = pubSess.data as { code: string };
       const odds = parseFloat(text.replace(",", "."));
       if (isNaN(odds) || odds < 1.1 || odds > 10000) {
         await sendHuman(chatId, "⚠️ Cote invalide. Entre un nombre comme <b>4.50</b> ou <b>12.5</b> :", undefined, DELAY_SHORT);
         return new Response("ok", { status: 200 });
       }
-      const price = calcPrice(odds);
-      await setBotState(supabase, chatId, "pub_time", { codes, odds, price });
-      await sendHuman(chatId, [`✅ Cote de <b>${odds}</b> enregistrée · Prix : <b>${price.toLocaleString("fr-FR")} FCFA</b>`,``,`⏰ <b>À quelle heure commencent les matchs ?</b>`,`Format : HH:MM (ex: 18:30 ou 20:00)`,`<i>Le coupon sera auto-supprimé à cette heure.</i>`].join("\n"), undefined, DELAY_SHORT);
+      const gain = odds <= 5.50 ? 250 : odds <= 16 ? 500 : 1000;
+      await setBotState(supabase, chatId, "pub_step_expiry", { code, odds, gain });
+      await sendHuman(chatId, [
+        `✅ Cote : <b>${odds}</b> → Gain par vente : <b>${gain.toLocaleString("fr-FR")} FCFA</b>`, ``,
+        `<b>Étape 3/4 — Temps d'expiration</b>`, ``,
+        `À quelle heure commencent les matchs ?`,
+        `Format : HH:MM (ex: <b>18:30</b> ou <b>20:00</b>)`,
+        `<i>Le coupon sera automatiquement supprimé à cette heure.</i>`,
+      ].join("\n"), {
+        inline_keyboard: [[{ text: "❌ Annuler", callback_data: "dashboard_home" }]],
+      }, DELAY_SHORT);
       return new Response("ok", { status: 200 });
     }
 
-    if (pubSess?.state === "pub_time") {
-      const { codes, odds, price } = pubSess.data as { codes: string[]; odds: number; price: number };
+    if (pubSess?.state === "pub_step_expiry") {
+      const { code, odds, gain } = pubSess.data as { code: string; odds: number; gain: number };
       const timeMatch = text.trim().match(/^(\d{1,2})[h:](\d{2})$/i);
       if (!timeMatch) {
         await sendHuman(chatId, "⚠️ Format invalide. Entre l'heure comme <b>18:30</b> ou <b>20h00</b> :", undefined, DELAY_SHORT);
@@ -415,9 +427,17 @@ async function handleFreeText(chatId: number, text: string, firstName: string, t
       const matchStart = new Date(now);
       matchStart.setHours(hh, mm, 0, 0);
       if (matchStart <= now) matchStart.setDate(matchStart.getDate() + 1);
-      await setBotState(supabase, chatId, "pub_confirm", { codes, odds, price, match_start: matchStart.toISOString() });
-      const masked = maskCodes(codes);
-      await sendHuman(chatId, [`📋 <b>Récapitulatif du coupon</b>`,``,`🎟 ${codes.length} code${codes.length>1?"s":""} (masqué${codes.length>1?"s":""}) : <code>${masked}</code>`,`📊 Cote totale : <b>${odds}</b>`,`💰 Prix client : <b>${price.toLocaleString("fr-FR")} FCFA</b>`,`⏰ Expire à : <b>${String(hh).padStart(2,"0")}:${String(mm).padStart(2,"0")}</b>`,``,`👆 Confirme pour publier dans le Pool :`].join("\n"), {
+      const expiryStr = `${String(hh).padStart(2,"0")}:${String(mm).padStart(2,"0")}`;
+      await setBotState(supabase, chatId, "pub_confirm", { codes: [code], odds, price: gain, match_start: matchStart.toISOString() });
+      await sendHuman(chatId, [
+        `📋 <b>Étape 4/4 — Validation</b>`, ``,
+        `Vérifie avant publication :`, ``,
+        `🎫 Code : <code>${code}</code>`,
+        `📊 Cote : <b>${odds}</b>`,
+        `⏰ Expiration : <b>${expiryStr}</b>`,
+        `💰 Ton gain par vente : <b>${gain.toLocaleString("fr-FR")} FCFA</b>`, ``,
+        `👆 Confirme pour publier dans le Pool :`,
+      ].join("\n"), {
         inline_keyboard: [
           [{ text: "✅ Publier le coupon", callback_data: "pub_confirm" }],
           [{ text: "❌ Annuler", callback_data: "dashboard_home" }],
@@ -425,6 +445,22 @@ async function handleFreeText(chatId: number, text: string, firstName: string, t
       }, DELAY_SHORT);
       return new Response("ok", { status: 200 });
     }
+
+    // Legacy states → redirect to new 4-step form
+    if (pubSess?.state === "pub_codes" || pubSess?.state === "pub_odds" || pubSess?.state === "pub_time") {
+      await clearBotState(supabase, chatId);
+      await setBotState(supabase, chatId, "pub_step_code", {});
+      await sendHuman(chatId, [
+        `🎫 <b>Publier un coupon</b>`, ``,
+        `<b>Étape 1/4 — Code</b>`, ``,
+        `Entre ton code coupon (1xBet / 1Win) :`,
+        `<i>Exemple : ABC123456</i>`,
+      ].join("\n"), {
+        inline_keyboard: [[{ text: "❌ Annuler", callback_data: "dashboard_home" }]],
+      }, DELAY_SHORT);
+      return new Response("ok", { status: 200 });
+    }
+  } catch (_pubErr) { /* ignore, fall through */ }
   } catch (_pubErr) { /* ignore, fall through */ }
 
   const isGreet = greetKw.some(k => lower.includes(k));
@@ -2469,12 +2505,10 @@ Deno.serve(async (req) => {
           analyses.length > 0 ? `🔔 <b>${analyses.length} analyse${analyses.length > 1 ? "s" : ""} en attente !</b>` : `✅ Toutes les analyses traitées.`,
         ].join("\n"), {
           inline_keyboard: [
-            [{ text: "📤 Publier un coupon", callback_data: "start_pub" }],
-            [{ text: "💰 Mon Wallet", callback_data: "wallet_detail" }, { text: "🎟 Mes coupons", callback_data: "my_coupons" }],
-            [{ text: "📋 Analyses", callback_data: "show_analyses" }, { text: "🎟 Voir le Pool", callback_data: "voir_pool" }],
-            [{ text: "🔗 Partager Lien Client",    url: _shareUrl(_cL_dash, "🎟 Rejoins-moi sur Betesim pour des coupons de pronostics ! "+_cL_dash) }],
-            [{ text: "🔗 Partager Lien Revendeur", url: _shareUrl(_rL_dash, "💼 Deviens revendeur Betesim et gagne des commissions ! "+_rL_dash) }],
-            ...(analyses.length > 0 ? [[{ text: `🔔 Créer coupon analyse (${analyses.length})`, callback_data: "show_analyses" }]] : []),
+            [{ text: "💰 Mon Wallet", callback_data: "wallet_detail" }],
+            [{ text: "🎫 Mes coupons",             callback_data: "my_coupons" }],
+            [{ text: "🔗 Partager mes liens",       callback_data: "share_links" }],
+            [{ text: "🔙 Retour",                   callback_data: "main_menu" }],
           ],
         });
         return;
@@ -2591,6 +2625,45 @@ Deno.serve(async (req) => {
             [_mkSh2("🔗 Partager Lien Revendeur", _resellerLink, `💼 Rejoins mon équipe Betesim et gagne des commissions ! ${_resellerLink}`)],
             [{ text: "📊 Mon Dashboard", callback_data: "dashboard_home" }],
             [{ text: "➕ Publier un autre coupon", callback_data: "start_pub" }],
+          ],
+        }, DELAY_SHORT);
+        return;
+      }
+
+      // ── Share links (native inline — no web redirect) ─────────────────────
+      if (data === "share_links") {
+        const { data: usr } = await supabase.from("telegram_users").select("client_link,reseller_link").eq("chat_id", chatId).maybeSingle();
+        await answerCallback(cb.id);
+        const cLink = usr?.client_link ?? "";
+        const rLink = usr?.reseller_link ?? "";
+        await sendHuman(chatId, [
+          "🔗 <b>Partager mes liens</b>", "",
+          "👇 Voici tes liens à partager :", "",
+          cLink ? "🎟 <b>Lien Client :</b>
+" + cLink : "❌ Lien client non disponible.",
+          "",
+          rLink ? "💼 <b>Lien Revendeur :</b>
+" + rLink : "❌ Lien revendeur non disponible.",
+        ].join("
+"), {
+          inline_keyboard: [
+            ...(cLink ? [[{ text: "📤 Partager lien client",    url: "https://t.me/share/url?url=" + encodeURIComponent(cLink)    + "&text=" + encodeURIComponent("🎟 Rejoins-moi sur Betesim ! " + cLink) }]] : []),
+            ...(rLink ? [[{ text: "📤 Partager lien revendeur", url: "https://t.me/share/url?url=" + encodeURIComponent(rLink)    + "&text=" + encodeURIComponent("💼 Deviens revendeur Betesim ! " + rLink) }]] : []),
+            [{ text: "🔙 Retour dashboard", callback_data: "dashboard_home" }],
+          ],
+        }, DELAY_SHORT);
+        return;
+      }
+
+      // ── Main menu (native — no web redirect) ─────────────────────────────
+      if (data === "main_menu") {
+        await answerCallback(cb.id);
+        await sendHuman(chatId, "🏠 <b>Menu principal</b>
+
+Choisis une section :", {
+          inline_keyboard: [
+            [{ text: "📊 Analyses du jour", callback_data: "show_analyses" }],
+            [{ text: "📋 Mon Dashboard",    callback_data: "dashboard_home" }],
           ],
         }, DELAY_SHORT);
         return;
@@ -2881,10 +2954,10 @@ Deno.serve(async (req) => {
             const _mk3  = (label: string, lnk: string, txt: string) =>
               ({ text: label, web_app: { url: FUNCTION_URL+"?source=share&label="+encodeURIComponent(label)+"&url="+encodeURIComponent(lnk)+"&text="+encodeURIComponent(txt) } });
             return [
-              [{ text: "📤 Publier un coupon", callback_data: "start_pub" }],
-              [{ text: "💰 Mon Wallet", callback_data: "wallet_detail" }, { text: "🎟 Mes coupons", callback_data: "my_coupons" }],
-              [_mk3("🔗 Partager Lien Client",    _cL3, "🎟 Rejoins-moi sur Betesim pour des coupons de pronostics ! "+_cL3)],
-              [_mk3("🔗 Partager Lien Revendeur", _rL3, "💼 Deviens revendeur Betesim et gagne des commissions ! "+_rL3)],
+              [{ text: "💰 Mon Wallet", callback_data: "wallet_detail" }],
+              [{ text: "🎫 Mes coupons",             callback_data: "my_coupons" }],
+              [{ text: "🔗 Partager mes liens",       callback_data: "share_links" }],
+              [{ text: "🔙 Retour",                   callback_data: "main_menu" }],
             ];
           })(),
         }, DELAY_SHORT);

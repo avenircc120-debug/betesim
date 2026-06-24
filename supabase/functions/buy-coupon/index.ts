@@ -48,7 +48,7 @@ serve(async (req) => {
     // Charger le coupon (FOR UPDATE via service role)
     const { data: coupon, error: couponErr } = await admin
       .from("coupons")
-      .select("id, code, price_fcfa, status, creator_id, partner_id, analysis_id, label")
+      .select("id, code, price_fcfa, status, creator_id, partner_id, analysis_id, label, total_odds")
       .eq("id", coupon_id)
       .single();
     if (couponErr || !coupon) return new Response(JSON.stringify({ error: "Coupon introuvable" }), { status: 404, headers: corsHeaders });
@@ -100,7 +100,10 @@ serve(async (req) => {
     if (soldErr) throw soldErr;
 
     // 3. Calcul des commissions
-    const creatorAmount   = Math.floor(price * CREATOR_RATE);
+    // Fixed wallet credit based on total_odds (odds-based reward system)
+    const totalOdds = coupon.total_odds ?? 0;
+    const fixedGain = totalOdds > 16 ? 1000 : totalOdds > 5.50 ? 500 : 250;
+    const creatorAmount   = totalOdds > 0 ? fixedGain : Math.floor(price * CREATOR_RATE);
     const referrerAmount  = referrerId ? Math.floor(price * REFERRER_RATE) : 0;
     const platformAmount  = price - creatorAmount - referrerAmount;
     const creatorId       = coupon.creator_id ?? coupon.partner_id;
