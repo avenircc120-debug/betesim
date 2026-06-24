@@ -261,6 +261,48 @@ async function handleFreeText(chatId: number, text: string, firstName: string, t
   // ─── Wizard state: revendeur en train d'entrer un code booking ─────────────
   try {
     const session = await getBotState(supabase, chatId);
+    // ─── État : recherche de match par texte ─────────────────────────────────
+    if (session?.state === "awaiting_search") {
+      const query = text.trim().toLowerCase();
+      if (query.length < 2) {
+        await sendMessage(chatId, "⚠️ Tape au moins 2 caractères pour chercher.");
+        return new Response("ok", { status: 200 });
+      }
+      const now = new Date().toISOString();
+      const { data: results } = await supabase
+        .from("analyses")
+        .select("id, team_home, team_away, league, match_date, confidence")
+        .gte("match_date", now)
+        .or(`team_home.ilike.%${query}%,team_away.ilike.%${query}%,league.ilike.%${query}%`)
+        .order("match_date", { ascending: true })
+        .limit(10);
+      await clearBotState(supabase, chatId);
+      if (!results || results.length === 0) {
+        await sendMessage(chatId, `🔍 Aucun match trouvé pour "<b>${escapeHtml(text.trim())}</b>".`, {
+          inline_keyboard: [
+            [{ text: "🔍 Nouvelle recherche", callback_data: "search_match" }],
+            [{ text: "🏠 Retour aux compétitions", callback_data: "pronostics_menu" }],
+          ],
+        });
+        return new Response("ok", { status: 200 });
+      }
+      const buttons = [
+        ...results.map((m: any) => {
+          const time = m.match_date
+            ? new Date(m.match_date).toLocaleString("fr-FR", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" })
+            : "";
+          return [{ text: `⚽ ${m.team_home} vs ${m.team_away} (${m.league || "?"}) ${time}`, callback_data: `mat:${m.id}` }];
+        }),
+        [{ text: "🔍 Nouvelle recherche", callback_data: "search_match" }],
+        [{ text: "◀ Menu compétitions",  callback_data: "pronostics_menu" }],
+      ];
+      await sendMessage(chatId, [
+        `🔍 <b>Résultats pour "${escapeHtml(text.trim())}"</b>`,``,
+        `${results.length} match${results.length > 1 ? "s" : ""} trouvé${results.length > 1 ? "s" : ""} :`,
+      ].join("\n"), { inline_keyboard: buttons });
+      return new Response("ok", { status: 200 });
+    }
+
     // ─── État : revendeur publie un coupon communautaire ────────────────────
     if (session?.state === "awaiting_coupon_partage") {
       const { analysis_id, match_label, league } = session.data as any;
@@ -862,51 +904,124 @@ async function askGroq(userMessage: string, firstName: string): Promise<string |
 
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ██████╗ ██████╗  ██████╗ ███╗   ██╗ ██████╗ ███████╗████████╗██╗ ██████╗███████╗
-// BOT PRONOSTICS TOUT-EN-UN — Lazy loading, zéro web_app, purge auto
+// BOT PRONOSTICS TOUT-EN-UN v2 — Double lecture, tous marchés, typing systématique
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function generateMatchAnalysis(match: any): Promise<string> {
+type Market = "win" | "goals" | "corners" | "cards" | "full";
+
+const MARKET_LABELS: Record<Market, string> = {
+  win:     "🏆 Vainqueur (1N2)",
+  goals:   "⚽ Buts / Over-Under",
+  corners: "🔢 Corners",
+  cards:   "🟨 Cartons",
+  full:    "📊 Analyse Totale",
+};
+
+const MARKET_PROMPTS: Record<Market, string> = {
+  win: `Concentre-toi UNIQUEMENT sur le marché Résultat (1N2/Double chance/Vainqueur).
+Format:
+🏆 VAINQUEUR: [équipe ou nul] | Cote estimée: [X.XX]
+📜 Historique H2H: [bilan succinct sur 3-5 dernières rencontres]
+📈 Forme récente: [5 derniers matchs de chaque équipe]
+🧮 Probabilité: Domicile [X%] / Nul [X%] / Extérieur [X%]
+✅ Le Pro mise sur: [choix + explication 1 phrase]`,
+
+  goals: `Concentre-toi UNIQUEMENT sur les marchés Buts (Over/Under 2.5, BTTS, Score exact probable).
+Format:
+⚽ TOTAL BUTS: Over ou Under [X.5] | Cote estimée: [X.XX]
+📜 Historique H2H buts: [moyenne buts sur 5 derniers H2H]
+📈 Forme offensive/défensive récente: [attaque + défense chaque équipe]
+🎯 Score exact le plus probable: [X-X]
+✅ Le Pro mise sur: [marché + cote]`,
+
+  corners: `Concentre-toi UNIQUEMENT sur les marchés Corners (Total, Over/Under, équipe dominante).
+Format:
+🔢 CORNERS: Over ou Under [X.5] | Cote estimée: [X.XX]
+📜 Historique H2H corners: [tendance sur 5 derniers matchs]
+📈 Style de jeu récent: [largeur de jeu, pressing, possession]
+✅ Le Pro mise sur: [marché corners + cote]`,
+
+  cards: `Concentre-toi UNIQUEMENT sur les marchés Cartons (Total, joueurs à risque, arbitre).
+Format:
+🟨 CARTONS: Over ou Under [X.5] | Cote estimée: [X.XX]
+📜 Historique H2H cartons: [matchs chauds? fair-play?]
+📈 Forme disciplinaire récente: [cartons moyens par match]
+✅ Le Pro mise sur: [marché cartons + cote]`,
+
+  full: `Tu es un analyste sportif expert. Analyse complète et sophistiquée tous marchés.
+Format STRICT (respecte chaque section):
+
+🔥 PRÉDICTION EXPERT — [Match]
+
+📜 DOUBLE LECTURE
+• H2H (5 derniers): [bilan confrontations directes]
+• Forme actuelle: [5 derniers matchs chaque équipe]
+• Synthèse: [comment le passé influence-t-il le présent?]
+
+🎯 MARCHÉS CLÉS
+• 1N2: [favori + cote]
+• Over/Under 2.5: [tendance + cote]  
+• BTTS: [Oui/Non + cote]
+• Corners: [Over/Under + seuil]
+• Cartons: [Over/Under + seuil]
+
+✅ LE CHOIX DU PRO
+[2-3 marchés combinables, cotes indicatives]
+
+⚠️ Paris sportifs = risque. Jouer responsable.`,
+};
+
+async function generateMatchAnalysis(match: any, market: Market = "full"): Promise<string> {
   const apiKey = Deno.env.get("GROQ_API_KEY");
-  const home   = escapeHtml(match.team_home  || "?");
-  const away   = escapeHtml(match.team_away  || "?");
-  const league = escapeHtml(match.league || match.country || "Compétition");
+  const home   = match.team_home  || "?";
+  const away   = match.team_away  || "?";
+  const league = match.league || match.country || "Compétition";
   const pred   = match.prediction || "Non définie";
   const conf   = match.confidence ? `${match.confidence}%` : "N/A";
   const odds   = match.odds       ? `${match.odds}`        : "N/A";
-  const notes  = (match.notes || match.stats || "").toString().slice(0, 120);
+  const notes  = (match.notes || match.stats || "").toString().slice(0, 200);
   const date   = match.match_date
     ? new Date(match.match_date).toLocaleString("fr-FR", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" })
     : "";
+  const marketLabel = MARKET_LABELS[market];
 
   const fallback = [
-    `🔥 <b>PRÉDICTION EXPERT</b> — ${home} vs ${away}`,
-    `🏆 ${league}${date ? ` · ${date}` : ""}`,
-    ``,
+    `🔥 <b>PRÉDICTION EXPERT</b> — ${escapeHtml(home)} vs ${escapeHtml(away)}`,
+    `🏆 ${escapeHtml(league)}${date ? ` · ${date}` : ""}`,
+    `📌 Marché : ${marketLabel}`,``,
     `✅ <b>Le Choix du Pro :</b> ${escapeHtml(pred)}`,
     `📈 Cote : <b>${odds}</b> · Confiance : <b>${conf}</b>`,
     notes ? `📝 ${escapeHtml(notes)}` : "",
   ].filter(Boolean).join("\n");
 
   if (!apiKey) return fallback;
+  const maxTok = market === "full" ? 350 : 200;
   try {
     const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-      signal: AbortSignal.timeout(4000),
+      signal: AbortSignal.timeout(6000),
       body: JSON.stringify({
         model: "llama-3.1-8b-instant",
         messages: [
-          { role: "system", content: "Expert pronostics sportifs, concis, en français. Format STRICT:\n🔥 PRÉDICTION EXPERT - [Match]\n✅ Le Choix du Pro: [2-3 marchés séparés par ·]\n📊 Analyse: [1 phrase max]\n⚠️ Paris = risque, jouer responsable." },
-          { role: "user", content: `Match: ${match.team_home} vs ${match.team_away} | Ligue: ${match.league} | Prédiction: ${pred} | Cote: ${odds} | Confiance: ${conf} | Notes: ${notes}` },
+          {
+            role: "system",
+            content: `Tu es un analyste sportif expert en paris. Réponds en français avec le format demandé. MARCHÉ CIBLE: ${marketLabel}.\n\n${MARKET_PROMPTS[market]}`,
+          },
+          {
+            role: "user",
+            content: `Match: ${home} vs ${away} | Compétition: ${league}${date ? ` | Date: ${date}` : ""} | Prédiction base: ${pred} | Cote indicative: ${odds} | Confiance: ${conf} | Données supplémentaires: ${notes || "standard"}`,
+          },
         ],
-        max_tokens: 120,
-        temperature: 0.4,
+        max_tokens: maxTok,
+        temperature: 0.35,
       }),
     });
     const d = await res.json() as any;
     const aiText = d?.choices?.[0]?.message?.content?.trim();
-    if (aiText) return aiText + (date ? `\n\n🗓 <i>${date} · ${league}</i>` : `\n\n🏆 <i>${league}</i>`);
+    if (aiText) {
+      return aiText + `\n\n🗓 <i>${date ? date + " · " : ""}${escapeHtml(league)}</i>`;
+    }
   } catch (_) { /* fallback */ }
   return fallback;
 }
@@ -940,9 +1055,13 @@ async function sendCompetitionList(chatId: number, supabase: any) {
     callback_data: `comp:${l}`.slice(0, 64),
   }]);
 
+  buttons.push([{ text: "🔍 Chercher par équipe ou compétition", callback_data: "search_match" }]);
+
   await sendMessage(chatId, [
     `🏆 <b>Pronostics — Sélectionne une compétition</b>`,``,
     `${leagues.size} compétition${leagues.size > 1 ? "s" : ""} · ${rows.length} match${rows.length > 1 ? "s" : ""} disponible${rows.length > 1 ? "s" : ""}`,
+    ``,
+    `💡 <i>Clique sur une compétition ou utilise la recherche</i>`,
   ].join("\n"), { inline_keyboard: buttons });
 }
 
@@ -978,32 +1097,74 @@ async function sendMatchesList(chatId: number, league: string, supabase: any) {
   ].join("\n"), { inline_keyboard: buttons });
 }
 
+// Étape 1 : Afficher la sélection de marché
 async function sendMatchAnalysis(chatId: number, analysisId: string, supabase: any) {
-  await sendAction(chatId); // typing pendant génération Groq
-  const { data: match } = await supabase.from("analyses").select("*").eq("id", analysisId).maybeSingle();
+  const { data: match } = await supabase
+    .from("analyses")
+    .select("id, team_home, team_away, league, match_date, confidence")
+    .eq("id", analysisId).maybeSingle();
   if (!match) {
     await sendMessage(chatId, "❌ Analyse introuvable ou expirée.", {
       inline_keyboard: [[{ text: "◀ Menu compétitions", callback_data: "pronostics_menu" }]],
     });
     return;
   }
-  const analysisText = await generateMatchAnalysis(match);
-  const league = (match.league || "Compétition").slice(0, 58);
+  const home   = escapeHtml(match.team_home || "?");
+  const away   = escapeHtml(match.team_away || "?");
+  const league = escapeHtml((match.league || "Compétition").slice(0, 40));
+  const date   = match.match_date
+    ? new Date(match.match_date).toLocaleString("fr-FR", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" })
+    : "";
+  const conf   = match.confidence ? ` · ${match.confidence}% confiance` : "";
+  const id     = analysisId;
+
+  await sendMessage(chatId, [
+    `⚽ <b>${home} vs ${away}</b>`,
+    `🏆 ${league}${date ? ` · ${date}` : ""}${conf}`,``,
+    `<b>Sur quel marché porte ton analyse ?</b>`,
+    `<i>L'IA va adapter toute sa puissance de calcul au marché choisi.</i>`,
+  ].join("\n"), {
+    inline_keyboard: [
+      [{ text: "🏆 Vainqueur (1N2)",       callback_data: `mkt:${id}:win`     }],
+      [{ text: "⚽ Buts / Over-Under",      callback_data: `mkt:${id}:goals`   }],
+      [{ text: "🔢 Corners",               callback_data: `mkt:${id}:corners` }],
+      [{ text: "🟨 Cartons",               callback_data: `mkt:${id}:cards`   }],
+      [{ text: "📊 Analyse Totale (tous marchés)", callback_data: `mkt:${id}:full` }],
+      [{ text: "◀ Retour", callback_data: `comp:${(match.league || "Autres").slice(0,58)}` }],
+    ],
+  });
+}
+
+// Étape 2 : Générer et afficher l'analyse pour le marché choisi
+async function sendMarketAnalysis(chatId: number, analysisId: string, market: Market, supabase: any) {
+  await sendAction(chatId); // ⌨️ typing systématique pendant que Groq réfléchit
+
+  const { data: match } = await supabase.from("analyses").select("*").eq("id", analysisId).maybeSingle();
+  if (!match) {
+    await sendMessage(chatId, "❌ Analyse introuvable ou expirée.", {
+      inline_keyboard: [[{ text: "◀ Menu", callback_data: "pronostics_menu" }]],
+    });
+    return;
+  }
+
+  const analysisText = await generateMatchAnalysis(match, market);
+  const league       = (match.league || "Compétition").slice(0, 58);
+
   const { count } = await supabase
     .from("coupons_partages")
     .select("id", { count: "exact", head: true })
     .eq("analysis_id", analysisId);
   const couponsCount = (count as number) || 0;
 
-  const kb = {
+  await sendMessage(chatId, analysisText, {
     inline_keyboard: [
-      [{ text: "📤 Publier mon coupon ✅", callback_data: `pub_coupon:${analysisId}` }],
-      ...(couponsCount > 0 ? [[{ text: `👀 Voir les ${couponsCount} coupon${couponsCount > 1 ? "s" : ""} partagé${couponsCount > 1 ? "s" : ""}`, callback_data: `see_coupons:${analysisId}` }]] : []),
-      [{ text: `◀ Retour à ${escapeHtml(league)}`, callback_data: `comp:${league}` }],
-      [{ text: "🏠 Menu compétitions", callback_data: "pronostics_menu" }],
+      [{ text: "📤 Publier mon coupon ✅",   callback_data: `pub_coupon:${analysisId}` }],
+      ...(couponsCount > 0 ? [[{ text: `👀 ${couponsCount} coupon${couponsCount > 1 ? "s" : ""} partagé${couponsCount > 1 ? "s" : ""}`, callback_data: `see_coupons:${analysisId}` }]] : []),
+      [{ text: "🔄 Changer de marché",       callback_data: `mat:${analysisId}` }],
+      [{ text: `◀ ${escapeHtml(league)}`, callback_data: `comp:${league}` }],
+      [{ text: "🏠 Menu compétitions",       callback_data: "pronostics_menu" }],
     ],
-  };
-  await sendMessage(chatId, analysisText, kb);
+  });
 }
 
 // ─── Pool Commun helpers ─────────────────────────────────────────────────────
@@ -2471,6 +2632,31 @@ Deno.serve(async (req) => {
         const analysisId = data.slice(4);
         await answerCallback(cb.id);
         await sendMatchAnalysis(chatId, analysisId, supabase);
+        return;
+      }
+
+      // Sélection de marché → analyse sophistiquée
+      if (data.startsWith("mkt:")) {
+        // Format: mkt:{uuid}:{market}
+        const parts    = data.slice(4).split(":");
+        const market   = parts.pop() as Market;
+        const analysisId = parts.join(":");
+        await answerCallback(cb.id);
+        await sendMarketAnalysis(chatId, analysisId, market, supabase);
+        return;
+      }
+
+      // Recherche par texte libre
+      if (data === "search_match") {
+        await answerCallback(cb.id);
+        await setBotState(supabase, chatId, "awaiting_search", {});
+        await sendMessage(chatId, [
+          `🔍 <b>Recherche de match</b>`,``,
+          `Tape le nom d'une équipe ou d'une compétition :`,
+          `<i>Exemple : PSG · Barcelona · Ligue 1 · Premier League</i>`,
+        ].join("\n"), {
+          inline_keyboard: [[{ text: "❌ Annuler", callback_data: "pronostics_menu" }]],
+        });
         return;
       }
 
