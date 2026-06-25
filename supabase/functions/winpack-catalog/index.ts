@@ -1,4 +1,3 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
 // WINPACK — Catalogue interne (pays & services).
 // L'API du fournisseur de numéros n'est jamais exposée au client.
@@ -12,7 +11,7 @@ const corsHeaders = {
 // Pays mis en avant (IDs internes)
 const PINNED_IDS = new Set(["1", "2", "23", "55", "24", "79", "68", "22"]);
 
-serve(async (req) => {
+Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
     const apiKey = Deno.env.get("SMSPOOL_API_KEY");
