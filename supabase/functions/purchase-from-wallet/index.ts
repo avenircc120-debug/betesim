@@ -19,8 +19,7 @@
  * Le code de réception de paiement (FedaPay/MoMo) n'est pas touché.
  */
 
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "npm:@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -79,7 +78,7 @@ async function deliverValidNumber(service: string, apiKey: string, country: stri
   throw new Error(`Aucun numéro valide après ${MAX_ATTEMPTS} tentatives`);
 }
 
-serve(async (req) => {
+Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   try {
