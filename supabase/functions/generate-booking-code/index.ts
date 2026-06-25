@@ -8,7 +8,7 @@
  *  • list      — liste les derniers codes (admin)
  */
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "npm:@supabase/supabase-js@2";
 
 const OWNER_EMAIL = "jeremyhounmetin@gmail.com";
 const GROQ_URL    = "https://api.groq.com/openai/v1/chat/completions";
