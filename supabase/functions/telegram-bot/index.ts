@@ -372,6 +372,28 @@ async function handleFreeText(chatId: number, text: string, firstName: string, t
     }
   } catch (_wizErr) { /* ignore wizard errors, fall through to normal handling */ }
 
+  // ─── Intent : solde / dashboard → réponse directe sans passer par Groq ────
+  const dashWords = ["solde", "wallet", "dashboard", "tableau de bord", "combien", "gains", "commission", "argent", "montant", "balance", "mon compte", "mes stats", "revenus"];
+  if (dashWords.some(w => lower.includes(w))) {
+    const r = await getResellerProfile(supabase, chatId);
+    if (r) {
+      const w = await getWalletBalance(supabase, r.id);
+      const pubUrl = (await getBase(supabase)) + "/vendeur?tg=1";
+      await sendMessage(chatId, [
+        `💰 <b>Ton solde, ${escapeHtml(firstName)} :</b>`,
+        ``,
+        `📊 Gains totaux : <b>${w.total.toLocaleString("fr-FR")} FCFA</b>`,
+        `🎟 Coupons vendus : <b>${w.count}</b>`,
+      ].join("\n"), {
+        inline_keyboard: [
+          [{ text: "📊 Tableau de bord complet", callback_data: "dashboard_home" }],
+          [{ text: "➕ Publier un coupon", web_app: { url: pubUrl } }],
+        ],
+      });
+      return new Response("ok", { status: 200 });
+    }
+  }
+
   // Tout message libre → Groq IA — comportement identique texte et vocal
   await sendAction(chatId); // typing... immédiat
   const freeReseller = await getResellerProfile(supabase, chatId);
@@ -2092,13 +2114,33 @@ Deno.serve(async (req) => {
 
       // ── Pas de paramètre : accueil général ──────────────────────────────
       if (!param) {
-        const pUrl = await pronosticsUrl(supabase);
+        // Si revendeur connu → menu personnalisé avec Tableau de bord
+        const knownReseller = await getResellerProfile(supabase, chatId);
+        if (knownReseller) {
+          const pubUrl = (await getBase(supabase)) + "/vendeur?tg=1";
+          await sendMessage(chatId, [
+            `📊 <b>Bienvenue ${escapeHtml(knownReseller.full_name || firstName)} !</b>`,
+            ``,
+            `Que veux-tu faire ?`,
+          ].join("\n"), {
+            inline_keyboard: [
+              [{ text: "📊 Tableau de bord", callback_data: "dashboard_home" }],
+              [{ text: "➕ Publier un coupon", web_app: { url: pubUrl } }],
+              [{ text: "🎟 Voir les coupons disponibles", callback_data: "voir_pool" }],
+            ],
+          });
+          return;
+        }
+        // Visiteur inconnu → accueil générique
         await sendMessage(chatId, [
           `👋 <b>Bienvenue ${escapeHtml(firstName)} sur Pack Officiel !</b>`,
           ``,
           `🎯 Touche le bouton ci-dessous pour démarrer.`,
         ].join("\n"), {
-          inline_keyboard: [[{ text:"➕ Ajouter un coupon", callback_data:"pronostics_menu" }], [{ text:"🎟 Voir les coupons disponibles", callback_data:"voir_pool" }]],
+          inline_keyboard: [
+            [{ text: "➕ Ajouter un coupon", callback_data: "pronostics_menu" }],
+            [{ text: "🎟 Voir les coupons disponibles", callback_data: "voir_pool" }],
+          ],
         });
         return;
       }
