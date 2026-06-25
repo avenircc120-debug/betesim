@@ -250,12 +250,6 @@ async function handleFreeText(chatId: number, text: string, firstName: string, t
   if (handled) return;
 
   const lower = text.toLowerCase();
-  const proUrl = await pronosticsUrl(supabase);
-  const proKb = { inline_keyboard: [[{ text: "➕ Ajouter un coupon", callback_data: "pronostics_menu" }]] };
-
-  const greetKw = ["salut","bonjour","hello","hi","allo","allô","bonsoir","yo","slt","bjr","bj","coucou","cc","cv","ça va","ca va","wesh","bsr","bien","bien?","koi","quoi de neuf","quoi de 9"];
-  const openKw  = ["pronostic","prono","match","voir","logiciel","coupon","pack","ouvrir","start","analyse"];
-  const helpKw  = ["aide","help","?","comment","quoi","kess","kes ke","info"];
 
 
   // ─── Wizard state: revendeur en train d'entrer un code booking ─────────────
@@ -462,71 +456,12 @@ async function handleFreeText(chatId: number, text: string, firstName: string, t
     }
   } catch (_pubErr) { /* ignore, fall through */ }
 
-  const isGreet = greetKw.some(k => lower.includes(k));
-  const isOpen  = openKw.some(k => lower.includes(k));
-  const isHelp  = helpKw.some(k => lower.includes(k));
-
-  let reply: string;
-  let kb: unknown = proKb;
-
-  if (isGreet && !isOpen) {
-    kb = {
-      inline_keyboard: [
-        [{ text: "➕ Ajouter un coupon",          callback_data: "pronostics_menu" }],
-        [{ text: "🎟 Voir les coupons disponibles", callback_data: "voir_pool" }],
-        [{ text: "📋 Mon Dashboard Revendeur",      callback_data: "dashboard_home" }],
-      ],
-    };
-    reply = [
-      `👋 Salut <b>${escapeHtml(firstName)}</b> !`,
-      ``,
-      `Que veux-tu faire ?`,
-    ].join("\n");
-  } else if (isOpen) {
-    reply = [
-      `📊 <b>Tes pronostics t'attendent, ${escapeHtml(firstName)} !</b>`,
-      ``,
-      `Appuie sur le bouton ci-dessous 👇`,
-    ].join("\n");
-  } else if (isHelp) {
-    reply = [
-      `🤖 <b>Voici ce que je peux faire pour toi :</b>`,
-      ``,
-      `🛡️ <b>Vérifier ton 2FA</b> → "Mon 2FA est activé ?"`,
-      `📋 <b>Voir ton statut</b> → "Quel est mon statut ?"`,
-      `💰 <b>Voir ton solde</b> → "C'est quoi mon solde ?"`,
-      ``,
-      `📊 <b>Commandes rapides :</b>`,
-      `• /start — Démarrer le parcours`,
-      `• /app — Ouvrir les pronostics`,
-    ].join("\n");
-  } else {
-    // Message non reconnu → guide simple
-    // ── Groq IA fallback ─────────────────────────────────────────────
-    await sendAction(chatId); // typing immédiat pendant que Groq réfléchit
-    const freeReseller = await getResellerProfile(supabase, chatId);
-    const freeRole: "client" | "revendeur" | "unknown" = freeReseller?.is_partner ? "revendeur" : (freeReseller ? "client" : "unknown");
-    const groqReply = await askGroq(text, firstName, freeRole);
-    if (groqReply) {
-      await sendMessage(chatId, groqReply, {
-        inline_keyboard: [
-          [{ text: "🎟 Voir les coupons disponibles", callback_data: "voir_pool" }, { text: "➕ Ajouter un coupon", callback_data: "pronostics_menu" }],
-        ],
-      });
-      return new Response("ok", { status: 200 });
-    }
-    kb = {
-      inline_keyboard: [
-        [{ text: "➕ Ajouter un coupon",          callback_data: "pronostics_menu" }],
-        [{ text: "🎟 Voir les coupons disponibles", callback_data: "voir_pool" }],
-      ],
-    };
-    reply = [`👇 Choisis une option :`].join("\n");
-  }
-
-  await sendAction(chatId);
-  await sleep(DELAY_SHORT);
-  await sendMessage(chatId, reply, kb);
+  // Tout message libre → Groq IA — comportement identique texte et vocal
+  await sendAction(chatId); // typing... immédiat
+  const freeReseller = await getResellerProfile(supabase, chatId);
+  const freeRole: "client" | "revendeur" | "unknown" = freeReseller?.is_partner ? "revendeur" : (freeReseller ? "client" : "unknown");
+  const groqReply = await askGroq(text, firstName, freeRole);
+  await sendMessage(chatId, groqReply || "Je n'ai pas bien saisi, pouvez-vous reformuler ? 😊");
 }
 
 // ─── Flow /start ─────────────────────────────────────────────────────────────
@@ -885,7 +820,12 @@ Infos plateforme :
 - Paiement : Mobile Money (Orange Money, Wave, MTN, Moov)
 - Commission revendeur créditée dès la publication du coupon
 
-Style : familier, amical, en français, avec emojis. Max 3 phrases. Ne donne jamais de fausses informations.`;
+RÈGLES ABSOLUES :
+1. Réponds TOUJOURS en phrase naturelle, courte et directe (max 3 phrases).
+2. Salutation (bonjour, cc, salut, ça va, allô...) → réponds chaleureusement et demande comment tu peux aider.
+3. Demande vague, hors-sujet ou incompréhensible → réponds EXACTEMENT : "Je n'ai pas bien saisi, pouvez-vous reformuler ? 😊"
+4. Corrige mentalement les erreurs de prononciation ou de transcription vocale avant de répondre.
+5. Jamais de liste de commandes. Jamais de fausses informations. Style : amical, 1-2 emojis max, en français.`;
 
 function buildGroqSystem(role: "client" | "revendeur" | "unknown"): string {
   const roleCtx =
@@ -2996,54 +2936,24 @@ Deno.serve(async (req) => {
       const firstName = update.message!.from?.first_name || "ami";
       const fileId    = (update.message?.voice ?? update.message?.audio)?.file_id;
 
-      await sendAction(chatId); // "en train d'écrire..." immédiat
+      await sendAction(chatId); // typing... immédiat
 
       if (!fileId) {
-        await sendMessage(chatId, "⚠️ Impossible de lire ce fichier audio. Envoie un message vocal.");
-        return new Response("ok", { status: 200 });
+        await sendMessage(chatId, "Je n'ai pas pu lire ce fichier audio. Essaie d'envoyer un message vocal directement. 🎤");
+        return;
       }
 
-      // Détecter le rôle de l'utilisateur
-      const voiceReseller = await getResellerProfile(supabase, chatId);
-      const voiceRole: "client" | "revendeur" | "unknown" = voiceReseller?.is_partner ? "revendeur" : "unknown";
-
-      // Transcrire le vocal
       const transcribed = await transcribeAudio(fileId);
       if (!transcribed) {
-        await logBotEvent("warn", "voice_transcription_fail", chatId, "Whisper n'a pas pu transcrire le vocal", { fileId, tgUserId, role: voiceRole });
-        await sendMessage(chatId, [
-          "🎤 Message vocal reçu !",
-          "",
-          "❌ Je n'ai pas pu transcrire ton message. Parle clairement ou écris directement.",
-          "",
-          voiceRole === "revendeur"
-            ? "💡 Revendeur : tape /pro pour ton dashboard ou envoie ton code coupon."
-            : "💡 Client : tape /coupons pour voir les coupons disponibles.",
-        ].join("\n"), {
-          inline_keyboard: voiceRole === "revendeur"
-            ? [[{ text: "📊 Mon Dashboard", callback_data: "dashboard_home" }], [{ text: "➕ Ajouter un coupon", callback_data: "pronostics_menu" }]]
-            : [[{ text: "🎟 Voir les coupons", callback_data: "voir_pool" }]],
-        });
-        return new Response("ok", { status: 200 });
+        await logBotEvent("warn", "voice_transcription_fail", chatId, "Whisper n'a pas pu transcrire le vocal", { fileId, tgUserId });
+        await sendMessage(chatId, "Je n'ai pas bien saisi ton message vocal. Parle un peu plus clairement ou envoie un message écrit. 😊");
+        return;
       }
 
-      // Message de confirmation de transcription + réponse IA
-      await logBotEvent("info", "voice_transcription_ok", chatId, transcribed.slice(0, 300), { role: voiceRole, tgUserId });
-      await sendAction(chatId);
-      const voiceGroqReply = await askGroq(transcribed, firstName, voiceRole);
-
-      const transcriptMsg = [
-        `🎤 <i>Vocal transcrit :</i> "${escapeHtml(transcribed)}"`,
-        "",
-        voiceGroqReply || "👆 Utilise les boutons pour naviguer.",
-      ].join("\n");
-
-      await sendMessage(chatId, transcriptMsg, {
-        inline_keyboard: voiceRole === "revendeur"
-          ? [[{ text: "➕ Ajouter un coupon", callback_data: "pronostics_menu" }, { text: "📊 Dashboard", callback_data: "dashboard_home" }]]
-          : [[{ text: "🎟 Voir les coupons", callback_data: "voir_pool" }, { text: "🏆 Analyses", callback_data: "pronostics_menu" }]],
-      });
-      return new Response("ok", { status: 200 });
+      await logBotEvent("info", "voice_transcription_ok", chatId, transcribed.slice(0, 300), { tgUserId });
+      // Traitement exactement identique à un message texte — invisible pour l'utilisateur
+      await handleFreeText(chatId, transcribed, firstName, tgUserId, supabase);
+      return;
     }
 
         if (update.message?.text && !update.message.text.startsWith("/")) {
