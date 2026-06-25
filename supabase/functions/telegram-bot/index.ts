@@ -910,6 +910,32 @@ Tu ne sais pas encore si c'est un client ou un revendeur. Propose les deux optio
   return GROQ_SYSTEM_BASE + roleCtx;
 }
 
+// ─── Logging persistant vers bot_logs ─────────────────────────────────────────
+async function logBotEvent(
+  level: "error" | "warn" | "info",
+  event: string,
+  chatId: number | null,
+  message: string,
+  details?: Record<string, unknown>,
+): Promise<void> {
+  try {
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const serviceKey  = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    if (!supabaseUrl || !serviceKey) return;
+    await fetch(`${supabaseUrl}/rest/v1/bot_logs`, {
+      method:  "POST",
+      headers: {
+        "Content-Type":  "application/json",
+        "apikey":        serviceKey,
+        "Authorization": `Bearer ${serviceKey}`,
+        "Prefer":        "return=minimal",
+      },
+      body: JSON.stringify({ level, event, chat_id: chatId, message, details: details ?? null }),
+      signal: AbortSignal.timeout(3000),
+    });
+  } catch { /* ne jamais crasher le bot pour un log */ }
+}
+
 async function askGroq(
   userMessage: string,
   firstName: string,
@@ -934,8 +960,9 @@ async function askGroq(
     });
     const data = await res.json() as any;
     return data?.choices?.[0]?.message?.content?.trim() ?? null;
-  } catch (e) {
+  } catch (e: any) {
     console.error("Groq timeout/error:", e);
+    void logBotEvent("error", "groq_error", null, e?.message ?? String(e), { model: "llama-3.1-8b-instant" });
     return null;
   }
 }
@@ -970,13 +997,16 @@ async function transcribeAudio(fileId: string): Promise<string | null> {
       signal: AbortSignal.timeout(15000),
     });
     if (!whisperRes.ok) {
-      console.error("Whisper error:", await whisperRes.text());
+      const errText = await whisperRes.text();
+      console.error("Whisper error:", errText);
+      void logBotEvent("error", "whisper_api_error", null, `Whisper HTTP ${whisperRes.status}`, { body: errText.slice(0, 300), fileId });
       return null;
     }
     const transcribed = (await whisperRes.text()).trim();
     return transcribed || null;
-  } catch (e) {
+  } catch (e: any) {
     console.error("transcribeAudio error:", e);
+    void logBotEvent("error", "whisper_error", null, e?.message ?? String(e), { fileId });
     return null;
   }
 }
@@ -2980,6 +3010,7 @@ Deno.serve(async (req) => {
       // Transcrire le vocal
       const transcribed = await transcribeAudio(fileId);
       if (!transcribed) {
+        await logBotEvent("warn", "voice_transcription_fail", chatId, "Whisper n'a pas pu transcrire le vocal", { fileId, tgUserId, role: voiceRole });
         await sendMessage(chatId, [
           "🎤 Message vocal reçu !",
           "",
@@ -2997,6 +3028,7 @@ Deno.serve(async (req) => {
       }
 
       // Message de confirmation de transcription + réponse IA
+      await logBotEvent("info", "voice_transcription_ok", chatId, transcribed.slice(0, 300), { role: voiceRole, tgUserId });
       await sendAction(chatId);
       const voiceGroqReply = await askGroq(transcribed, firstName, voiceRole);
 
@@ -3099,6 +3131,10 @@ Deno.serve(async (req) => {
     console.error("[telegram-bot] Erreur fatale non rattrapée:", {
       message: err?.message ?? String(err),
       stack: err?.stack?.slice(0, 800) ?? "(pas de stack)",
+      time: new Date().toISOString(),
+    });
+    await logBotEvent("error", "fatal_error", null, err?.message ?? String(err), {
+      stack: err?.stack?.slice(0, 500) ?? null,
       time: new Date().toISOString(),
     });
   }
