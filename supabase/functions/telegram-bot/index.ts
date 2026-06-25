@@ -340,7 +340,7 @@ async function handleFreeText(chatId: number, text: string, firstName: string, t
       const price = conf >= 90 ? 3000 : conf >= 80 ? 2000 : 1500;
       const { data: newCoupon, error } = await supabase.from("coupons").insert({
         code, label: analysis ? `${(analysis as any).team_home} vs ${(analysis as any).team_away}` : "Coupon",
-        price_fcfa: price, platform, status: "active", creator_id: reseller_id, analysis_id,
+        price_fcfa: price, platform, status: "active", partner_id: reseller_id, creator_id: reseller_id, analysis_id,
       }).select("id").single();
       await clearBotState(supabase, chatId);
       if (error || !newCoupon) {
@@ -502,9 +502,11 @@ async function handleFreeText(chatId: number, text: string, firstName: string, t
     ].join("\n");
   } else {
     // Message non reconnu → guide simple
-    // ── Groq IA fallback ─────���──────────────────────────────────────
+    // ── Groq IA fallback ─────────────────────────────────────────────
     await sendAction(chatId); // typing immédiat pendant que Groq réfléchit
-    const groqReply = await askGroq(text, firstName);
+    const freeReseller = await getResellerProfile(supabase, chatId);
+    const freeRole: "client" | "revendeur" | "unknown" = freeReseller?.is_partner ? "revendeur" : (freeReseller ? "client" : "unknown");
+    const groqReply = await askGroq(text, firstName, freeRole);
     if (groqReply) {
       await sendMessage(chatId, groqReply, {
         inline_keyboard: [
@@ -873,32 +875,6 @@ async function getWalletBalance(supabase: any, partnerId: string): Promise<{ tot
   return { total, count: (data ?? []).length };
 }
 
-
-// ─── Groq AI helper ──────────────────────────────────────────────────────────
-
-const GROQ_SYSTEM = `Tu es l'assistant IA du bot Telegram "Pack Officiel" de betesim — une plateforme de pronostics sportifs en Afrique.
-
-Rôle :
-- Aider les clients à acheter des codes coupons de paris sportifs (1xBet et 1Win)
-- Guider les revendeurs dans la publication et gestion de leurs coupons
-- Répondre aux questions sur la plateforme
-
-Commandes disponibles :
-- /coupons → voir les coupons disponibles à acheter
-- /dashboard → tableau de bord revendeur (wallet + analyses)
-- /wallet → solde et commissions
-- /analyses → analyses à traiter (revendeurs)
-- /connect {uid} → lier son compte revendeur au bot
-- /relancer → notifier les revendeurs (admin uniquement)
-
-Infos plateforme :
-- Les clients achètent des codes booking pour des matchs sportifs
-- Prix : 1500 à 3000 FCFA selon la confiance de l'analyse
-- Paiement par Mobile Money (Orange Money, Wave, MTN)
-- Le code est partiel avant paiement, complet après confirmation admin
-- Commission revendeur : 70% · Parrain : 10% · Plateforme : 20%
-
-Style : familier, amical, en français, emojis. Max 3 phrases sauf besoin d'explication. Ne donne jamais de codes ou d'informations fausses. Si tu ne sais pas, dis-le honnêtement.`;
 
 // ─── Groq : Prompt système avec détection de rôle ────────────────────────────
 const GROQ_SYSTEM_BASE = `Tu es l'assistant IA du bot Telegram "Pack Officiel" de betesim — une plateforme de pronostics sportifs en Afrique de l'Ouest.
@@ -2685,6 +2661,7 @@ Deno.serve(async (req) => {
           price_fcfa:       price,
           match_start_time: match_start,
           status:           "active",
+          partner_id:       (reseller as any).id,
           creator_id:       (reseller as any).id,
           label:            `Coupon ${odds}x — ${codes.length} code${codes.length>1?"s":""}`,
         }).select("id").single();
