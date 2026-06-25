@@ -355,7 +355,7 @@ async function handleFreeText(chatId: number, text: string, firstName: string, t
         "Ton coupon est maintenant visible dans le catalogue.",
       ].join("\n"), {
         inline_keyboard: [
-          [{ text: "📋 Voir d'autres analyses", callback_data: "show_analyses" }],
+          [{ text: "➕ Ajouter un coupon",       callback_data: "pronostics_menu" }],
           [{ text: "📊 Dashboard", callback_data: "dashboard_home" }],
         ],
       }, DELAY_SHORT);
@@ -1798,7 +1798,7 @@ Deno.serve(async (req) => {
       if (!analyses.length) {
         await sendMessage(chatId,
           `🔍 Aucun résultat pour "<b>${escapeHtml(term)}</b>"\n\nEssaie un autre terme ou consulte toutes les analyses.`,
-          { inline_keyboard: [[{ text: "📋 Toutes les analyses", callback_data: "show_analyses" }]] }
+          { inline_keyboard: [[{ text: "➕ Ajouter un coupon", callback_data: "pronostics_menu" }]] }
         );
         return;
       }
@@ -1886,7 +1886,7 @@ Deno.serve(async (req) => {
           `👇 Crée tes coupons dès maintenant :`,
         ].join("\n"), {
           inline_keyboard: [
-            [{ text: "📋 Voir les analyses", callback_data: "show_analyses" }],
+            [{ text: "➕ Ajouter un coupon", callback_data: "pronostics_menu" }],
             [{ text: "📊 Mon Dashboard", callback_data: "dashboard_home" }],
           ],
         });
@@ -1919,7 +1919,7 @@ Deno.serve(async (req) => {
           ...(data.errors?.length ? [`\n⚠️ ${data.errors.length} erreur(s) : ${data.errors.join(", ")}`] : []),
         ];
         await sendMessage(chatId, lines.join("\n"), {
-          inline_keyboard: [[{ text: "📊 Voir les Analyses", callback_data: "show_analyses" }]],
+          inline_keyboard: [[{ text: "➕ Ajouter un coupon", callback_data: "pronostics_menu" }]],
         });
       } catch (err: any) {
         await sendMessage(chatId, `❌ Échec : ${err?.message ?? "erreur inconnue"}`);
@@ -2442,7 +2442,7 @@ Deno.serve(async (req) => {
           await answerCallback(update.callback_query!.id);
           await sendMessage(chatId,
             "🔍 <b>Recherche d'analyses</b>\n\nTape ta recherche :\n<code>/rechercher Bayern</code>\n<code>/rechercher CAN</code>\n<code>/rechercher Champions League</code>\n<code>/rechercher France</code>\n\nTu peux chercher par équipe, compétition ou pays.",
-            { inline_keyboard: [[{ text: "📋 Toutes les analyses", callback_data: "show_analyses" }, { text: "◀ Dashboard", callback_data: "dashboard_home" }]] }
+            { inline_keyboard: [[{ text: "➕ Ajouter un coupon",   callback_data: "pronostics_menu" }, { text: "◀ Dashboard", callback_data: "dashboard_home" }]] }
           );
           return;
         }
@@ -2545,7 +2545,7 @@ Deno.serve(async (req) => {
           `Maintenant, <b>entre ton code booking</b> ${platform.toUpperCase()} :`,
           `<i>(ex: ABC123456 — copie-colle depuis l'appli)</i>`,
         ].join("\n"), {
-          inline_keyboard: [[{ text: "❌ Annuler", callback_data: "show_analyses" }]],
+          inline_keyboard: [[{ text: "❌ Annuler", callback_data: "pronostics_menu" }]],
         });
         return;
       }
@@ -2659,7 +2659,7 @@ Deno.serve(async (req) => {
         await answerCallback(cb.id);
         await sendHuman(chatId, "🏠 <b>Menu principal</b>\n\nChoisis une section :", {
           inline_keyboard: [
-            [{ text: "📊 Analyses du jour", callback_data: "show_analyses" }],
+            [{ text: "➕ Ajouter un coupon", callback_data: "pronostics_menu" }],
             [{ text: "📋 Mon Dashboard",    callback_data: "dashboard_home" }],
           ],
         }, DELAY_SHORT);
@@ -2826,22 +2826,39 @@ Deno.serve(async (req) => {
       }
 
       if (data.startsWith("pub_coupon:")) {
-        const analysisId = data.slice(11);
+        const eventId = data.slice(11);
         await answerCallback(cb.id);
-        const { data: match } = await supabase
-          .from("analyses").select("team_home, team_away, league").eq("id", analysisId).maybeSingle();
-        const matchLabel = match ? `${match.team_home} vs ${match.team_away}` : "Match";
-        const lg = (match?.league || "Compétition").slice(0, 58);
-        await setBotState(supabase, chatId, "awaiting_coupon_partage", {
-          analysis_id: analysisId, match_label: matchLabel, league: lg,
-        });
+
+        // Récupérer le nom du match pour l'affichage
+        let matchLabel = "Match sélectionné";
+        const isUUIDev = eventId.includes("-");
+        if (isUUIDev) {
+          const { data: m } = await supabase.from("analyses")
+            .select("team_home, team_away").eq("id", eventId).maybeSingle();
+          if (m) matchLabel = `${(m as any).team_home} vs ${(m as any).team_away}`;
+        } else {
+          const ev = await fetchEventById(eventId);
+          if (ev) matchLabel = `${ev.strHomeTeam} vs ${ev.strAwayTeam}`;
+        }
+
+        // URL de la page web de saisie du coupon
+        const base = await getBase(supabase);
+        const webUrl = `${base}/publier-coupon?event_id=${encodeURIComponent(eventId)}&from_tg=1`;
+
         await sendMessage(chatId, [
-          `📤 <b>Publication de coupon</b>`,``,
-          `🎯 Match : <b>${escapeHtml(matchLabel)}</b>`,``,
-          `Copie et colle ici ton code coupon <b>OneWin / 1xBet</b> :`,``,
-          `<i>Exemple : ABC123456 ou 1WIN-XYZ99</i>`,
+          "📤 <b>Publier mon coupon</b>", "",
+          `⚽ Match : <b>${escapeHtml(matchLabel)}</b>`, "",
+          "Appuie sur le bouton ci-dessous pour saisir ton code coupon 1Win, ta cote et l'heure du match.", "",
+          "💡 <b>Gains automatiques selon ta cote :</b>",
+          "• Cote 1.00 – 5.50 → <b>250 FCFA</b>",
+          "• Cote 5.51 – 16   → <b>500 FCFA</b>",
+          "• Cote > 16        → <b>1 000 FCFA</b>", "",
+          "💰 Crédité dès que tu soumets le formulaire !",
         ].join("\n"), {
-          inline_keyboard: [[{ text: "❌ Annuler", callback_data: `mat:${analysisId}` }]],
+          inline_keyboard: [
+            [{ text: "📝 Saisir mon coupon 1Win", web_app: { url: webUrl } }],
+            [{ text: "◀ Retour à l'analyse",       callback_data: `mat:${eventId}` }],
+          ],
         });
         return;
       }
