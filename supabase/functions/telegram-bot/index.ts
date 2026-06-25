@@ -55,6 +55,26 @@ async function sendHuman(chatId: number, text: string, kb?: unknown, delay = DEL
   // Réponse instantanée — typing indicator et sleep supprimés
   return sendMessage(chatId, text, kb);
 }
+// ─── Menu de navigation universel ────────────────────────────────────────────
+const NAV_KEYBOARD = (extra = []) => ({
+  inline_keyboard: [
+    ...extra,
+    [
+      { text: "🔄 Actualiser",         callback_data: "refresh_last"   },
+      { text: "📊 Dashboard",           callback_data: "dashboard_home" },
+    ],
+    [
+      { text: "🚀 Publier mon coupon", callback_data: "pronostics_menu" },
+      { text: "🎟 Pool coupons",       callback_data: "voir_pool"       },
+    ],
+  ],
+});
+
+/** Envoie un message avec le menu de navigation universel en bas. */
+const sendWithMenu = (chatId, text, extraButtons = []) =>
+  sendMessage(chatId, text, NAV_KEYBOARD(extraButtons));
+
+
 
 function escapeHtml(s: string) {
   return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
@@ -321,18 +341,16 @@ async function handleFreeText(chatId: number, text: string, firstName: string, t
         .select("id", { count: "exact", head: true })
         .eq("analysis_id", analysis_id);
       const total = (count as number) || 1;
-      await sendMessage(chatId, [
+      await sendWithMenu(chatId, [
         `✅ <b>Coupon publié avec succès ! 🔥</b>`,``,
         `🎟 Code <code>${escapeHtml(code)}</code> ajouté à la liste communautaire.`,
         `👥 ${total} revendeur${total > 1 ? "s" : ""} ont partagé un coupon pour ce match.`,
         ``,
         `Merci pour ta contribution !`,
-      ].join("\n"), {
-        inline_keyboard: [
-          [{ text: "🏆 Voir d'autres analyses", callback_data: "pronostics_menu" }],
-          [{ text: `👀 Voir les coupons de ce match`, callback_data: `see_coupons:${analysis_id}` }],
-        ],
-      });
+      ].join("\n"), [
+        [{ text: "🏆 Voir d'autres analyses", callback_data: "pronostics_menu" }],
+        [{ text: `👀 Voir les coupons de ce match`, callback_data: `see_coupons:${analysis_id}` }],
+      ]);
       return new Response("ok", { status: 200 });
     }
 
@@ -353,21 +371,18 @@ async function handleFreeText(chatId: number, text: string, firstName: string, t
       }).select("id").single();
       await clearBotState(supabase, chatId);
       if (error || !newCoupon) {
-        await sendHuman(chatId, `❌ Erreur création. Réessaie ou publie depuis le site.\n<code>${error?.message || "unknown"}</code>`, undefined, DELAY_SHORT);
+        await sendWithMenu(chatId, `❌ Erreur création. Réessaie ou publie depuis le site.\n<code>${error?.message || "unknown"}</code>`);
         return new Response("ok", { status: 200 });
       }
-      await sendHuman(chatId, [
+      await sendWithMenu(chatId, [
         `🎉 <b>Coupon publié dans le Pool Commun !</b>`, ``,
         `🎟 Code : <code>${code}</code>`,
         `💰 Prix : <b>${price.toLocaleString("fr-FR")} FCFA</b>`,
         `📲 Plateforme : <b>${platform.toUpperCase()}</b>`, ``,
         "Ton coupon est maintenant visible dans le catalogue.",
-      ].join("\n"), {
-        inline_keyboard: [
-          [{ text: "➕ Ajouter un coupon",       callback_data: "pronostics_menu" }],
-          [{ text: "📊 Dashboard", callback_data: "dashboard_home" }],
-        ],
-      }, DELAY_SHORT);
+      ].join("\n"), [
+        [{ text: "➕ Ajouter un coupon",  callback_data: "pronostics_menu" }],
+      ]);
       return new Response("ok", { status: 200 });
     }
   } catch (_wizErr) { /* ignore wizard errors, fall through to normal handling */ }
@@ -379,17 +394,15 @@ async function handleFreeText(chatId: number, text: string, firstName: string, t
     if (r) {
       const w = await getWalletBalance(supabase, r.id);
       const pubUrl = (await getBase(supabase)) + "/vendeur?tg=1";
-      await sendMessage(chatId, [
+      await sendWithMenu(chatId, [
         `💰 <b>Ton solde, ${escapeHtml(firstName)} :</b>`,
         ``,
         `📊 Gains totaux : <b>${w.total.toLocaleString("fr-FR")} FCFA</b>`,
         `🎟 Coupons vendus : <b>${w.count}</b>`,
-      ].join("\n"), {
-        inline_keyboard: [
-          [{ text: "📊 Tableau de bord complet", callback_data: "dashboard_home" }],
-          [{ text: "➕ Publier un coupon", web_app: { url: pubUrl } }],
-        ],
-      });
+      ].join("\n"), [
+        [{ text: "📊 Tableau de bord complet", callback_data: "dashboard_home" }],
+        [{ text: "➕ Publier un coupon", web_app: { url: pubUrl } }],
+      ]);
       return new Response("ok", { status: 200 });
     }
   }
@@ -399,7 +412,17 @@ async function handleFreeText(chatId: number, text: string, firstName: string, t
   const freeReseller = await getResellerProfile(supabase, chatId);
   const freeRole: "client" | "revendeur" | "unknown" = freeReseller?.is_partner ? "revendeur" : (freeReseller ? "client" : "unknown");
   const groqReply = await askGroq(text, firstName, freeRole);
-  await sendMessage(chatId, groqReply || "Je n'ai pas bien compris, peux-tu reformuler ? Tu peux aussi utiliser les boutons ci-dessous. 😊");
+
+  // Boutons contextuels selon le rôle
+  const contextBtns = freeRole === "revendeur" ? [
+    [{ text: "💰 Mon Wallet", callback_data: "wallet_detail" }, { text: "🎫 Mes coupons", callback_data: "my_coupons" }],
+  ] : [];
+
+  await sendWithMenu(
+    chatId,
+    groqReply || "Je n'ai pas bien compris, peux-tu reformuler ? 😊",
+    contextBtns,
+  );
 }
 
 // ─── Flow /start ─────────────────────────────────────────────────────────────
@@ -2393,7 +2416,34 @@ Deno.serve(async (req) => {
         return;
       }
 
-      // ── Dashboard home ────────────────────────────────────────────────────
+      // ── Actualiser (menu universel) ──────────────────────────────────────
+      if (data === "refresh_last") {
+        await answerCallback(cb.id, "🔄 Actualisation...");
+        const r = await getResellerProfile(supabase, chatId);
+        if (r) {
+          const w = await getWalletBalance(supabase, r.id);
+          const { data: activeCoupons } = await supabase.from("coupons").select("id,status").eq("creator_id", r.id);
+          const active = (activeCoupons ?? []).filter((c) => c.status === "active").length;
+          const sold   = (activeCoupons ?? []).filter((c) => c.status === "sold").length;
+          await sendWithMenu(chatId, [
+            `📊 <b>Dashboard — ${escapeHtml(r.full_name || "Revendeur")}</b>`,
+            ``,
+            `━━━━━━━━━━━━━━━━━━━━━━━━`,
+            `💰 Gains : <b>${w.total.toLocaleString("fr-FR")} FCFA</b> (${w.count} vente${w.count > 1 ? "s" : ""})`,
+            `🎟 Actifs : <b>${active}</b> · Vendus : <b>${sold}</b>`,
+            `━━━━━━━━━━━━━━━━━━━━━━━━`,
+            `✅ Données à jour — ${new Date().toLocaleTimeString("fr-FR", {hour:"2-digit",minute:"2-digit"})}`,
+          ].join("\n"), [
+            [{ text: "💰 Wallet",       callback_data: "wallet_detail" },
+             { text: "🎫 Mes coupons",  callback_data: "my_coupons" }],
+          ]);
+        } else {
+          await sendWithMenu(chatId, "🔄 Actualisation complète. Tape /start pour accéder à ton espace.");
+        }
+        return;
+      }
+
+            // ── Dashboard home ────────────────────────────────────────────────────
       if (data === "dashboard_home" || data === "wallet_detail" || data === "show_analyses" || data === "my_coupons") {
         let reseller = await getResellerProfile(supabase, chatId);
         await answerCallback(cb.id);
