@@ -224,6 +224,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     price_fcfa:       gain,
     match_start_time: matchStart,
     status:           "active",
+    partner_id:       reseller.id,
     creator_id:       reseller.id,
     label:            `Coupon ${oddsNum}x — 1Win`,
     ...(isUUID ? { analysis_id: event_id } : {}),
