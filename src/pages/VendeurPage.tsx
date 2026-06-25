@@ -3,7 +3,7 @@ import {
   Wallet, TrendingUp, Tag, Banknote, RefreshCw,
   Phone, CheckCircle, XCircle, Loader2, ChevronRight,
   Clock, AlertCircle, ArrowRight, ShoppingCart, BarChart2,
-  Edit2, Check, X, Coins
+  Edit2, Check, X, Coins, PlusCircle, Send
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -62,7 +62,7 @@ const VendeurPage = () => {
   const { user, requireAuth } = useAuth();
   const { data: profile } = useProfile();
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState<"wallet" | "coupons" | "retrait">("wallet");
+  const [activeTab, setActiveTab] = useState<"wallet" | "coupons" | "retrait" | "publier">("wallet");
 
   // Retrait state
   const [amount, setAmount] = useState("");
@@ -71,6 +71,14 @@ const VendeurPage = () => {
   const [step, setStep] = useState<WithdrawStep>("form");
   const [errorMsg, setErrorMsg] = useState("");
   const [editingCoupon, setEditingCoupon] = useState<{ id: string; price: string } | null>(null);
+
+  // Publish coupon state
+  const [pubCode, setPubCode] = useState("");
+  const [pubOdds, setPubOdds] = useState("");
+  const [pubTemps, setPubTemps] = useState("");
+  const [pubStep, setPubStep] = useState<"form" | "success" | "error">("form");
+  const [pubError, setPubError] = useState("");
+  const [pubResult, setPubResult] = useState<{ gain: number; balance: number } | null>(null);
 
   const getToken = async () => {
     const { data } = await supabase.auth.getSession();
@@ -198,6 +206,28 @@ const VendeurPage = () => {
     onError: (e: any) => { setErrorMsg(e.message); setStep("error"); },
   });
 
+  const publishMutation = useMutation({
+    mutationFn: async () => {
+      if (!pubCode.trim() || pubCode.trim().length < 4) throw new Error("Code coupon invalide (min. 4 caractères)");
+      const oddsNum = parseFloat(pubOdds.replace(",", "."));
+      if (isNaN(oddsNum) || oddsNum < 1.01) throw new Error("Cote invalide (ex: 4.50)");
+      const token = await getToken();
+      const { data, error } = await supabase.functions.invoke("submit-coupon", {
+        body: { code: pubCode.trim().toUpperCase(), odds: oddsNum, temps: pubTemps.trim() || undefined },
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (error || !data?.success) throw new Error(data?.error || error?.message || "Erreur inconnue");
+      return data as { gain_credited: number; new_balance: number };
+    },
+    onSuccess: (data) => {
+      setPubResult({ gain: data.gain_credited, balance: data.new_balance });
+      setPubStep("success");
+      queryClient.invalidateQueries({ queryKey: ["seller-balance"] });
+      queryClient.invalidateQueries({ queryKey: ["seller-coupons"] });
+    },
+    onError: (e: any) => { setPubError(e.message); setPubStep("error"); },
+  });
+
   if (!user || !(profile as any)?.is_partner) {
     return (
       <div className="min-h-screen bg-background flex flex-col items-center justify-center p-6 text-center">
@@ -218,6 +248,7 @@ const VendeurPage = () => {
   const TABS = [
     { id: "wallet",  label: "Wallet",   icon: Wallet },
     { id: "coupons", label: "Coupons",  icon: Tag },
+    { id: "publier", label: "Publier",  icon: PlusCircle },
     { id: "retrait", label: "Retrait",  icon: Banknote },
   ] as const;
 
@@ -419,6 +450,114 @@ const VendeurPage = () => {
                   </div>
                 );
               })}
+            </motion.div>
+          )}
+
+          {/* ── PUBLIER TAB ─────────────────────────────────────────────── */}
+          {activeTab === "publier" && (
+            <motion.div key="publier" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="space-y-4">
+              <AnimatePresence mode="wait">
+                {pubStep === "success" && pubResult ? (
+                  <motion.div key="pub-success" initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="text-center py-10">
+                    <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                      <CheckCircle className="h-8 w-8 text-green-600" />
+                    </div>
+                    <h3 className="font-bold text-lg">Coupon publié !</h3>
+                    <p className="text-sm text-muted-foreground mt-2">
+                      <span className="font-bold text-green-600">+{pubResult.gain.toLocaleString("fr-FR")} FCFA</span> crédités sur ton wallet
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-1">Solde : {pubResult.balance.toLocaleString("fr-FR")} FCFA</p>
+                    <div className="flex gap-2 mt-6 justify-center">
+                      <Button className="rounded-2xl" onClick={() => { setPubStep("form"); setPubCode(""); setPubOdds(""); setPubTemps(""); setPubResult(null); }}>
+                        <PlusCircle className="h-4 w-4 mr-2" /> Nouveau coupon
+                      </Button>
+                      <Button variant="outline" className="rounded-2xl" onClick={() => setActiveTab("wallet")}>
+                        <Wallet className="h-4 w-4 mr-2" /> Mon wallet
+                      </Button>
+                    </div>
+                  </motion.div>
+                ) : pubStep === "error" ? (
+                  <motion.div key="pub-error" initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="text-center py-10">
+                    <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                      <XCircle className="h-8 w-8 text-red-500" />
+                    </div>
+                    <h3 className="font-bold text-lg">Erreur</h3>
+                    <p className="text-sm text-muted-foreground mt-2">{pubError}</p>
+                    <Button variant="outline" className="mt-6 rounded-2xl" onClick={() => setPubStep("form")}>Réessayer</Button>
+                  </motion.div>
+                ) : (
+                  <motion.div key="pub-form" className="space-y-5">
+                    {/* Gains info */}
+                    <div className="bg-green-50 border border-green-200 rounded-2xl p-4">
+                      <p className="text-sm font-bold text-green-800 mb-2">💰 Gains automatiques selon ta cote</p>
+                      <div className="space-y-1 text-xs text-green-700">
+                        <div className="flex justify-between"><span>Cote 1.00 – 5.50</span><span className="font-bold">+250 FCFA</span></div>
+                        <div className="flex justify-between"><span>Cote 5.51 – 16.00</span><span className="font-bold">+500 FCFA</span></div>
+                        <div className="flex justify-between"><span>Cote &gt; 16.00</span><span className="font-bold">+1 000 FCFA</span></div>
+                      </div>
+                    </div>
+
+                    {/* Code */}
+                    <div>
+                      <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Code coupon 1Win *</label>
+                      <Input
+                        value={pubCode}
+                        onChange={e => setPubCode(e.target.value.toUpperCase())}
+                        className="mt-1 h-12 rounded-xl font-mono text-sm"
+                        placeholder="Ex: ABC123456"
+                        maxLength={60}
+                      />
+                    </div>
+
+                    {/* Cote */}
+                    <div>
+                      <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Cote totale *</label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        min="1.01"
+                        value={pubOdds}
+                        onChange={e => setPubOdds(e.target.value)}
+                        className="mt-1 h-12 rounded-xl text-sm"
+                        placeholder="Ex: 4.50"
+                      />
+                      {pubOdds && !isNaN(parseFloat(pubOdds)) && (
+                        <p className="text-xs text-green-600 mt-1 font-semibold">
+                          → Gain par vente : {parseFloat(pubOdds) <= 5.50 ? "250" : parseFloat(pubOdds) <= 16 ? "500" : "1 000"} FCFA
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Heure match */}
+                    <div>
+                      <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Heure des matchs (optionnel)</label>
+                      <Input
+                        value={pubTemps}
+                        onChange={e => setPubTemps(e.target.value)}
+                        className="mt-1 h-12 rounded-xl text-sm"
+                        placeholder="Ex: 18:30 ou 20h00"
+                      />
+                      <p className="text-xs text-muted-foreground mt-1">Le coupon sera supprimé automatiquement à cette heure.</p>
+                    </div>
+
+                    <Button
+                      className="w-full h-12 rounded-2xl font-bold text-base"
+                      disabled={publishMutation.isPending || !pubCode.trim() || !pubOdds.trim()}
+                      onClick={() => {
+                        setPubStep("form");
+                        setPubError("");
+                        publishMutation.mutate();
+                      }}
+                    >
+                      {publishMutation.isPending ? (
+                        <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Publication…</>
+                      ) : (
+                        <><Send className="h-4 w-4 mr-2" /> Publier le coupon</>
+                      )}
+                    </Button>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </motion.div>
           )}
 
