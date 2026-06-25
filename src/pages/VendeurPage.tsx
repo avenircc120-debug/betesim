@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Wallet, TrendingUp, Tag, Banknote, RefreshCw,
   Phone, CheckCircle, XCircle, Loader2, ChevronRight,
@@ -79,6 +79,40 @@ const VendeurPage = () => {
   const [pubStep, setPubStep] = useState<"form" | "success" | "error">("form");
   const [pubError, setPubError] = useState("");
   const [pubResult, setPubResult] = useState<{ gain: number; balance: number } | null>(null);
+  const [analysisCtx, setAnalysisCtx] = useState<{ home: string; away: string; league: string; date: string; prediction: string } | null>(null);
+
+  // Lire les params URL (depuis le bot Telegram) pour pré-remplir le formulaire
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const tab = params.get("tab");
+    const eventId = params.get("event_id");
+    if (tab === "publier") setActiveTab("publier");
+    if (eventId) {
+      const isUUID = eventId.includes("-");
+      if (isUUID) {
+        supabase.from("analyses")
+          .select("team_home, team_away, league, match_date, prediction, confidence_pct")
+          .eq("id", eventId)
+          .maybeSingle()
+          .then(({ data }) => {
+            if (!data) return;
+            const d = data as any;
+            setAnalysisCtx({
+              home: d.team_home ?? "?",
+              away: d.team_away ?? "?",
+              league: d.league ?? "",
+              date: d.match_date ? new Date(d.match_date).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "",
+              prediction: d.prediction ?? "",
+            });
+            if (d.match_date) {
+              const t = new Date(d.match_date);
+              setPubTemps(`${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}`);
+            }
+          });
+      }
+      if (tab === "publier") setActiveTab("publier");
+    }
+  }, []);
 
   const getToken = async () => {
     const { data } = await supabase.auth.getSession();
@@ -487,6 +521,18 @@ const VendeurPage = () => {
                   </motion.div>
                 ) : (
                   <motion.div key="pub-form" className="space-y-5">
+                    {/* Contexte analyse IA (si venu depuis le bot) */}
+                    {analysisCtx && (
+                      <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4">
+                        <p className="text-xs font-bold text-blue-700 uppercase tracking-wider mb-2">⚽ Match sélectionné depuis l'IA</p>
+                        <p className="font-bold text-blue-900 text-base">{analysisCtx.home} vs {analysisCtx.away}</p>
+                        <p className="text-xs text-blue-600 mt-0.5">{analysisCtx.league}{analysisCtx.date ? ` · ${analysisCtx.date}` : ""}</p>
+                        {analysisCtx.prediction && (
+                          <p className="text-xs text-blue-800 mt-2 bg-blue-100 rounded-xl px-3 py-2">🤖 {analysisCtx.prediction}</p>
+                        )}
+                      </div>
+                    )}
+
                     {/* Gains info */}
                     <div className="bg-green-50 border border-green-200 rounded-2xl p-4">
                       <p className="text-sm font-bold text-green-800 mb-2">💰 Gains automatiques selon ta cote</p>
