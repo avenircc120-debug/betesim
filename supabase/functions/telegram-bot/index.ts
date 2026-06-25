@@ -2125,7 +2125,8 @@ Deno.serve(async (req) => {
           ].join("\n"), {
             inline_keyboard: [
               [{ text: "📊 Tableau de bord", callback_data: "dashboard_home" }],
-              [{ text: "➕ Publier un coupon", web_app: { url: pubUrl } }],
+              [{ text: "🔍 Analyser un match & Publier", callback_data: "pronostics_menu" }],
+              [{ text: "✍️ Publier directement (j'ai mon code)", web_app: { url: pubUrl } }],
               [{ text: "🎟 Voir les coupons disponibles", callback_data: "voir_pool" }],
             ],
           });
@@ -2598,7 +2599,7 @@ Deno.serve(async (req) => {
 
         // URL de la page web de saisie du coupon
         const base = await getBase(supabase);
-        const webUrl = `${base}/publier-coupon?event_id=${encodeURIComponent(eventId)}&from_tg=1`;
+        const webUrl = `${base}/vendeur?tg=1&tab=publier&event_id=${encodeURIComponent(eventId)}`;
 
         await sendMessage(chatId, [
           "📤 <b>Publier mon coupon</b>", "",
