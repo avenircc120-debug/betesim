@@ -3,7 +3,7 @@
 // Auth Firebase côté client : on fait confiance au user_id passé dans le body
 // (même pattern que les autres fonctions du projet : partner-pack, deliver-number, etc.)
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
+import { createClient } from "npm:@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
