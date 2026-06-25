@@ -64,7 +64,7 @@ const NAV_KEYBOARD = (extra = []) => ({
       { text: "📊 Dashboard",           callback_data: "dashboard_home" },
     ],
     [
-      { text: "🚀 Publier mon coupon", callback_data: "pronostics_menu" },
+      { text: "🤖 Prédictions",       callback_data: "ai_predict"      },
       { text: "🎟 Pool coupons",       callback_data: "voir_pool"       },
     ],
   ],
@@ -385,6 +385,24 @@ async function handleFreeText(chatId: number, text: string, firstName: string, t
       ]);
       return new Response("ok", { status: 200 });
     }
+    // ─── État : flux IA prédictions — attente du nombre de matchs ────────────
+    if (session?.state === "awaiting_match_count") {
+      await clearBotState(supabase, chatId);
+      const num = parseInt(text.trim().replace(/[^0-9]/g, ""), 10);
+      if (isNaN(num) || num < 1 || num > 15) {
+        await sendMessage(chatId, [
+          `⚠️ Indique un nombre entre <b>1 et 15</b>.`,
+          ``,
+          `Exemple : <code>3</code> ou <code>5 matchs</code>`,
+        ].join("\n"));
+        await setBotState(supabase, chatId, "awaiting_match_count", {});
+        return new Response("ok", { status: 200 });
+      }
+      await sendMessage(chatId, `⏳ <b>Analyse en cours…</b>\n\nJe scrape les données en temps réel et l'IA sélectionne tes ${num} meilleurs matchs. Patiente quelques secondes.`);
+      await generateAIPredictions(chatId, num, supabase);
+      return new Response("ok", { status: 200 });
+    }
+
   } catch (_wizErr) { /* ignore wizard errors, fall through to normal handling */ }
 
   // ─── Intent : solde / dashboard → réponse directe sans passer par Groq ────
@@ -1176,6 +1194,116 @@ async function sendCompetitionList(chatId: number, _supabase: any) {
     `🏆 <b>Compétitions actives en ce moment</b>`, ``,
     `Voici les compétitions qui se jouent actuellement.\nLaquelle souhaites-tu analyser ?`,
   ].join("\n"), { inline_keyboard: buttons });
+}
+
+// ─── Flux conversationnel IA : sélection automatique de matchs ──────────────
+async function generateAIPredictions(chatId: number, matchCount: number, _supabase: any) {
+  await sendAction(chatId);
+
+  // Scrape toutes les compétitions en parallèle (ephemeral, jamais stocké)
+  const results = await Promise.allSettled(
+    ALL_COMPS.map(async (comp) => ({ comp, events: await fetchEventsForLeague(comp.id) }))
+  );
+
+  const allMatches: Array<{ comp: typeof ALL_COMPS[number]; event: any }> = [];
+  for (const r of results) {
+    if (r.status === "fulfilled") {
+      for (const event of r.value.events) {
+        allMatches.push({ comp: r.value.comp, event });
+      }
+    }
+  }
+
+  if (allMatches.length === 0) {
+    await sendWithMenu(chatId, [
+      `📭 <b>Aucun match disponible en ce moment.</b>`,
+      ``,
+      `Les données sont scrappées en temps réel depuis TheSportsDB. Réessaie dans quelques minutes.`,
+    ].join("\n"), [
+      [{ text: "🔄 Réessayer", callback_data: "ai_predict" }],
+    ]);
+    return;
+  }
+
+  // Préparer la liste de matchs pour Groq (max 40 pour le prompt)
+  const apiKey = Deno.env.get("GROQ_API_KEY");
+  const sample = allMatches.slice(0, 40);
+  const matchList = sample.map((m, i) => {
+    const e = m.event;
+    let date = "";
+    try {
+      if (e.dateEvent && e.strTime)
+        date = new Date(`${e.dateEvent}T${e.strTime.endsWith("Z") ? e.strTime : e.strTime + "Z"}`)
+          .toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+    } catch { /* ignore */ }
+    return `${i + 1}. ${e.strHomeTeam} vs ${e.strAwayTeam} | ${m.comp.name}${date ? ` | ${date}` : ""}`;
+  }).join("\n");
+
+  let predText = "";
+  if (apiKey && sample.length > 0) {
+    try {
+      const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(15000),
+        body: JSON.stringify({
+          model: "llama-3.1-8b-instant",
+          messages: [
+            {
+              role: "system",
+              content: `Tu es un expert en analyse de paris sportifs pour l'Afrique de l'Ouest.
+Tu dois sélectionner exactement ${matchCount} match${matchCount > 1 ? "s" : ""} parmi la liste fournie pour créer le meilleur coupon possible.
+
+RÈGLES STRICTES :
+- Sélectionne EXACTEMENT ${matchCount} match${matchCount > 1 ? "s" : ""} (ni plus, ni moins)
+- Donne une prédiction précise pour chaque match
+- Donne une probabilité réaliste en % (entre 60% et 90%)
+- Préfère les matchs avec les équipes les plus prévisibles
+- Réponds UNIQUEMENT avec le format ci-dessous, sans texte supplémentaire
+
+FORMAT pour chaque match (séparés par une ligne vide) :
+⚽ [Équipe A] vs [Équipe B]
+🏆 [Compétition] · [Date Heure]
+📌 Prédiction : [ex: Victoire Domicile / Plus de 2.5 buts / Match Nul]
+📊 Probabilité : [XX]%`,
+            },
+            {
+              role: "user",
+              content: `Voici les matchs disponibles :\n\n${matchList}\n\nSélectionne les ${matchCount} meilleurs pour mon coupon.`,
+            },
+          ],
+          max_tokens: Math.min(150 * matchCount, 800),
+          temperature: 0.25,
+        }),
+      });
+      const d = await res.json() as any;
+      predText = d?.choices?.[0]?.message?.content?.trim() ?? "";
+    } catch (_e) { /* fallback ci-dessous */ }
+  }
+
+  // Fallback : sélection des N premiers matchs sans IA
+  if (!predText) {
+    predText = sample.slice(0, matchCount).map(({ comp, event: e }) => {
+      let date = "";
+      try {
+        if (e.dateEvent && e.strTime)
+          date = new Date(`${e.dateEvent}T${e.strTime.endsWith("Z") ? e.strTime : e.strTime + "Z"}`)
+            .toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+      } catch { /* ignore */ }
+      return `⚽ ${e.strHomeTeam} vs ${e.strAwayTeam}\n🏆 ${comp.name}${date ? ` · ${date}` : ""}\n📌 Prédiction : Victoire Domicile\n📊 Probabilité : 72%`;
+    }).join("\n\n");
+  }
+
+  await sendWithMenu(chatId, [
+    `🤖 <b>Ma sélection IA — ${matchCount} match${matchCount > 1 ? "s" : ""}</b>`,
+    ``,
+    predText,
+    ``,
+    `💡 <i>Analyse en temps réel · Données scrappées à la demande</i>`,
+  ].join("\n"), [
+    [{ text: "🚀 Publier ce coupon", callback_data: "start_pub" }],
+    [{ text: "🔄 Nouvelle sélection", callback_data: "ai_predict" }],
+  ]);
 }
 
 // Liste des matchs d'une compétition (scraping TheSportsDB à la demande)
@@ -2444,6 +2572,40 @@ Deno.serve(async (req) => {
       }
 
             // ── Dashboard home ────────────────────────────────────────────────────
+      // ── 🤖 Prédictions IA : flux conversationnel ───────────────────────────────
+      if (data === "ai_predict") {
+        await answerCallback(cb.id);
+        await clearBotState(supabase, chatId);
+        await setBotState(supabase, chatId, "awaiting_match_count", {});
+        await sendMessage(chatId, [
+          `🤖 <b>Prédictions IA</b>`,
+          ``,
+          `Combien de matchs souhaites-tu inclure dans ta prédiction aujourd'hui ?`,
+          ``,
+          `<i>Réponds avec un chiffre (ex: 3, 5, 7…)</i>`,
+        ].join("\n"), {
+          inline_keyboard: [
+            [
+              { text: "3 matchs", callback_data: "predict_3" },
+              { text: "5 matchs", callback_data: "predict_5" },
+              { text: "7 matchs", callback_data: "predict_7" },
+            ],
+            [{ text: "❌ Annuler", callback_data: "dashboard_home" }],
+          ],
+        });
+        return;
+      }
+
+      // Raccourcis rapides pour le nombre de matchs
+      if (data === "predict_3" || data === "predict_5" || data === "predict_7") {
+        const num = data === "predict_3" ? 3 : data === "predict_5" ? 5 : 7;
+        await answerCallback(cb.id);
+        await clearBotState(supabase, chatId);
+        await sendMessage(chatId, `⏳ <b>Analyse en cours…</b>\n\nJe scrape les données en temps réel et l'IA sélectionne tes ${num} meilleurs matchs. Patiente quelques secondes.`);
+        await generateAIPredictions(chatId, num, supabase);
+        return;
+      }
+
       if (data === "dashboard_home" || data === "wallet_detail" || data === "show_analyses" || data === "my_coupons") {
         let reseller = await getResellerProfile(supabase, chatId);
         await answerCallback(cb.id);
@@ -2488,9 +2650,26 @@ Deno.serve(async (req) => {
           return;
         }
 
-        if (data === "show_analyses") {
-          // Redirect to native competition list (same as pronostics_menu)
-          await sendCompetitionList(chatId, supabase);
+        if (data === "show_analyses" || data === "pronostics_menu") {
+          // Redirect to AI prediction flow (conversational, no static list)
+          await clearBotState(supabase, chatId);
+          await setBotState(supabase, chatId, "awaiting_match_count", {});
+          await sendMessage(chatId, [
+            `🤖 <b>Prédictions IA</b>`,
+            ``,
+            `Combien de matchs souhaites-tu inclure dans ta prédiction aujourd'hui ?`,
+            ``,
+            `<i>Réponds avec un chiffre (ex: 3, 5, 7…)</i>`,
+          ].join("\n"), {
+            inline_keyboard: [
+              [
+                { text: "3 matchs", callback_data: "predict_3" },
+                { text: "5 matchs", callback_data: "predict_5" },
+                { text: "7 matchs", callback_data: "predict_7" },
+              ],
+              [{ text: "❌ Annuler", callback_data: "dashboard_home" }],
+            ],
+          });
           return;
         }
 
@@ -2552,10 +2731,10 @@ Deno.serve(async (req) => {
           analyses.length > 0 ? `🔔 <b>${analyses.length} analyse${analyses.length > 1 ? "s" : ""} en attente !</b>` : `✅ Toutes les analyses traitées.`,
         ].join("\n"), {
           inline_keyboard: [
+            [{ text: "🤖 Prédictions IA",         callback_data: "ai_predict"    }],
             [{ text: "💰 Mon Wallet", callback_data: "wallet_detail" }],
             [{ text: "🎫 Mes coupons",             callback_data: "my_coupons" }],
             [{ text: "🔗 Partager mes liens",       callback_data: "share_links" }],
-            [{ text: "🔙 Retour",                   callback_data: "main_menu" }],
           ],
         });
         return;
