@@ -315,7 +315,7 @@ async function handleFreeText(chatId: number, text: string, firstName: string, t
           ].join("\n"), {
             inline_keyboard: [
               [{ text: "🔍 Nouvelle recherche",       callback_data: "search_match"     }],
-              [{ text: "🏠 Voir compétitions actives", callback_data: "pronostics_menu" }],
+              [{ text: "🤖 Prédictions IA", callback_data: "ai_predict" }],
             ],
           });
         }
@@ -348,7 +348,7 @@ async function handleFreeText(chatId: number, text: string, firstName: string, t
         ``,
         `Merci pour ta contribution !`,
       ].join("\n"), [
-        [{ text: "🏆 Voir d'autres analyses", callback_data: "pronostics_menu" }],
+        [{ text: "🤖 Nouvelle prédiction", callback_data: "ai_predict" }],
         [{ text: `👀 Voir les coupons de ce match`, callback_data: `see_coupons:${analysis_id}` }],
       ]);
       return new Response("ok", { status: 200 });
@@ -381,7 +381,7 @@ async function handleFreeText(chatId: number, text: string, firstName: string, t
         `📲 Plateforme : <b>${platform.toUpperCase()}</b>`, ``,
         "Ton coupon est maintenant visible dans le catalogue.",
       ].join("\n"), [
-        [{ text: "➕ Ajouter un coupon",  callback_data: "pronostics_menu" }],
+        [{ text: "🤖 Prédictions IA", callback_data: "ai_predict" }],
       ]);
       return new Response("ok", { status: 200 });
     }
@@ -1168,7 +1168,7 @@ async function sendCompetitionList(chatId: number, _supabase: any) {
     ].join("\n"), {
       inline_keyboard: [
         [{ text: "🔍 Chercher une compétition", callback_data: "search_match" }],
-        [{ text: "🔄 Rafraîchir", callback_data: "pronostics_menu" }],
+        [{ text: "🔄 Actualiser prédictions", callback_data: "refresh_last" }],
       ],
     });
     return;
@@ -1197,7 +1197,7 @@ async function sendCompetitionList(chatId: number, _supabase: any) {
 }
 
 // ─── Flux conversationnel IA : sélection automatique de matchs ──────────────
-async function generateAIPredictions(chatId: number, matchCount: number, _supabase: any) {
+async function generateAIPredictions(chatId: number, matchCount: number, supabase: any) {
   await sendAction(chatId);
 
   // Scrape toutes les compétitions en parallèle (ephemeral, jamais stocké)
@@ -1293,6 +1293,9 @@ FORMAT pour chaque match (séparés par une ligne vide) :
       return `⚽ ${e.strHomeTeam} vs ${e.strAwayTeam}\n🏆 ${comp.name}${date ? ` · ${date}` : ""}\n📌 Prédiction : Victoire Domicile\n📊 Probabilité : 72%`;
     }).join("\n\n");
   }
+
+  // Mémoriser pour "Actualiser" sans poser la question à nouveau
+  try { await supabase.from("bot_sessions").upsert({ telegram_chat_id: chatId, state: "idle", data: { last_match_count: matchCount }, updated_at: new Date().toISOString() }); } catch (_) {}
 
   await sendWithMenu(chatId, [
     `🤖 <b>Ma sélection IA — ${matchCount} match${matchCount > 1 ? "s" : ""}</b>`,
@@ -1424,7 +1427,7 @@ async function sendMarketAnalysis(chatId: number, eventId: string, market: strin
       [{ text: "📤 Publier mon coupon ✅",  callback_data: `pub_coupon:${eventId}` }],
       ...(n > 0 ? [[{ text: `👀 ${n} coupon${n>1?"s":""} partagé${n>1?"s":""}`, callback_data: `see_coupons:${eventId}` }]] : []),
       [{ text: "🔄 Changer de marché",      callback_data: `mat:${eventId}`        }],
-      [{ text: "🏠 Menu compétitions",      callback_data: "pronostics_menu"       }],
+      [{ text: "🤖 Prédictions",            callback_data: "ai_predict"             }],
     ],
   });
 }
@@ -1758,7 +1761,7 @@ Deno.serve(async (req) => {
       const pUrl = await pronosticsUrl(supabase);
       await sendMessage(chatId, `🎯 Ouvre <b>Pack Officiel</b> en plein écran :`, {
         inline_keyboard: [
-          [{ text:"➕ Ajouter un coupon",           callback_data:"pronostics_menu" }],
+          [{ text:"🤖 Prédictions IA",              callback_data:"ai_predict" }],
           [{ text:"🎟 Voir les coupons disponibles", callback_data:"voir_pool" }],
         ],
       });
@@ -1881,7 +1884,7 @@ Deno.serve(async (req) => {
           : `✅ Toutes les analyses ont un coupon.`,
       ].join("\n"), {
         inline_keyboard: [
-          [{ text: "💰 Détail wallet", callback_data: "wallet_detail" }, { text: "➕ Ajouter un coupon", callback_data: "pronostics_menu" }],
+          [{ text: "💰 Détail wallet", callback_data: "wallet_detail" }, { text: "🤖 Prédictions IA", callback_data: "ai_predict" }],
           pendingCount > 0 ? [{ text: `🔔 Ajouter un coupon maintenant (${pendingCount})`, callback_data: "pronostics_menu" }] : [],
           [{ text: "🎟 Voir mes coupons", callback_data: "my_coupons" }],
         ].filter((row: any[]) => row.length > 0),
@@ -1924,7 +1927,7 @@ Deno.serve(async (req) => {
       if (!term) {
         await sendMessage(chatId,
           "🔍 <b>Recherche d'analyses</b>\n\nTape : <code>/rechercher Bayern</code> ou <code>/rechercher Ligue 1</code>\n\nTu peux chercher par :\n• Nom d'équipe (ex: <code>PSG</code>, <code>Real Madrid</code>)\n• Compétition (ex: <code>Champions League</code>, <code>CAN</code>)\n• Pays (ex: <code>France</code>, <code>Afrique</code>)",
-          { inline_keyboard: [[{ text: "➕ Ajouter un coupon", callback_data: "pronostics_menu" }]] }
+          { inline_keyboard: [[{ text: "🤖 Prédictions IA", callback_data: "ai_predict" }]] }
         );
         return;
       }
@@ -1932,7 +1935,7 @@ Deno.serve(async (req) => {
       if (!analyses.length) {
         await sendMessage(chatId,
           `🔍 Aucun résultat pour "<b>${escapeHtml(term)}</b>"\n\nEssaie un autre terme ou consulte toutes les analyses.`,
-          { inline_keyboard: [[{ text: "➕ Ajouter un coupon", callback_data: "pronostics_menu" }]] }
+          { inline_keyboard: [[{ text: "🤖 Prédictions IA", callback_data: "ai_predict" }]] }
         );
         return;
       }
@@ -1942,17 +1945,29 @@ Deno.serve(async (req) => {
         {
           inline_keyboard: [
             ...analyses.slice(0, 6).map((a: any) => [{ text: `➕ ${a.team_home} vs ${a.team_away}`, callback_data: `create_coupon_${a.id}` }]),
-            [{ text: "➕ Ajouter un coupon",   callback_data: "pronostics_menu" }, { text: "◀ Dashboard", callback_data: "dashboard_home" }],
+            [{ text: "🤖 Prédictions IA", callback_data: "ai_predict" }, { text: "◀ Dashboard", callback_data: "dashboard_home" }],
           ],
         }
       );
       return;
     }
 
-    // ── /analyses — Menu pronostics tout-en-un ───────────────────────────────
+    // ── /analyses — redirige vers le flux IA conversationnel ─────────────────
     if (update.message?.text?.startsWith("/analyses")) {
       const chatId = update.message.chat.id;
-      await sendCompetitionList(chatId, supabase);
+      await setBotState(supabase, chatId, "awaiting_match_count", {});
+      await sendMessage(chatId, [
+        `🤖 <b>Prédictions IA</b>`,
+        ``,
+        `Combien de matchs souhaites-tu inclure dans ta prédiction aujourd'hui ?`,
+        ``,
+        `<i>Réponds avec un chiffre (ex: 3, 5, 7…)</i>`,
+      ].join("\n"), {
+        inline_keyboard: [
+          [{ text: "3 matchs", callback_data: "predict_3" }, { text: "5 matchs", callback_data: "predict_5" }, { text: "7 matchs", callback_data: "predict_7" }],
+          [{ text: "❌ Annuler", callback_data: "dashboard_home" }],
+        ],
+      });
       return;
     }
 
@@ -2022,7 +2037,7 @@ Deno.serve(async (req) => {
           `👇 Crée tes coupons dès maintenant :`,
         ].join("\n"), {
           inline_keyboard: [
-            [{ text: "➕ Ajouter un coupon", callback_data: "pronostics_menu" }],
+            [{ text: "🤖 Prédictions IA", callback_data: "ai_predict" }],
             [{ text: "📊 Mon Dashboard", callback_data: "dashboard_home" }],
           ],
         });
@@ -2055,7 +2070,7 @@ Deno.serve(async (req) => {
           ...(data.errors?.length ? [`\n⚠️ ${data.errors.length} erreur(s) : ${data.errors.join(", ")}`] : []),
         ];
         await sendMessage(chatId, lines.join("\n"), {
-          inline_keyboard: [[{ text: "➕ Ajouter un coupon", callback_data: "pronostics_menu" }]],
+          inline_keyboard: [[{ text: "🤖 Prédictions IA", callback_data: "ai_predict" }]],
         });
       } catch (err: any) {
         await sendMessage(chatId, `❌ Échec : ${err?.message ?? "erreur inconnue"}`);
@@ -2276,7 +2291,7 @@ Deno.serve(async (req) => {
           ].join("\n"), {
             inline_keyboard: [
               [{ text: "📊 Tableau de bord", callback_data: "dashboard_home" }],
-              [{ text: "🔍 Analyser un match & Publier", callback_data: "pronostics_menu" }],
+              [{ text: "🤖 Prédictions IA", callback_data: "ai_predict" }],
               [{ text: "✍️ Publier directement (j'ai mon code)", web_app: { url: pubUrl } }],
               [{ text: "🎟 Voir les coupons disponibles", callback_data: "voir_pool" }],
             ],
@@ -2290,7 +2305,7 @@ Deno.serve(async (req) => {
           `🎯 Touche le bouton ci-dessous pour démarrer.`,
         ].join("\n"), {
           inline_keyboard: [
-            [{ text: "➕ Ajouter un coupon", callback_data: "pronostics_menu" }],
+            [{ text: "🤖 Prédictions IA", callback_data: "ai_predict" }],
             [{ text: "🎟 Voir les coupons disponibles", callback_data: "voir_pool" }],
           ],
         });
@@ -2547,12 +2562,25 @@ Deno.serve(async (req) => {
       // ── Actualiser (menu universel) ──────────────────────────────────────
       if (data === "refresh_last") {
         await answerCallback(cb.id, "🔄 Actualisation...");
+
+        // Si la dernière action était une prédiction IA → la rejouer directement
+        const sess = await getBotState(supabase, chatId);
+        const lastCount = (sess?.data as any)?.last_match_count;
+        if (lastCount && Number.isInteger(lastCount) && lastCount >= 1 && lastCount <= 15) {
+          await sendMessage(chatId, `⏳ <b>Actualisation de ta sélection IA (${lastCount} matchs)…</b>\n\nJe re-scrape les données en temps réel.`);
+          await generateAIPredictions(chatId, lastCount, supabase);
+          return;
+        }
+
+        // Sinon → dashboard classique
         const r = await getResellerProfile(supabase, chatId);
         if (r) {
-          const w = await getWalletBalance(supabase, r.id);
-          const { data: activeCoupons } = await supabase.from("coupons").select("id,status").eq("creator_id", r.id);
-          const active = (activeCoupons ?? []).filter((c) => c.status === "active").length;
-          const sold   = (activeCoupons ?? []).filter((c) => c.status === "sold").length;
+          const [w, { data: activeCoupons }] = await Promise.all([
+            getWalletBalance(supabase, r.id),
+            supabase.from("coupons").select("id,status").eq("creator_id", r.id),
+          ]);
+          const active = (activeCoupons ?? []).filter((c: any) => c.status === "active").length;
+          const sold   = (activeCoupons ?? []).filter((c: any) => c.status === "sold").length;
           await sendWithMenu(chatId, [
             `📊 <b>Dashboard — ${escapeHtml(r.full_name || "Revendeur")}</b>`,
             ``,
@@ -2562,8 +2590,9 @@ Deno.serve(async (req) => {
             `━━━━━━━━━━━━━━━━━━━━━━━━`,
             `✅ Données à jour — ${new Date().toLocaleTimeString("fr-FR", {hour:"2-digit",minute:"2-digit"})}`,
           ].join("\n"), [
-            [{ text: "💰 Wallet",       callback_data: "wallet_detail" },
-             { text: "🎫 Mes coupons",  callback_data: "my_coupons" }],
+            [{ text: "💰 Wallet", callback_data: "wallet_detail" },
+             { text: "🎫 Mes coupons", callback_data: "my_coupons" }],
+            [{ text: "🤖 Nouvelle prédiction", callback_data: "ai_predict" }],
           ]);
         } else {
           await sendWithMenu(chatId, "🔄 Actualisation complète. Tape /start pour accéder à ton espace.");
@@ -2571,7 +2600,6 @@ Deno.serve(async (req) => {
         return;
       }
 
-            // ── Dashboard home ────────────────────────────────────────────────────
       // ── 🤖 Prédictions IA : flux conversationnel ───────────────────────────────
       if (data === "ai_predict") {
         await answerCallback(cb.id);
@@ -2677,7 +2705,7 @@ Deno.serve(async (req) => {
           await answerCallback(update.callback_query!.id);
           await sendMessage(chatId,
             "🔍 <b>Recherche d'analyses</b>\n\nTape ta recherche :\n<code>/rechercher Bayern</code>\n<code>/rechercher CAN</code>\n<code>/rechercher Champions League</code>\n<code>/rechercher France</code>\n\nTu peux chercher par équipe, compétition ou pays.",
-            { inline_keyboard: [[{ text: "➕ Ajouter un coupon",   callback_data: "pronostics_menu" }, { text: "◀ Dashboard", callback_data: "dashboard_home" }]] }
+            { inline_keyboard: [[{ text: "🤖 Prédictions IA", callback_data: "ai_predict" }, { text: "◀ Dashboard", callback_data: "dashboard_home" }]] }
           );
           return;
         }
