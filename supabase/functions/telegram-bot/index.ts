@@ -461,7 +461,7 @@ async function handleFreeText(chatId: number, text: string, firstName: string, t
   const freeReseller = await getResellerProfile(supabase, chatId);
   const freeRole: "client" | "revendeur" | "unknown" = freeReseller?.is_partner ? "revendeur" : (freeReseller ? "client" : "unknown");
   const groqReply = await askGroq(text, firstName, freeRole);
-  await sendMessage(chatId, groqReply || "Je n'ai pas bien saisi, pouvez-vous reformuler ? 😊");
+  await sendMessage(chatId, groqReply || "Je n'ai pas bien écouté, pouvez-vous reformuler ? 😊");
 }
 
 // ─── Flow /start ─────────────────────────────────────────────────────────────
@@ -823,7 +823,7 @@ Infos plateforme :
 RÈGLES ABSOLUES :
 1. Réponds TOUJOURS en phrase naturelle, courte et directe (max 3 phrases).
 2. Salutation (bonjour, cc, salut, ça va, allô...) → réponds chaleureusement et demande comment tu peux aider.
-3. Demande vague, hors-sujet ou incompréhensible → réponds EXACTEMENT : "Je n'ai pas bien saisi, pouvez-vous reformuler ? 😊"
+3. Demande vague, hors-sujet ou incompréhensible → réponds EXACTEMENT : "Je n'ai pas bien écouté, pouvez-vous reformuler ? 😊"
 4. Corrige mentalement les erreurs de prononciation ou de transcription vocale avant de répondre.
 5. Jamais de liste de commandes. Jamais de fausses informations. Style : amical, 1-2 emojis max, en français.`;
 
@@ -2946,7 +2946,7 @@ Deno.serve(async (req) => {
       const transcribed = await transcribeAudio(fileId);
       if (!transcribed) {
         await logBotEvent("warn", "voice_transcription_fail", chatId, "Whisper n'a pas pu transcrire le vocal", { fileId, tgUserId });
-        await sendMessage(chatId, "Je n'ai pas bien saisi ton message vocal. Parle un peu plus clairement ou envoie un message écrit. 😊");
+        await sendMessage(chatId, "Je n'ai pas bien écouté ton message vocal. Parle un peu plus clairement ou envoie un message écrit. 😊");
         return;
       }
 
