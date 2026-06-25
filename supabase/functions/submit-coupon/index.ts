@@ -16,7 +16,7 @@
  *   { code: string, odds: number, temps: string, event_id: string, init_data: string }
  */
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "npm:@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
