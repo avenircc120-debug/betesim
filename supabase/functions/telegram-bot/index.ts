@@ -900,21 +900,59 @@ Infos plateforme :
 
 Style : familier, amical, en français, emojis. Max 3 phrases sauf besoin d'explication. Ne donne jamais de codes ou d'informations fausses. Si tu ne sais pas, dis-le honnêtement.`;
 
-async function askGroq(userMessage: string, firstName: string): Promise<string | null> {
+// ─── Groq : Prompt système avec détection de rôle ────────────────────────────
+const GROQ_SYSTEM_BASE = `Tu es l'assistant IA du bot Telegram "Pack Officiel" de betesim — une plateforme de pronostics sportifs en Afrique de l'Ouest.
+
+Infos plateforme :
+- Coupons de paris sportifs (1Win / 1xBet) vendus par des revendeurs
+- Prix coupon selon la cote : ≤5.50 → 250 FCFA | 5.51–16 → 500 FCFA | >16 → 1000 FCFA
+- Paiement : Mobile Money (Orange Money, Wave, MTN, Moov)
+- Commission revendeur créditée dès la publication du coupon
+
+Style : familier, amical, en français, avec emojis. Max 3 phrases. Ne donne jamais de fausses informations.`;
+
+function buildGroqSystem(role: "client" | "revendeur" | "unknown"): string {
+  const roleCtx =
+    role === "revendeur" ?
+      `
+
+Tu parles à un REVENDEUR. Il publie des coupons 1Win pour gagner des commissions.
+Commandes utiles : /pro (dashboard+wallet) · "Ajouter un coupon" (menu natif Telegram) · /publier (wizard coupon).
+Aide-le à publier ses coupons, vérifier son solde et comprendre ses gains.`
+    : role === "client" ?
+      `
+
+Tu parles à un CLIENT. Il cherche à acheter des coupons de pronostics sportifs.
+Commandes utiles : /coupons (voir coupons disponibles) · /start (démarrer).
+Aide-le à trouver un coupon, comprendre le paiement et récupérer son code après achat.`
+    :
+      `
+
+Tu ne sais pas encore si c'est un client ou un revendeur. Propose les deux options :
+- Client → /coupons pour voir les coupons
+- Revendeur → /pro pour le dashboard`;
+  return GROQ_SYSTEM_BASE + roleCtx;
+}
+
+async function askGroq(
+  userMessage: string,
+  firstName: string,
+  role: "client" | "revendeur" | "unknown" = "unknown",
+): Promise<string | null> {
   const apiKey = Deno.env.get("GROQ_API_KEY");
   if (!apiKey) return null;
   try {
     const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-      signal: AbortSignal.timeout(4000),
+      signal: AbortSignal.timeout(5000),
       body: JSON.stringify({
         model: "llama-3.1-8b-instant",
         messages: [
-          { role: "system", content: GROQ_SYSTEM },
+          { role: "system", content: buildGroqSystem(role) },
           { role: "user", content: `[${firstName}]: ${userMessage}` },
         ],
-        max_tokens: 150,
+        max_tokens: 200,
         temperature: 0.7,
       }),
     });
@@ -922,6 +960,47 @@ async function askGroq(userMessage: string, firstName: string): Promise<string |
     return data?.choices?.[0]?.message?.content?.trim() ?? null;
   } catch (e) {
     console.error("Groq timeout/error:", e);
+    return null;
+  }
+}
+
+// ─── Transcription vocale via Groq Whisper ────────────────────────────────
+async function transcribeAudio(fileId: string): Promise<string | null> {
+  const apiKey   = Deno.env.get("GROQ_API_KEY");
+  const botToken = Deno.env.get("TELEGRAM_BOT_TOKEN");
+  if (!apiKey || !botToken) return null;
+  try {
+    // 1. Obtenir le chemin du fichier depuis Telegram
+    const fileRes  = await fetch(`https://api.telegram.org/bot${botToken}/getFile?file_id=${fileId}`);
+    const fileData = await fileRes.json() as any;
+    const filePath = fileData?.result?.file_path;
+    if (!filePath) return null;
+
+    // 2. Télécharger le fichier audio depuis Telegram
+    const audioRes  = await fetch(`https://api.telegram.org/file/bot${botToken}/${filePath}`);
+    const audioBlob = await audioRes.blob();
+
+    // 3. Envoyer à Groq Whisper pour transcription
+    const form = new FormData();
+    form.append("file", audioBlob, "voice.ogg");
+    form.append("model", "whisper-large-v3-turbo");
+    form.append("language", "fr");
+    form.append("response_format", "text");
+
+    const whisperRes = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}` },
+      body: form,
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!whisperRes.ok) {
+      console.error("Whisper error:", await whisperRes.text());
+      return null;
+    }
+    const transcribed = (await whisperRes.text()).trim();
+    return transcribed || null;
+  } catch (e) {
+    console.error("transcribeAudio error:", e);
     return null;
   }
 }
@@ -2903,7 +2982,62 @@ Deno.serve(async (req) => {
 
 
     // ── Messages texte libres ────────────────────────────────────────────��
-    if (update.message?.text && !update.message.text.startsWith("/")) {
+    // ── Messages vocaux / audio (transcription Whisper → Groq IA) ───────────
+    if (update.message?.voice || update.message?.audio) {
+      const chatId    = update.message!.chat.id;
+      const tgUserId  = update.message!.from?.id ?? 0;
+      const firstName = update.message!.from?.first_name || "ami";
+      const fileId    = (update.message?.voice ?? update.message?.audio)?.file_id;
+
+      await sendAction(chatId); // "en train d'écrire..." immédiat
+
+      if (!fileId) {
+        await sendMessage(chatId, "⚠️ Impossible de lire ce fichier audio. Envoie un message vocal.");
+        return new Response("ok", { status: 200 });
+      }
+
+      // Détecter le rôle de l'utilisateur
+      const voiceReseller = await getResellerProfile(supabase, chatId);
+      const voiceRole: "client" | "revendeur" | "unknown" = voiceReseller?.is_partner ? "revendeur" : "unknown";
+
+      // Transcrire le vocal
+      const transcribed = await transcribeAudio(fileId);
+      if (!transcribed) {
+        await sendMessage(chatId, [
+          "🎤 Message vocal reçu !",
+          "",
+          "❌ Je n'ai pas pu transcrire ton message. Parle clairement ou écris directement.",
+          "",
+          voiceRole === "revendeur"
+            ? "💡 Revendeur : tape /pro pour ton dashboard ou envoie ton code coupon."
+            : "💡 Client : tape /coupons pour voir les coupons disponibles.",
+        ].join("\n"), {
+          inline_keyboard: voiceRole === "revendeur"
+            ? [[{ text: "📊 Mon Dashboard", callback_data: "dashboard_home" }], [{ text: "➕ Ajouter un coupon", callback_data: "pronostics_menu" }]]
+            : [[{ text: "🎟 Voir les coupons", callback_data: "voir_pool" }]],
+        });
+        return new Response("ok", { status: 200 });
+      }
+
+      // Message de confirmation de transcription + réponse IA
+      await sendAction(chatId);
+      const voiceGroqReply = await askGroq(transcribed, firstName, voiceRole);
+
+      const transcriptMsg = [
+        `🎤 <i>Vocal transcrit :</i> "${escapeHtml(transcribed)}"`,
+        "",
+        voiceGroqReply || "👆 Utilise les boutons pour naviguer.",
+      ].join("\n");
+
+      await sendMessage(chatId, transcriptMsg, {
+        inline_keyboard: voiceRole === "revendeur"
+          ? [[{ text: "➕ Ajouter un coupon", callback_data: "pronostics_menu" }, { text: "📊 Dashboard", callback_data: "dashboard_home" }]]
+          : [[{ text: "🎟 Voir les coupons", callback_data: "voir_pool" }, { text: "🏆 Analyses", callback_data: "pronostics_menu" }]],
+      });
+      return new Response("ok", { status: 200 });
+    }
+
+        if (update.message?.text && !update.message.text.startsWith("/")) {
       const chatId    = update.message.chat.id;
       const tgUserId  = update.message.from?.id ?? 0;
       const firstName = update.message.from?.first_name || "ami";
