@@ -372,105 +372,6 @@ async function handleFreeText(chatId: number, text: string, firstName: string, t
     }
   } catch (_wizErr) { /* ignore wizard errors, fall through to normal handling */ }
 
-  // ─── Wizard publication coupon (pub_*) ────────────────────────────────────
-  try {
-    const pubSess = await getBotState(supabase, chatId);
-
-    if (pubSess?.state === "pub_step_code") {
-      const rawCode = text.trim().toUpperCase().replace(/[^A-Z0-9\-]/g, "");
-      if (rawCode.length < 4 || rawCode.length > 40) {
-        await sendHuman(chatId, "⚠️ Code invalide (4-40 caractères). Entre le code exact :\n<i>Exemple : ABC123456</i>", undefined, DELAY_SHORT);
-        return new Response("ok", { status: 200 });
-      }
-      await setBotState(supabase, chatId, "pub_step_cote", { code: rawCode });
-      await sendHuman(chatId, [
-        `✅ Code : <code>${rawCode}</code>`, ``,
-        `<b>Étape 2/4 — Cote</b>`, ``,
-        `Entre la cote totale du coupon :`,
-        `<i>Exemple : 4.50 ou 12.5</i>`, ``,
-        `💡 Gains selon la cote :`,
-        `• 1.00 – 5.50 → 250 FCFA`,
-        `• 5.51 – 16.00 → 500 FCFA`,
-        `• > 16.00 → 1000 FCFA`,
-      ].join("\n"), {
-        inline_keyboard: [[{ text: "❌ Annuler", callback_data: "dashboard_home" }]],
-      }, DELAY_SHORT);
-      return new Response("ok", { status: 200 });
-    }
-
-    if (pubSess?.state === "pub_step_cote") {
-      const { code } = pubSess.data as { code: string };
-      const odds = parseFloat(text.replace(",", "."));
-      if (isNaN(odds) || odds < 1.1 || odds > 10000) {
-        await sendHuman(chatId, "⚠️ Cote invalide. Entre un nombre comme <b>4.50</b> ou <b>12.5</b> :", undefined, DELAY_SHORT);
-        return new Response("ok", { status: 200 });
-      }
-      const gain = odds <= 5.50 ? 250 : odds <= 16 ? 500 : 1000;
-      await setBotState(supabase, chatId, "pub_step_expiry", { code, odds, gain });
-      await sendHuman(chatId, [
-        `✅ Cote : <b>${odds}</b> → Gain par vente : <b>${gain.toLocaleString("fr-FR")} FCFA</b>`, ``,
-        `<b>Étape 3/4 — Temps d'expiration</b>`, ``,
-        `À quelle heure commencent les matchs ?`,
-        `Format : HH:MM (ex: <b>18:30</b> ou <b>20:00</b>)`,
-        `<i>Le coupon sera automatiquement supprimé à cette heure.</i>`,
-      ].join("\n"), {
-        inline_keyboard: [[{ text: "❌ Annuler", callback_data: "dashboard_home" }]],
-      }, DELAY_SHORT);
-      return new Response("ok", { status: 200 });
-    }
-
-    if (pubSess?.state === "pub_step_expiry") {
-      const { code, odds, gain } = pubSess.data as { code: string; odds: number; gain: number };
-      const timeMatch = text.trim().match(/^(\d{1,2})[h:](\d{2})$/i);
-      if (!timeMatch) {
-        await sendHuman(chatId, "⚠️ Format invalide. Entre l'heure comme <b>18:30</b> ou <b>20h00</b> :", undefined, DELAY_SHORT);
-        return new Response("ok", { status: 200 });
-      }
-      const hh = parseInt(timeMatch[1]);
-      const mm = parseInt(timeMatch[2]);
-      if (hh > 23 || mm > 59) {
-        await sendHuman(chatId, "⚠️ Heure invalide. Exemple valide : <b>18:30</b>", undefined, DELAY_SHORT);
-        return new Response("ok", { status: 200 });
-      }
-      const now = new Date();
-      const matchStart = new Date(now);
-      matchStart.setHours(hh, mm, 0, 0);
-      if (matchStart <= now) matchStart.setDate(matchStart.getDate() + 1);
-      const expiryStr = `${String(hh).padStart(2,"0")}:${String(mm).padStart(2,"0")}`;
-      await setBotState(supabase, chatId, "pub_confirm", { codes: [code], odds, price: gain, match_start: matchStart.toISOString() });
-      await sendHuman(chatId, [
-        `📋 <b>Étape 4/4 — Validation</b>`, ``,
-        `Vérifie avant publication :`, ``,
-        `🎫 Code : <code>${code}</code>`,
-        `📊 Cote : <b>${odds}</b>`,
-        `⏰ Expiration : <b>${expiryStr}</b>`,
-        `💰 Ton gain par vente : <b>${gain.toLocaleString("fr-FR")} FCFA</b>`, ``,
-        `👆 Confirme pour publier dans le Pool :`,
-      ].join("\n"), {
-        inline_keyboard: [
-          [{ text: "✅ Publier le coupon", callback_data: "pub_confirm" }],
-          [{ text: "❌ Annuler", callback_data: "dashboard_home" }],
-        ],
-      }, DELAY_SHORT);
-      return new Response("ok", { status: 200 });
-    }
-
-    // Legacy states → redirect to new 4-step form
-    if (pubSess?.state === "pub_codes" || pubSess?.state === "pub_odds" || pubSess?.state === "pub_time") {
-      await clearBotState(supabase, chatId);
-      await setBotState(supabase, chatId, "pub_step_code", {});
-      await sendHuman(chatId, [
-        `🎫 <b>Publier un coupon</b>`, ``,
-        `<b>Étape 1/4 — Code</b>`, ``,
-        `Entre ton code coupon (1xBet / 1Win) :`,
-        `<i>Exemple : ABC123456</i>`,
-      ].join("\n"), {
-        inline_keyboard: [[{ text: "❌ Annuler", callback_data: "dashboard_home" }]],
-      }, DELAY_SHORT);
-      return new Response("ok", { status: 200 });
-    }
-  } catch (_pubErr) { /* ignore, fall through */ }
-
   // Tout message libre → Groq IA — comportement identique texte et vocal
   await sendAction(chatId); // typing... immédiat
   const freeReseller = await getResellerProfile(supabase, chatId);
@@ -1896,15 +1797,17 @@ Deno.serve(async (req) => {
         reseller = fp;
       }
       await clearBotState(supabase, chatId);
-      await setBotState(supabase, chatId, "pub_step_code", {});
-      await sendHuman(chatId, [
-        `🎫 <b>Publier un coupon</b>`, ``,
-        `<b>Étape 1/4 — Code</b>`, ``,
-        `Entre ton code coupon (1xBet / 1Win) :`,
-        `<i>Exemple : ABC123456</i>`,
+      const pubBase = await getBase(supabase);
+      const pubUrl = pubBase + "/vendeur?tg=1";
+      await sendMessage(chatId, [
+        "📤 <b>Publier un coupon</b>", "",
+        "Clique sur le bouton ci-dessous pour accéder au formulaire de publication.",
       ].join("\n"), {
-        inline_keyboard: [[{ text: "❌ Annuler", callback_data: "dashboard_home" }]],
-      }, DELAY_SHORT);
+        inline_keyboard: [
+          [{ text: "📝 Ouvrir le formulaire", web_app: { url: pubUrl } }],
+          [{ text: "🏠 Menu principal", callback_data: "dashboard_home" }],
+        ],
+      });
       return;
     }
 
@@ -2616,276 +2519,25 @@ Deno.serve(async (req) => {
       if (data === "start_pub") {
         await answerCallback(cb.id);
         await clearBotState(supabase, chatId);
-        await setBotState(supabase, chatId, "pub_step_code", {});
-        await sendHuman(chatId, [
-          `🎫 <b>Publier un coupon</b>`, ``,
-          `<b>Étape 1/4 — Code</b>`, ``,
-          `Entre ton code coupon (1xBet / 1Win) :`,
-          `<i>Exemple : ABC123456</i>`,
-        ].join("\n"), {
-          inline_keyboard: [[{ text: "❌ Annuler", callback_data: "dashboard_home" }]],
-        }, DELAY_SHORT);
-        return;
-      }
-
-      // pub_start_N (legacy) → redirect to new 4-step form
-      if (data.startsWith("pub_start_")) {
-        await answerCallback(cb.id);
-        await clearBotState(supabase, chatId);
-        await setBotState(supabase, chatId, "pub_step_code", {});
-        await sendHuman(chatId, [
-          `🎫 <b>Publier un coupon</b>`, ``,
-          `<b>Étape 1/4 — Code</b>`, ``,
-          `Entre ton code coupon (1xBet / 1Win) :`,
-          `<i>Exemple : ABC123456</i>`,
-        ].join("\n"), {
-          inline_keyboard: [[{ text: "❌ Annuler", callback_data: "dashboard_home" }]],
-        }, DELAY_SHORT);
-        return;
-      }
-
-      if (data === "pub_confirm") {
-        const sess = await getBotState(supabase, chatId);
-        await answerCallback(cb.id, sess?.state === "pub_confirm" ? "⏳ Publication en cours…" : "Session expirée");
-        if (sess?.state !== "pub_confirm") {
-          await sendMessage(chatId, "❌ Session expirée. Recommence avec /publier");
-          return;
-        }
-        const { codes, odds, price, match_start } = sess.data as { codes: string[]; odds: number; price: number; match_start: string };
-        let reseller = await getResellerProfile(supabase, chatId);
-        if (!reseller) {
-          const fn2 = cb.from?.first_name || "Revendeur";
-          await supabase.from("profiles").insert({ id: `tg_${chatId}`, full_name: fn2, is_partner: true, telegram_chat_id: chatId, created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
-          const { data: fp } = await supabase.from("profiles").select("id,full_name,is_partner").eq("telegram_chat_id", chatId).maybeSingle();
-          reseller = fp;
-        }
-        const { data: newCoupon, error: cpErr } = await supabase.from("coupons").insert({
-          code:             codes[0],
-          codes_json:       codes,
-          total_odds:       odds,
-          price_fcfa:       price,
-          match_start_time: match_start,
-          status:           "active",
-          partner_id:       (reseller as any).id,
-          creator_id:       (reseller as any).id,
-          label:            `Coupon ${odds}x — ${codes.length} code${codes.length>1?"s":""}`,
-        }).select("id").single();
-        await clearBotState(supabase, chatId);
-        if (cpErr || !newCoupon) {
-          await sendMessage(chatId, `❌ Erreur publication.\n<code>${cpErr?.message || "unknown"}</code>`);
-          return;
-        }
-        const BOT_UNAME  = "pack_officiel_expert_bot";
-        const clientLink = `https://t.me/${BOT_UNAME}?start=c_${chatId}`;
-        const matchHour  = new Date(match_start).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", timeZone: "Africa/Abidjan" });
-        const shareMsg   = `🎟 Coupon de pronostics disponible !\n📊 Cote: ${odds} | 💰 ${price.toLocaleString("fr-FR")} FCFA\n⏰ Matchs à ${matchHour}\nAchète maintenant: ${clientLink}`;
-        const _resellerLink = `https://t.me/pack_officiel_expert_bot?start=r_${chatId}`;
-        const _mkSh2 = (label: string, lnk: string, txt: string) =>
-          ({ text: label, web_app: { url: FUNCTION_URL+"?source=share&label="+encodeURIComponent(label)+"&url="+encodeURIComponent(lnk)+"&text="+encodeURIComponent(txt) } });
-        await sendHuman(chatId, [`✅ <b>Coupon publié dans le Pool !</b>`,``,`🎟 Code${codes.length>1?"s":""} : <code>${maskCodes(codes)}</code>`,`📊 Cote : <b>${odds}</b> · 💰 Prix : <b>${price.toLocaleString("fr-FR")} FCFA</b>`,`⏰ Expire à : <b>${matchHour}</b>`,``,`💡 Partage ton lien client pour que tes clients achètent ce coupon.`].join("\n"), {
-          inline_keyboard: [
-            [_mkSh2("🔗 Partager Lien Client",    clientLink,    `🎟 Coupon de pronostics disponible ! Cote ${odds} · ${price.toLocaleString("fr-FR")} FCFA. Achète ici : ${clientLink}`)],
-            [_mkSh2("🔗 Partager Lien Revendeur", _resellerLink, `💼 Rejoins mon équipe Betesim et gagne des commissions ! ${_resellerLink}`)],
-            [{ text: "📊 Mon Dashboard", callback_data: "dashboard_home" }],
-            [{ text: "➕ Publier un autre coupon", callback_data: "start_pub" }],
-          ],
-        }, DELAY_SHORT);
-        return;
-      }
-
-      // ── Share links (native inline — no web redirect) ─────────────────────
-      if (data === "share_links") {
-        await answerCallback(cb.id);
-        const _botUn   = Deno.env.get("BOT_USERNAME") || "pack_officiel_expert_bot";
-        const cLink    = `https://t.me/${_botUn}?start=c_${chatId}`;
-        const rLink    = `https://t.me/${_botUn}?start=r_${chatId}`;
-        const shareMsg = [
-          "\u{1F517} <b>Partager mes liens</b>", "",
-          "\u{1F447} Voici tes liens \u00E0 partager :", "",
-          "\u{1F3DF} <b>Lien Client :</b>", cLink, "",
-          "\u{1F4BC} <b>Lien Revendeur :</b>", rLink,
-        ].join("\n");
-        await sendHuman(chatId, shareMsg, {
-          inline_keyboard: [
-            [{ text: "\u{1F4E4} Partager lien client",    url: "https://t.me/share/url?url=" + encodeURIComponent(cLink) + "&text=" + encodeURIComponent("\u{1F3DF} Rejoins-moi sur Betesim ! " + cLink) }],
-            [{ text: "\u{1F4E4} Partager lien revendeur", url: "https://t.me/share/url?url=" + encodeURIComponent(rLink) + "&text=" + encodeURIComponent("\u{1F4BC} Deviens revendeur Betesim ! " + rLink) }],
-            [{ text: "\u{1F519} Retour dashboard", callback_data: "dashboard_home" }],
-          ],
-        }, DELAY_SHORT);
-        return;
-      }
-
-      // ── Main menu (native — no web redirect) ─────────────────────────────────────
-      if (data === "main_menu") {
-        await answerCallback(cb.id);
-        await sendHuman(chatId, "🏠 <b>Menu principal</b>\n\nChoisis une section :", {
-          inline_keyboard: [
-            [{ text: "➕ Ajouter un coupon", callback_data: "pronostics_menu" }],
-            [{ text: "📋 Mon Dashboard",    callback_data: "dashboard_home" }],
-          ],
-        }, DELAY_SHORT);
-        return;
-      }
-
-
-      if (data === "voir_pool" || data === "catalogue") {
-        const coupons = await fetchPoolCoupons(supabase);
-        await answerCallback(cb.id);
-        await sendMessage(chatId, formatCatalog(coupons), coupons.length > 0 ? {
-          inline_keyboard: coupons.map(c => [{
-            text: `${couponDisplayName(c)} — ${c.price_fcfa.toLocaleString("fr-FR")} F`,
-            callback_data: `acheter_${c.id}`,
-          }]),
-        } : undefined);
-        return;
-      }
-
-      // ── Sélection coupon → formulaire paiement ─────────────────────��───────
-      if (data.startsWith("acheter_")) {
-        const couponId = data.replace("acheter_", "");
-        const { data: coupon } = await supabase.from("coupons")
-          .select("id, code, codes_json, label, price_fcfa, platform, total_odds, match_start_time, status, creator_id, analyses:analysis_id(team_home, team_away)")
-          .eq("id", couponId).maybeSingle();
-        await answerCallback(cb.id);
-        if (!coupon || coupon.status !== "active") {
-          await sendHuman(chatId, coupon ? "❌ Ce coupon n'est plus disponible. Tape /coupons pour voir les autres." : "❌ Coupon introuvable.", undefined, DELAY_SHORT);
-          return;
-        }
-        const cName    = couponDisplayName(coupon as any);
-        const plat     = (coupon as any).platform?.toUpperCase() || "1Win";
-        const price    = (coupon as any).price_fcfa;
-        const oddsVal  = (coupon as any).total_odds;
-        const codesArr = (coupon as any).codes_json as string[] | null;
-        const masked   = codesArr?.length ? maskCodes(codesArr) : partialCode((coupon as any).code);
-        const codeCount = codesArr?.length || 1;
-        const expireAt = (coupon as any).match_start_time
-          ? new Date((coupon as any).match_start_time).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", timeZone: "Africa/Abidjan" })
-          : null;
-        // Try FedaPay first
-        const fedaUrl = await createFedaPayLink(price, `Coupon ${oddsVal || ""}x - ${cName}`, couponId, chatId, supabase);
-        // Also create a bot_order for Mobile Money fallback
-        const mobileNum = await getMobileMoneyNumber(supabase);
-        const buyerName = cb.from.first_name || "Client";
-        const orderId   = fedaUrl ? null : await createBotOrder(supabase, couponId, chatId, buyerName, price);
-        const shortRef  = orderId ? orderId.slice(0, 8).toUpperCase() : null;
-        const lines = [
-          `🎟 <b>${escapeHtml(cName)}</b>`,``,
-          `🔒 <b>Code${codeCount>1?"s":""} (masqué${codeCount>1?"s":""}) :</b>`,
-          `<code>${masked}</code>`,
-          `<i>(${codeCount} code${codeCount>1?"s":""} · code${codeCount>1?"s":""} complet${codeCount>1?"s":""} après paiement)</i>`,``,
-          oddsVal ? `📊 Cote : <b>${oddsVal}</b>` : null,
-          expireAt ? `⏰ Matchs à : <b>${expireAt}</b>` : null,
-          `💰 Prix : <b>${price.toLocaleString("fr-FR")} FCFA</b>`,``,
-        ].filter(l => l !== null).join("\n");
-        const payButtons: any[][] = [];
-        if (fedaUrl) {
-          payButtons.push([{ text: `💳 Payer ${price.toLocaleString("fr-FR")} FCFA (FedaPay)`, url: fedaUrl }]);
-          payButtons.push([{ text: "❌ Annuler", callback_data: "catalogue" }]);
-        } else {
-          payButtons.push([{ text: "✅ J'ai payé — Mobile Money", callback_data: `paie_${orderId}` }]);
-          payButtons.push([{ text: "❌ Annuler", callback_data: "catalogue" }]);
-        }
-        await sendHuman(chatId, lines + (fedaUrl ? "👇 Clique pour payer et recevoir les codes automatiquement :" : [`📲 Paiement Mobile Money :`,`   Numéro : <code>${mobileNum}</code>`,`   Montant : <code>${price} FCFA</code>`,shortRef ? `   Réf : <code>${shortRef}</code>` : ""].join("\n")), {
-          inline_keyboard: payButtons,
-        }, DELAY_LONG);
-        return;
-      }
-
-      // ── Client confirme avoir payé ─────────────────────────────────────────
-      if (data.startsWith("paie_")) {
-        const orderId = data.replace("paie_", "");
-        const { data: order } = await supabase.from("bot_orders")
-          .select("*, coupons(label, platform, price_fcfa, analyses:analysis_id(team_home, team_away))")
-          .eq("id", orderId).maybeSingle();
-        await answerCallback(cb.id, "⏳ Vérification en cours…");
-        if (!order || order.status !== "pending") {
-          await sendHuman(chatId, "⚠️ Cette commande a déjà été traitée.", undefined, DELAY_SHORT);
-          return;
-        }
-        const c = (order as any).coupons;
-        const name = c ? (c.analyses ? `${c.analyses.team_home} vs ${c.analyses.team_away}` : c.label || "Coupon") : "Coupon";
-        await notifyAdmin(supabase, orderId, cb.from.first_name || "Client", chatId, name, (order as any).amount_fcfa);
-        await sendHuman(chatId, [
-          `⏳ <b>Paiement en cours de vérification</b>`, ``,
-          `Notre équipe vérifie ton paiement. Tu recevras le code complet <b>dans les prochaines minutes</b>.`, ``,
-          `📌 Réf : <code>${orderId.slice(0,8).toUpperCase()}</code>`,
-        ].join("\n"), undefined, DELAY_SHORT);
-        return;
-      }
-
-      // ── Admin confirme paiement ────────────────────────────────────────────
-      if (data.startsWith("confirm_")) {
-        const orderId = data.replace("confirm_", "");
-        await answerCallback(cb.id);
-        const result = await confirmBotOrder(supabase, orderId);
-        if (!result) {
-          await editMessage(chatId, messageId, "⚠️ Commande introuvable ou déjà traitée.");
-          return;
-        }
-        await deliverCode(result.buyerChatId, result.couponCode, result.platform, result.amount);
-        await editMessage(chatId, messageId, `✅ <b>Confirmé !</b>\nCode <code>${result.couponCode}</code> livré au client.`);
-        return;
-      }
-
-      // ── Admin refuse paiement ─────────────────────────────────────────────
-      if (data.startsWith("refuse_")) {
-        const orderId = data.replace("refuse_", "");
-        await supabase.from("bot_orders").update({ status: "cancelled" }).eq("id", orderId);
-        await answerCallback(cb.id, "❌ Refusé");
-        await editMessage(chatId, messageId, `❌ <b>Paiement refusé.</b>`);
-        const { data: order } = await supabase.from("bot_orders").select("buyer_chat_id").eq("id", orderId).maybeSingle();
-        if (order?.buyer_chat_id) {
-          await sendMessage(order.buyer_chat_id, "❌ <b>Paiement non confirmé.</b>\n\nContacte le support ou tape /coupons pour voir d'autres coupons.");
-        }
-        return;
-      }
-
-      // ── PRONOSTICS TOUT-EN-UN callbacks ─────────────────────────────────────
-      if (data === "pronostics_menu" || data === "analyses_menu") {
-        await answerCallback(cb.id);
-        await sendCompetitionList(chatId, supabase);
-        return;
-      }
-
-      if (data.startsWith("comp:")) {
-        const leagueId = data.slice(5); // ID TheSportsDB numérique
-        await answerCallback(cb.id);
-        await sendMatchesList(chatId, leagueId, supabase);
-        return;
-      }
-
-      if (data.startsWith("mat:")) {
-        const analysisId = data.slice(4);
-        await answerCallback(cb.id);
-        await sendMatchAnalysis(chatId, analysisId, supabase);
-        return;
-      }
-
-      // Sélection de marché → analyse sophistiquée
-      if (data.startsWith("mkt:")) {
-        // Format: mkt:{uuid}:{market}
-        const parts    = data.slice(4).split(":");
-        const market   = parts.pop() as Market;
-        const analysisId = parts.join(":");
-        await answerCallback(cb.id);
-        await sendMarketAnalysis(chatId, analysisId, market, supabase);
-        return;
-      }
-
-      // Recherche par texte libre
-      if (data === "search_match") {
-        await answerCallback(cb.id);
-        await setBotState(supabase, chatId, "awaiting_search", {});
+        const base2 = await getBase(supabase);
+        const pubWebUrl = base2 + "/vendeur?tg=1";
         await sendMessage(chatId, [
-          `🔍 <b>Recherche de match</b>`,``,
-          `Tape le nom d'une équipe ou d'une compétition :`,
-          `<i>Exemple : PSG · Barcelona · Ligue 1 · Premier League</i>`,
+          "📤 <b>Publier un coupon</b>", "",
+          "Utilise le formulaire web pour publier ton coupon.", "",
+          "💡 Gains selon ta cote :",
+          "• Cote 1.00 – 5.50 → <b>250 FCFA</b>",
+          "• Cote 5.51 – 16   → <b>500 FCFA</b>",
+          "• Cote > 16        → <b>1 000 FCFA</b>",
         ].join("\n"), {
-          inline_keyboard: [[{ text: "❌ Annuler", callback_data: "pronostics_menu" }]],
+          inline_keyboard: [
+            [{ text: "📝 Ouvrir le formulaire", web_app: { url: pubWebUrl } }],
+            [{ text: "🏠 Menu principal", callback_data: "dashboard_home" }],
+          ],
         });
         return;
       }
 
+      // Voir catalogue
       if (data.startsWith("pub_coupon:")) {
         const eventId = data.slice(11);
         await answerCallback(cb.id);
