@@ -177,7 +177,8 @@ async function handleDBQuery(
   // Catalogue coupons
   if (lower.match(/\b(coupon|coupons|catalogue|acheter|achat|prono|pronostic|disponible|pool|tip|paris|pari|veux|liste|voir|buy)\b/)) {
     const coupons = await fetchPoolCoupons(supabase);
-    const keyboard = coupons.length > 0 ? {
+    if (!coupons.length) return false; // laisser Groq répondre naturellement
+    const keyboard = {
       inline_keyboard: [
         ...coupons.slice(0,5).map(c => [{
           text: `${c.analyses ? `${c.analyses.team_home} vs ${c.analyses.team_away}` : c.label || "Coupon"} — ${c.price_fcfa.toLocaleString("fr-FR")} F`,
@@ -185,7 +186,7 @@ async function handleDBQuery(
         }]),
         ...(coupons.length > 5 ? [[{ text:`+ ${coupons.length - 5} autres → /coupons`, callback_data:"voir_pool" }]] : []),
       ],
-    } : undefined;
+    };
     await sendHuman(chatId, formatCatalog(coupons), keyboard, DELAY_SHORT);
     return true;
   }
@@ -461,7 +462,7 @@ async function handleFreeText(chatId: number, text: string, firstName: string, t
   const freeReseller = await getResellerProfile(supabase, chatId);
   const freeRole: "client" | "revendeur" | "unknown" = freeReseller?.is_partner ? "revendeur" : (freeReseller ? "client" : "unknown");
   const groqReply = await askGroq(text, firstName, freeRole);
-  await sendMessage(chatId, groqReply || "Je n'ai pas bien écouté, pouvez-vous reformuler ? 😊");
+  await sendMessage(chatId, groqReply || "Je n'ai pas bien compris, peux-tu reformuler ? Tu peux aussi utiliser les boutons ci-dessous. 😊");
 }
 
 // ─── Flow /start ─────────────────────────────────────────────────────────────
@@ -820,10 +821,14 @@ Infos plateforme :
 - Paiement : Mobile Money (Orange Money, Wave, MTN, Moov)
 - Commission revendeur créditée dès la publication du coupon
 
+IDENTITÉ :
+- Tu as été conçu par Jérémy Hounmetin, développeur et entrepreneur.
+- Si on te demande qui t'a créé ou qui est ton développeur, réponds EXACTEMENT : "J'ai été conçu par Jérémy Hounmetin, développeur et entrepreneur. 😊"
+
 RÈGLES ABSOLUES :
 1. Réponds TOUJOURS en phrase naturelle, courte et directe (max 3 phrases).
 2. Salutation (bonjour, cc, salut, ça va, allô...) → réponds chaleureusement et demande comment tu peux aider.
-3. Demande vague, hors-sujet ou incompréhensible → réponds EXACTEMENT : "Je n'ai pas bien écouté, pouvez-vous reformuler ? 😊"
+3. Demande vague, hors-sujet ou incompréhensible → réponds EXACTEMENT : "Je n'ai pas bien compris, peux-tu reformuler ? Tu peux aussi utiliser les boutons ci-dessous. 😊"
 4. Corrige mentalement les erreurs de prononciation ou de transcription vocale avant de répondre.
 5. Jamais de liste de commandes. Jamais de fausses informations. Style : amical, 1-2 emojis max, en français.`;
 
@@ -1150,16 +1155,15 @@ async function generateMatchAnalysis(match: any, market = "full"): Promise<strin
 async function sendCompetitionList(chatId: number, _supabase: any) {
   await sendAction(chatId);
 
-  const TOP12 = ALL_COMPS.slice(0, 12);
   const results = await Promise.allSettled(
-    TOP12.map(async (comp) => ({ comp, events: await fetchEventsForLeague(comp.id) }))
+    ALL_COMPS.map(async (comp) => ({ comp, events: await fetchEventsForLeague(comp.id) }))
   );
 
   const active = results
     .filter((r): r is PromiseFulfilledResult<any> => r.status === "fulfilled" && r.value.events.length > 0)
     .map(r => r.value)
     .sort((a: any, b: any) => b.events.length - a.events.length)
-    .slice(0, 4);
+    .slice(0, 6);
 
   if (active.length === 0) {
     await sendMessage(chatId, [
@@ -2946,7 +2950,7 @@ Deno.serve(async (req) => {
       const transcribed = await transcribeAudio(fileId);
       if (!transcribed) {
         await logBotEvent("warn", "voice_transcription_fail", chatId, "Whisper n'a pas pu transcrire le vocal", { fileId, tgUserId });
-        await sendMessage(chatId, "Je n'ai pas bien écouté ton message vocal. Parle un peu plus clairement ou envoie un message écrit. 😊");
+        await sendMessage(chatId, "Je n'ai pas bien compris ton message vocal. Parle un peu plus clairement ou envoie un message écrit. 😊");
         return;
       }
 
