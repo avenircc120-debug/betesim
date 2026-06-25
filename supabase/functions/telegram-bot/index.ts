@@ -276,15 +276,29 @@ async function handleFreeText(chatId: number, text: string, firstName: string, t
         ];
         await sendMessage(chatId, `🔍 <b>Compétitions trouvées pour "${escapeHtml(text.trim())}"</b>`, { inline_keyboard: buttons });
       } else {
-        await sendMessage(chatId, [
-          `🔍 Aucune compétition trouvée pour "<b>${escapeHtml(text.trim())}</b>".`, ``,
-          `💡 Essaie : Ligue 1 · Premier League · CAN · Champions League · Copa America`,
-        ].join("\n"), {
-          inline_keyboard: [
-            [{ text: "🔍 Nouvelle recherche",       callback_data: "search_match"     }],
-            [{ text: "🏠 Voir compétitions actives", callback_data: "pronostics_menu" }],
-          ],
-        });
+        // Fallback : recherche dynamique sur TheSportsDB (Edge Function n'est pas rate-limitée)
+        await sendAction(chatId);
+        const onlineResults = await searchLeaguesOnline(text.trim());
+        if (onlineResults.length > 0) {
+          const buttons = [
+            ...onlineResults.map(l => [{
+              text: `🏆 ${l.name}${l.country ? ` (${l.country})` : ""}`,
+              callback_data: `comp:${l.id}`,
+            }]),
+            [{ text: "🔍 Nouvelle recherche", callback_data: "search_match" }],
+          ];
+          await sendMessage(chatId, `🔍 <b>Résultats pour "${escapeHtml(text.trim())}"</b>\n\nSélectionne la compétition :`, { inline_keyboard: buttons });
+        } else {
+          await sendMessage(chatId, [
+            `🔍 Aucune compétition trouvée pour "<b>${escapeHtml(text.trim())}</b>".`, ``,
+            `💡 Essaie : Botola Pro · CHAN · MTN Ligue 1 · Nigeria Premier · Ghana Premier · PSL · Premier League · CAN`,
+          ].join("\n"), {
+            inline_keyboard: [
+              [{ text: "🔍 Nouvelle recherche",       callback_data: "search_match"     }],
+              [{ text: "🏠 Voir compétitions actives", callback_data: "pronostics_menu" }],
+            ],
+          });
+        }
       }
       return new Response("ok", { status: 200 });
     }
@@ -1061,6 +1075,23 @@ const ALL_COMPS = [
 ];
 
 const SDB_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
+
+// Recherche dynamique de compétitions sur TheSportsDB (depuis Edge Function, sans rate-limit)
+async function searchLeaguesOnline(query: string): Promise<{ id: string; name: string; country: string }[]> {
+  try {
+    const res = await fetch(
+      `https://www.thesportsdb.com/api/v1/json/3/searchleagues.php?t=${encodeURIComponent(query)}`,
+      { headers: { "User-Agent": SDB_UA, Accept: "application/json" }, signal: AbortSignal.timeout(6000) }
+    );
+    if (!res.ok) return [];
+    const json = await res.json() as any;
+    const leagues = (json?.countrys ?? []) as any[];
+    return leagues
+      .filter((l: any) => l.strSport === "Soccer")
+      .slice(0, 6)
+      .map((l: any) => ({ id: String(l.idLeague), name: l.strLeague, country: l.strCountry ?? "" }));
+  } catch { return []; }
+}
 
 // Scraping : prochains matchs d'une compétition (TheSportsDB gratuit)
 async function fetchEventsForLeague(leagueId: string): Promise<any[]> {
