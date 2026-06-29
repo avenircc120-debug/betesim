@@ -1212,7 +1212,12 @@ Deno.serve(async (req: Request) => {
           getVendor(sb, chatId), getDelivery(sb, chatId),
         ]);
         const role = w ? "grossiste" : r ? "revendeur" : v ? "vendeur" : d ? "livreur" : "visiteur";
-        const ctx = role !== "visiteur" ? `L'utilisateur est ${role} sur ${PLATFORM}.` : "";
+        const actor = w || r || v || d;
+        const balance = actor ? Number(actor.lv_wallet_balance || 0) : null;
+        const actorName = actor ? (actor.full_name || actor.shop_name || firstName) : firstName;
+        const ctx = role !== "visiteur"
+          ? `L'utilisateur est ${role} sur ${PLATFORM}. Prénom : ${actorName}. Solde wallet : ${balance !== null ? balance.toLocaleString('fr-FR') + ' FCFA' : 'inconnu'}.`
+          : "";
         const reply = await askGroq(text, firstName, ctx);
         await sendWithMenu(chatId, reply || `Bonjour ${escapeHtml(firstName)} ! 👋 Comment puis-je t'aider ?`);
         return;
