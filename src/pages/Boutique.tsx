@@ -299,7 +299,7 @@ const Boutique = () => {
         return { id: s.id, name: s.name, emoji: meta.emoji, color: meta.color, instock: s.instock };
       });
     },
-    enabled: !!user,
+    enabled: !!user && selectedCountry !== "0",
     staleTime: 5 * 60 * 1000,
   });
 
@@ -410,7 +410,8 @@ const Boutique = () => {
 
   // ── Filtres services ──────────────────────────────────────────────────────
   const filteredServices = useMemo(() => {
-    const base = smspoolServices ?? ALL_SERVICES;
+    // Use ALL_SERVICES when no country selected OR when SMSpool returned nothing
+    const base = (smspoolServices && smspoolServices.length > 0) ? smspoolServices : ALL_SERVICES;
     if (!search.trim()) return base;
     return base.filter((s) => s.name.toLowerCase().includes(search.toLowerCase()));
   }, [smspoolServices, search]);
@@ -774,7 +775,7 @@ const Boutique = () => {
 
 
                 {/* Grille services — clic = paiement direct */}
-                {loadingServices && (
+                {loadingServices && selectedCountry !== "0" && (
                   <div className="flex items-center justify-center py-8 text-sm text-muted-foreground gap-2">
                     <Loader2 className="h-4 w-4 animate-spin" />
                     Chargement des services…
