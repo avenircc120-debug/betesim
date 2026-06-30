@@ -4,6 +4,19 @@ import { supabase } from "../lib/supabase.js";
 import { logger } from "../lib/logger.js";
 import { deliverValidNumber } from "../lib/number-delivery-engine.js";
 
+// Mapping service ID (client) → nom SMSPool (API)
+// Sans ce mapping, SMSPool reçoit "whatsapp" au lieu de "WhatsApp" et rejette la commande.
+const SERVICE_MAP: Record<string, string> = {
+  whatsapp: "WhatsApp", telegram: "Telegram", signal: "Signal", viber: "Viber",
+  line: "Line", wechat: "WeChat", skype: "Skype", tiktok: "TikTok",
+  instagram: "Instagram", facebook: "Facebook", twitter: "Twitter", snapchat: "Snapchat",
+  linkedin: "LinkedIn", pinterest: "Pinterest", reddit: "Reddit", discord: "Discord",
+  steam: "Steam", twitch: "Twitch", netflix: "Netflix", spotify: "Spotify",
+  tinder: "Tinder", bumble: "Bumble", google: "Google", apple: "Apple",
+  amazon: "Amazon", paypal: "PayPal", airbnb: "Airbnb", uber: "Uber",
+  shein: "Shein", aliexpress: "AliExpress", ebay: "eBay", shopee: "Shopee",
+};
+
 const router = Router();
 
 const SECURITY_TIPS = [
@@ -241,7 +254,8 @@ router.post("/webhook/fedapay", async (req: Request, res: Response) => {
   const metadata = transaction?.metadata ?? {};
   const userId: string | undefined = metadata?.user_id;
   const paymentType: string = metadata?.payment_type ?? "";
-  const service: string = metadata?.service ?? "whatsapp";
+  const rawService: string = metadata?.service ?? "whatsapp";
+  const service: string = SERVICE_MAP[rawService.toLowerCase()] ?? rawService;
   const country: string = metadata?.country ?? "0";
   const productType: "simple" | "partner" =
     metadata?.product_type === "partner" ? "partner" : "simple";
