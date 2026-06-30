@@ -25,10 +25,10 @@ import LoginPage from './pages/LoginPage';
 import PackPartenaire from './pages/PackPartenaire';
 import Admin from './pages/Admin';
 import Onboarding from './pages/Onboarding';
-import Pronostics from './pages/Pronostics';
 import VendeurPage from './pages/VendeurPage';
 import RevendeurDashboard from './pages/RevendeurDashboard';
 import Marketplace from './pages/Marketplace';
+import AjouterProduit from './pages/Pronostics';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -70,6 +70,45 @@ class ErrorBoundary extends Component<{ children: ReactNode }, EBState> {
   }
 }
 
+// ── Layout authentifié (toutes les pages protégées) ────────────────────────
+const AuthenticatedLayout = ({ isTG, showSplash, onSplashComplete }: {
+  isTG: boolean;
+  showSplash: boolean;
+  onSplashComplete: () => void;
+}) => (
+  <AuthProvider>
+    <ProfileGate>
+      {showSplash && <SplashScreen onComplete={onSplashComplete} />}
+      <InAppNotificationBanner />
+      {!isTG && <NotificationPermissionBanner />}
+      {!isTG && <InstallBanner />}
+      <Toaster />
+      <Sonner />
+      <Routes>
+        <Route path="/" element={<Index />} />
+        <Route path="/boutique" element={<Boutique />} />
+        <Route path="/wallet" element={<WalletPage />} />
+        <Route path="/historique" element={<Historique />} />
+        <Route path="/compte" element={<Compte />} />
+        <Route path="/leaderboard" element={<Leaderboard />} />
+        <Route path="/faq" element={<FAQ />} />
+        <Route path="/install" element={<Install />} />
+        <Route path="/auth/callback" element={<AuthCallback />} />
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/auth" element={<LoginPage />} />
+        <Route path="/reset-password" element={<ResetPassword />} />
+        <Route path="/pack-partenaire" element={<PackPartenaire />} />
+        <Route path="/admin" element={<Admin />} />
+        <Route path="/onboarding" element={<Onboarding />} />
+        <Route path="/marketplace" element={<Marketplace />} />
+        <Route path="/dashboard-revendeur" element={<RevendeurDashboard />} />
+        <Route path="/vendeur" element={<VendeurPage />} />
+        <Route path="*" element={<NotFound />} />
+      </Routes>
+    </ProfileGate>
+  </AuthProvider>
+);
+
 const AppContent = () => {
   const isTG = isTelegramWebApp();
 
@@ -88,39 +127,19 @@ const AppContent = () => {
 
   return (
     <BrowserRouter>
-      <AuthProvider>
-        <ProfileGate>
-          {showSplash && <SplashScreen onComplete={handleSplashComplete} />}
-          <InAppNotificationBanner />
-          {!isTG && <NotificationPermissionBanner />}
-          {!isTG && <InstallBanner />}
-          <Toaster />
-          <Sonner />
+      <Routes>
+        {/* ── Page standalone sans authentification ── */}
+        <Route path="/ajouter-produit" element={<AjouterProduit />} />
 
-          <Routes>
-            <Route path="/" element={<Index />} />
-            <Route path="/boutique" element={<Boutique />} />
-            <Route path="/wallet" element={<WalletPage />} />
-            <Route path="/historique" element={<Historique />} />
-            <Route path="/compte" element={<Compte />} />
-            <Route path="/leaderboard" element={<Leaderboard />} />
-            <Route path="/faq" element={<FAQ />} />
-            <Route path="/install" element={<Install />} />
-            <Route path="/auth/callback" element={<AuthCallback />} />
-            <Route path="/login" element={<LoginPage />} />
-            <Route path="/auth" element={<LoginPage />} />
-            <Route path="/reset-password" element={<ResetPassword />} />
-            <Route path="/pack-partenaire" element={<PackPartenaire />} />
-            <Route path="/admin" element={<Admin />} />
-            <Route path="/onboarding" element={<Onboarding />} />
-            <Route path="/marketplace" element={<Marketplace />} />
-          <Route path="/dashboard-revendeur" element={<RevendeurDashboard />} />
-          <Route path="/pronostics" element={<Pronostics />} />
-            <Route path="/vendeur" element={<VendeurPage />} />
-            <Route path="*" element={<NotFound />} />
-          </Routes>
-        </ProfileGate>
-      </AuthProvider>
+        {/* ── Toutes les autres pages avec authentification ── */}
+        <Route path="*" element={
+          <AuthenticatedLayout
+            isTG={isTG}
+            showSplash={showSplash}
+            onSplashComplete={handleSplashComplete}
+          />
+        } />
+      </Routes>
     </BrowserRouter>
   );
 };
