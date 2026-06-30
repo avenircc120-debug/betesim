@@ -13,8 +13,9 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 
 const fadeUp = {
-  initial: { opacity: 0, y: 16 },
-  animate: { opacity: 1, y: 0 },
+  initial: { opacity: 0 },
+  animate: { opacity: 1 },
+  transition: { duration: 0.25 },
 };
 
 const Index = () => {
