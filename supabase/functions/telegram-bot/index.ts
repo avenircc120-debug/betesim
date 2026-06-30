@@ -111,6 +111,60 @@ async function askGroq(userMessage: string, firstName: string, context = ""): Pr
   }
 }
 
+// ─── Recherche produit — détection intention achat ──────────────────────────
+const BUY_KEYWORDS = [
+  "acheter","achète","commander","je veux","je voudrais","je cherche",
+  "je voudrai","disponible","combien","produit","avoir","trouver",
+  "montrez","montre moi","voir","affiche","j'ai besoin","besoin d'",
+  "vente","vend","achète","koi","quoi",
+];
+const STOP_WORDS = new Set([
+  "je","veux","voudrais","voudrai","acheter","achète","un","une","des",
+  "le","la","les","du","de","à","et","ou","en","avec","pour",
+  "sur","dans","par","qui","que","commander","cherche","chercher",
+  "disponible","prix","avoir","voir","trouver","affiche","montre",
+  "moi","svp","stp","please","merci","bonjour","salut","hey",
+  "besoin","d","s","l","m","j","c","y","n","y",
+]);
+
+function detectProductSearch(text: string): string | null {
+  const lower = text.toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu,"");
+  const hasBuyIntent = BUY_KEYWORDS.some(k => lower.includes(k));
+  if (!hasBuyIntent) return null;
+  const words = lower.split(/\s+/)
+    .map(w => w.replace(/[^a-z0-9]/g,""))
+    .filter(w => w.length > 2 && !STOP_WORDS.has(w));
+  return words.length > 0 ? words.slice(0,4).join(" ") : null;
+}
+
+async function searchProductsForBuyer(sb: any, keyword: string): Promise<any[]> {
+  const kw = `%${keyword.replace(/ /g,"%")}%`;
+  const { data: products } = await sb.from("lv_products")
+    .select("id,name,description,image_url,stock")
+    .eq("is_active",true)
+    .or(`name.ilike.${kw},description.ilike.${kw}`)
+    .limit(6);
+  if (!products?.length) return [];
+
+  const ids = products.map((p:any)=>p.id);
+  const { data: rps } = await sb.from("lv_reseller_products")
+    .select("id,retail_price,product_id,reseller:reseller_id(shop_name,full_name)")
+    .in("product_id",ids).eq("is_active",true).limit(4);
+
+  const rpMap: Record<string,any> = {};
+  for (const rp of rps??[]) rpMap[rp.product_id] = rp;
+
+  return products.slice(0,3).map((p:any)=>{
+    const rp = rpMap[p.id];
+    return {
+      id:    rp ? rp.id : `wp_${p.id}`,
+      name:  p.name,
+      price: rp ? Number(rp.retail_price) : null,
+      stock: p.stock,
+    };
+  }).filter((p:any)=>p.stock>0||true);
+}
+
 // ─── State machine (réutilise bot_sessions existant) ─────────────────────────
 const _cache = new Map<number, { state: string; data: Record<string, unknown> } | null>();
 
@@ -1181,7 +1235,7 @@ Deno.serve(async (req: Request) => {
           return;
         }
 
-        // ── Message libre → Groq IA ────────────────────────────────────────────
+        // ── Message libre — recherche produit ou Groq IA ──────────────────────
         await sendAction(chatId);
         const [w, r, v, d] = await Promise.all([
           getWholesaler(sb, chatId), getReseller(sb, chatId),
@@ -1191,6 +1245,49 @@ Deno.serve(async (req: Request) => {
         const actor = w || r || v || d;
         const balance = actor ? Number(actor.lv_wallet_balance || 0) : null;
         const actorName = actor ? (actor.full_name || actor.shop_name || firstName) : firstName;
+
+        // Si l'utilisateur est acheteur/visiteur → tenter une recherche produit
+        if (!w && !r && !d) {
+          const keyword = detectProductSearch(text);
+          if (keyword) {
+            const found = await searchProductsForBuyer(sb, keyword);
+            const appUrl = Deno.env.get("APP_URL") || "https://betesim.vercel.app";
+            const vitrineUrl = `${appUrl}/vitrine?chatId=${chatId}`;
+
+            if (found.length > 0) {
+              const prodButtons = found.map((p:any) => [{
+                text: `🛍️ ${p.name}${p.price ? ` — ${Number(p.price).toLocaleString("fr-FR")} F` : ""}`,
+                url: `${appUrl}/vitrine?chatId=${chatId}&id=${p.id}`,
+              }]);
+              await sendMessage(chatId, [
+                `🔍 J'ai trouvé <b>${found.length} produit${found.length>1?"s":""}</b> pour « ${escapeHtml(keyword)} » :`,
+                ``,
+                `Clique sur un produit pour voir la publication et l'ajouter au panier.`,
+              ].join("\n"), {
+                inline_keyboard: [
+                  ...prodButtons,
+                  [{ text: "😕 Pas satisfait ? Voir toute la vitrine", url: vitrineUrl }],
+                  [{ text: "🛒 Mon Panier", callback_data: "lv_cart" }],
+                ],
+              });
+              return;
+            } else {
+              // Aucun résultat → lien vers vitrine complète
+              await sendMessage(chatId, [
+                `😕 Je n'ai pas trouvé de produit pour « ${escapeHtml(keyword)} ».`,
+                ``,
+                `Mais notre vitrine regroupe tous les produits disponibles ! 👇`,
+              ].join("\n"), {
+                inline_keyboard: [
+                  [{ text: "🌐 Voir toute la vitrine", url: vitrineUrl }],
+                  [{ text: "🛍️ Parcourir le catalogue", callback_data: "lv_catalog" }],
+                ],
+              });
+              return;
+            }
+          }
+        }
+
         const ctx = role !== "visiteur"
           ? `L'utilisateur est ${role} sur ${PLATFORM}. Prénom : ${actorName}. Solde wallet : ${balance !== null ? balance.toLocaleString('fr-FR') + ' FCFA' : 'inconnu'}.`
           : "";
