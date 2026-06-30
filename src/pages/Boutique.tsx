@@ -767,12 +767,34 @@ const Boutique = () => {
                     type="text"
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
-                    placeholder="Rechercher un service…"
-                    className="w-full rounded-xl border border-border bg-card pl-9 pr-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+                    placeholder="Rechercher parmi les services (WhatsApp, Google…)"
+                    className="w-full rounded-xl border border-border bg-card pl-9 pr-9 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
                   />
+                  {search && (
+                    <button
+                      onClick={() => setSearch("")}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      ✕
+                    </button>
+                  )}
                 </div>
 
-
+                {/* Compteur résultats */}
+                <div className="flex items-center justify-between text-xs text-muted-foreground px-1">
+                  <span>
+                    {loadingServices
+                      ? "Chargement…"
+                      : search.trim()
+                        ? `${filteredServices.length} résultat${filteredServices.length !== 1 ? "s" : ""} pour « ${search} »`
+                        : `${filteredServices.length} services disponibles`}
+                  </span>
+                  {search && (
+                    <button onClick={() => setSearch("")} className="text-primary hover:underline">
+                      Effacer
+                    </button>
+                  )}
+                </div>
 
                 {/* Grille services — clic = paiement direct */}
                 {loadingServices && (
@@ -781,7 +803,7 @@ const Boutique = () => {
                     Chargement des services…
                   </div>
                 )}
-                <div className="grid grid-cols-4 gap-2 max-h-80 overflow-y-auto pr-1">
+                <div className="grid grid-cols-4 gap-2 max-h-96 overflow-y-auto pr-1">
                   {!loadingServices && filteredServices.map((s) => (
                     <motion.button
                       key={s.id}
