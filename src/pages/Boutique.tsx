@@ -445,6 +445,9 @@ const Boutique = () => {
         userId: user.id,
         paymentType: "number_purchase",
         callbackUrl: `${window.location.origin}/boutique`,
+        service: selectedService.id,
+        country: selectedCountry,
+        productType: selectedProduct,
       });
       window.location.href = result.paymentUrl;
     } catch (e: any) {
