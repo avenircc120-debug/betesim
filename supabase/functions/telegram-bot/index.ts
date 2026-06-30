@@ -267,6 +267,7 @@ async function sendWholesalerDashboard(chatId: number, w: any, sb: any) {
   ].join("\n"), [
     [{ text: "➕ Ajouter un produit",        callback_data: "lv_add_product"    }],
     [{ text: "📋 Gérer mes produits",         callback_data: "lv_my_products"    }],
+    [{ text: "🌐 Voir mes publications",       url: `${Deno.env.get("APP_URL")||"https://betesim.vercel.app"}/vitrine?chatId=${chatId}` }],
     [{ text: "🔗 Lien recrutement revendeurs", callback_data: "lv_recruit_link"   }],
   ]);
 }
@@ -297,6 +298,7 @@ async function sendResellerDashboard(chatId: number, r: any, sb: any) {
     lines.length ? `\n<b>Ma boutique :</b>\n${lines.join("\n")}` : `\n<i>Ajoute des produits à ta boutique.</i>`,
   ].join("\n"), [
     [{ text: "🛍️ Parcourir le catalogue",   callback_data: "lv_browse_wholesale"  }],
+    [{ text: "🌐 Voir mes publications",       url: `${Deno.env.get("APP_URL")||"https://betesim.vercel.app"}/vitrine?chatId=${chatId}` }],
     [{ text: "🔗 Mon lien de revente",        callback_data: "lv_my_store_link"     }],
     [{ text: "💸 Retirer mes gains",          callback_data: "lv_withdraw"           }],
   ]);
@@ -317,6 +319,7 @@ async function sendVendorDashboard(chatId: number, v: any, _sb: any) {
     `🔗 Ton lien : <code>${link}</code>`,
   ].join("\n"), [
     [{ text: "📋 Copier mon lien",    callback_data: "lv_vendor_link"   }],
+    [{ text: "🌐 Voir la vitrine",   url: `${Deno.env.get("APP_URL")||"https://betesim.vercel.app"}/vitrine?chatId=${chatId}` }],
     [{ text: "💸 Retirer mes gains", callback_data: "lv_withdraw"        }],
   ]);
 }
