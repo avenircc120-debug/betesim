@@ -29,6 +29,7 @@ import VendeurPage from './pages/VendeurPage';
 import RevendeurDashboard from './pages/RevendeurDashboard';
 import Marketplace from './pages/Marketplace';
 import AjouterProduit from './pages/Pronostics';
+import Vitrine from './pages/Vitrine';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -36,7 +37,6 @@ const queryClient = new QueryClient({
   },
 });
 
-// Détecte si l'app est ouverte dans Telegram WebApp (?tg=1 ou initData présent)
 const isTelegramWebApp = () => {
   try {
     if (new URLSearchParams(window.location.search).get('tg') === '1') return true;
@@ -47,7 +47,6 @@ const isTelegramWebApp = () => {
   }
 };
 
-// ── Error Boundary ── affiche l'erreur au lieu d'une page blanche
 interface EBState { error: Error | null }
 class ErrorBoundary extends Component<{ children: ReactNode }, EBState> {
   state: EBState = { error: null };
@@ -70,7 +69,6 @@ class ErrorBoundary extends Component<{ children: ReactNode }, EBState> {
   }
 }
 
-// ── Layout authentifié (toutes les pages protégées) ────────────────────────
 const AuthenticatedLayout = ({ isTG, showSplash, onSplashComplete }: {
   isTG: boolean;
   showSplash: boolean;
@@ -114,10 +112,7 @@ const AppContent = () => {
 
   const [showSplash, setShowSplash] = useState(() => {
     if (isTelegramWebApp()) return false;
-    try {
-      const seen = sessionStorage.getItem('betesim-splash-seen');
-      return !seen;
-    } catch { return false; }
+    try { return !sessionStorage.getItem('betesim-splash-seen'); } catch { return false; }
   });
 
   const handleSplashComplete = () => {
@@ -128,10 +123,11 @@ const AppContent = () => {
   return (
     <BrowserRouter>
       <Routes>
-        {/* ── Page standalone sans authentification ── */}
+        {/* ── Pages standalone — accessibles sans authentification ── */}
         <Route path="/ajouter-produit" element={<AjouterProduit />} />
+        <Route path="/vitrine"         element={<Vitrine />} />
 
-        {/* ── Toutes les autres pages avec authentification ── */}
+        {/* ── Reste de l'app avec authentification ── */}
         <Route path="*" element={
           <AuthenticatedLayout
             isTG={isTG}
