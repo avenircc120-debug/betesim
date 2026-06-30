@@ -316,20 +316,25 @@ async function sendBuyerCatalog(chatId: number, sb: any, resellerLink?: string) 
     return;
   }
 
-  const buttons = items.map((rp: any) => [{
+  const appUrl    = Deno.env.get("APP_URL") || "https://betesim.vercel.app";
+  const vitrineUrl = `${appUrl}/vitrine?chatId=${chatId}`;
+  const featured   = (items || []).slice(0, 4);
+
+  const buttons = featured.map((rp: any) => [{
     text: `🛍️ ${rp.product?.name || "Produit"} — ${Number(rp.retail_price).toLocaleString("fr-FR")} F`,
-    callback_data: `lv_item:${rp.id}`,
+    url: `${appUrl}/vitrine?chatId=${chatId}&id=${rp.id}`,
   }]);
 
   await sendMessage(chatId, [
     `🛒 <b>Catalogue ${PLATFORM}</b>`,
     ``,
-    `${items.length} produit${items.length>1?"s":""} disponible${items.length>1?"s":""}. Clique pour commander :`,
+    `${items.length} produit${items.length>1?"s":""} disponible${items.length>1?"s":""}. Clique sur un produit pour voir la publication :`,
   ].join("\n"), {
     inline_keyboard: [
       ...buttons,
-      [{ text: "🛒 Mon Panier", callback_data: "lv_cart" }],
-      [{ text: "🏠 Accueil",    callback_data: "lv_home"  }],
+      [{ text: "🌐 Voir toute la vitrine", url: vitrineUrl }],
+      [{ text: "🛒 Mon Panier",             callback_data: "lv_cart" }],
+      [{ text: "🏠 Accueil",                callback_data: "lv_home"  }],
     ],
   });
 }
@@ -590,6 +595,7 @@ Deno.serve(async (req: Request) => {
             .eq("id", rpId).maybeSingle();
           if (!rp) { await sendMessage(chatId, "❌ Produit introuvable."); return; }
           const p = rp.product as any;
+          const appUrlItem = Deno.env.get("APP_URL") || "https://betesim.vercel.app";
           await sendMessage(chatId, [
             `🛍️ <b>${escapeHtml(p?.name || "Produit")}</b>`,
             p?.description ? `\n📝 ${escapeHtml(p.description)}` : "",
@@ -598,6 +604,7 @@ Deno.serve(async (req: Request) => {
             `📦 Stock : ${p?.stock > 0 ? `<b>${p.stock}</b> disponible${p.stock>1?"s":""}` : "<b>Rupture</b>"}`,
           ].filter(Boolean).join("\n"), {
             inline_keyboard: [
+              [{ text: "🌐 Voir la publication", url: `${appUrlItem}/vitrine?chatId=${chatId}&id=${rpId}` }],
               p?.stock > 0 ? [{ text: "🛒 Ajouter au panier", callback_data: `lv_addcart:${rpId}` }] : [],
               [{ text: "◀ Retour catalogue",  callback_data: "lv_catalog" }],
             ].filter(r => r.length > 0),
