@@ -12,6 +12,9 @@ export interface CreatePaymentOptions {
   userId: string;
   paymentType: string;
   callbackUrl: string;
+  service?: string;
+  country?: string;
+  productType?: "simple" | "partner";
 }
 
 export interface CreatePaymentResult {
@@ -37,6 +40,9 @@ export async function createFedaPayTransaction(
         user_id: options.userId,
         payment_type: options.paymentType,
         callback_url: options.callbackUrl,
+        service: options.service,
+        country: options.country,
+        product_type: options.productType,
       },
     }
   );
