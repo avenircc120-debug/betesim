@@ -648,12 +648,20 @@ Deno.serve(async (req: Request) => {
         if (data === "lv_add_product") {
           const w = await getWholesaler(sb, chatId);
           if (!w) { await sendMessage(chatId, "🔒 Crée d'abord ton profil grossiste."); return; }
-          await setBotState(sb, chatId, "lv_await_product_name", { wholesalerId: w.id });
+          const appUrl = Deno.env.get("APP_URL") || "https://betesim.vercel.app";
+          const formUrl = `${appUrl}/ajouter-produit?chatId=${chatId}&wholesalerId=${encodeURIComponent(w.id)}`;
           await sendMessage(chatId, [
-            `➕ <b>Nouveau produit</b>`,
+            `➕ <b>Ajouter un produit</b>`,
             ``,
-            `Quel est le nom du produit ?`,
-          ].join("\n"), { inline_keyboard: [[{ text: "❌ Annuler", callback_data: "lv_dashboard" }]] });
+            `Clique sur le bouton ci-dessous pour remplir le formulaire en ligne.`,
+            ``,
+            `📸 Tu pourras y ajouter le nom, le prix, le stock et une photo.`,
+          ].join("\n"), {
+            inline_keyboard: [
+              [{ text: "🌐 Remplir le formulaire", url: formUrl }],
+              [{ text: "❌ Annuler", callback_data: "lv_dashboard" }],
+            ],
+          });
           return;
         }
 
@@ -1024,46 +1032,7 @@ Deno.serve(async (req: Request) => {
           return;
         }
 
-        // Grossiste : nom produit
-        if (session?.state === "lv_await_product_name") {
-          await setBotState(sb, chatId, "lv_await_product_price", { ...(session.data as any), productName: text });
-          await sendMessage(chatId, [
-            `💰 <b>${escapeHtml(text)}</b>`,
-            ``,
-            `Prix de base (ce que tu verses à toi-même, en FCFA) ?`,
-            `<i>Exemple : 5000</i>`,
-          ].join("\n"), { inline_keyboard: [[{ text: "❌ Annuler", callback_data: "lv_dashboard" }]] });
-          return;
-        }
-
-        if (session?.state === "lv_await_product_price") {
-          const price = parseFloat(text.replace(/[^0-9.]/g,""));
-          if (isNaN(price) || price <= 0) { await sendMessage(chatId, "⚠️ Prix invalide. Exemple : 5000"); return; }
-          await setBotState(sb, chatId, "lv_await_product_stock", { ...(session.data as any), productPrice: price });
-          await sendMessage(chatId, "📦 Quantité en stock ?", { inline_keyboard: [[{ text: "❌ Annuler", callback_data: "lv_dashboard" }]] });
-          return;
-        }
-
-        if (session?.state === "lv_await_product_stock") {
-          const d = session.data as any;
-          const stock = parseInt(text.replace(/[^0-9]/g,""),10);
-          if (isNaN(stock) || stock < 0) { await sendMessage(chatId, "⚠️ Stock invalide."); return; }
-          await sb.from("lv_products").insert({
-            wholesaler_id: d.wholesalerId, name: d.productName,
-            base_price: d.productPrice, stock, is_active: true,
-          });
-          await clearBotState(sb, chatId);
-          await sendWithMenu(chatId, [
-            `✅ <b>Produit ajouté !</b>`,
-            ``,
-            `📦 <b>${escapeHtml(d.productName)}</b>`,
-            `💰 Prix : ${Number(d.productPrice).toLocaleString("fr-FR")} FCFA · Stock : ${stock}`,
-          ].join("\n"), [
-            [{ text: "➕ Ajouter un autre", callback_data: "lv_add_product" }],
-            [{ text: "📋 Mes produits",      callback_data: "lv_my_products" }],
-          ]);
-          return;
-        }
+        // Saisie produit supprimée : flux redirigé vers formulaire web (/ajouter-produit)
 
         // Grossiste : modifier prix produit
         if (session?.state === "lv_await_new_price") {
