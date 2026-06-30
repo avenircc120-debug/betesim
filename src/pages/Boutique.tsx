@@ -284,12 +284,12 @@ const Boutique = () => {
     staleTime: 10 * 60 * 1000,
   });
 
-  // Catalogue SMSpool — services disponibles pour le pays sélectionné
+  // Catalogue SMSpool — tous les services disponibles (1 seul appel, pas de filtre pays)
   const { data: smspoolServices, isLoading: loadingServices } = useQuery({
-    queryKey: ["smspool-services", selectedCountry],
+    queryKey: ["smspool-services"],
     queryFn: async () => {
       const resp = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/winpack-catalog?action=services&country=${selectedCountry}`,
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/winpack-catalog?action=services`,
         { headers: { apikey: import.meta.env.VITE_SUPABASE_ANON_KEY } }
       );
       const json = await resp.json();
@@ -299,8 +299,8 @@ const Boutique = () => {
         return { id: s.id, name: s.name, emoji: meta.emoji, color: meta.color, instock: s.instock };
       });
     },
-    enabled: !!user && selectedCountry !== "0",
-    staleTime: 5 * 60 * 1000,
+    enabled: true,
+    staleTime: 30 * 60 * 1000,
   });
 
   // ── Récupère le subscription_id à partir du numéro livré ──────────────────
@@ -775,7 +775,7 @@ const Boutique = () => {
 
 
                 {/* Grille services — clic = paiement direct */}
-                {loadingServices && selectedCountry !== "0" && (
+                {loadingServices && (
                   <div className="flex items-center justify-center py-8 text-sm text-muted-foreground gap-2">
                     <Loader2 className="h-4 w-4 animate-spin" />
                     Chargement des services…
