@@ -52,22 +52,28 @@ function escapeHtml(s: string) {
 }
 
 // ─── Menu de navigation universel ────────────────────────────────────────────
-const NAV_KEYBOARD = (extra: any[][] = []) => ({
-  inline_keyboard: [
-    ...extra,
-    [
-      { text: "🏠 Accueil",     callback_data: "lv_home"      },
-      { text: "📊 Dashboard",   callback_data: "lv_dashboard" },
+const NAV_KEYBOARD = (chatId: number, extra: any[][] = []) => {
+  const appUrl = Deno.env.get("APP_URL") || "https://betesim.vercel.app";
+  return {
+    inline_keyboard: [
+      ...extra,
+      [
+        { text: "🏠 Accueil",    callback_data: "lv_home"      },
+        { text: "📊 Dashboard",  callback_data: "lv_dashboard" },
+      ],
+      [
+        { text: "💰 Mon Wallet", callback_data: "lv_wallet"    },
+        { text: "📦 Boutiques",  callback_data: "lv_catalog"   },
+      ],
+      [
+        { text: "🌐 Vitrine",    url: `${appUrl}/vitrine?chatId=${chatId}` },
+      ],
     ],
-    [
-      { text: "💰 Mon Wallet",  callback_data: "lv_wallet"    },
-      { text: "📦 Boutiques",   callback_data: "lv_catalog"   },
-    ],
-  ],
-});
+  };
+};
 
 const sendWithMenu = (chatId: number, text: string, extra: any[][] = []) =>
-  sendMessage(chatId, text, NAV_KEYBOARD(extra));
+  sendMessage(chatId, text, NAV_KEYBOARD(chatId, extra));
 
 // ─── Groq IA — guide conversationnel ────────────────────────────────────────
 const GROQ_SYSTEM = `Tu es l'assistant IA de ${PLATFORM}, une plateforme de commerce et livraison en Afrique de l'Ouest.
@@ -267,7 +273,6 @@ async function sendWholesalerDashboard(chatId: number, w: any, sb: any) {
   ].join("\n"), [
     [{ text: "➕ Ajouter un produit",        callback_data: "lv_add_product"    }],
     [{ text: "📋 Gérer mes produits",         callback_data: "lv_my_products"    }],
-    [{ text: "🌐 Voir mes publications",       url: `${Deno.env.get("APP_URL")||"https://betesim.vercel.app"}/vitrine?chatId=${chatId}` }],
     [{ text: "🔗 Lien recrutement revendeurs", callback_data: "lv_recruit_link"   }],
   ]);
 }
@@ -298,7 +303,6 @@ async function sendResellerDashboard(chatId: number, r: any, sb: any) {
     lines.length ? `\n<b>Ma boutique :</b>\n${lines.join("\n")}` : `\n<i>Ajoute des produits à ta boutique.</i>`,
   ].join("\n"), [
     [{ text: "🛍️ Parcourir le catalogue",   callback_data: "lv_browse_wholesale"  }],
-    [{ text: "🌐 Voir mes publications",       url: `${Deno.env.get("APP_URL")||"https://betesim.vercel.app"}/vitrine?chatId=${chatId}` }],
     [{ text: "🔗 Mon lien de revente",        callback_data: "lv_my_store_link"     }],
     [{ text: "💸 Retirer mes gains",          callback_data: "lv_withdraw"           }],
   ]);
@@ -319,7 +323,6 @@ async function sendVendorDashboard(chatId: number, v: any, _sb: any) {
     `🔗 Ton lien : <code>${link}</code>`,
   ].join("\n"), [
     [{ text: "📋 Copier mon lien",    callback_data: "lv_vendor_link"   }],
-    [{ text: "🌐 Voir la vitrine",   url: `${Deno.env.get("APP_URL")||"https://betesim.vercel.app"}/vitrine?chatId=${chatId}` }],
     [{ text: "💸 Retirer mes gains", callback_data: "lv_withdraw"        }],
   ]);
 }
