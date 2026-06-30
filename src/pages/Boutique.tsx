@@ -61,6 +61,52 @@ const ALL_SERVICES: Service[] = [
 ];
 
 const CATEGORIES = ["Tous", "Messagerie", "Réseaux sociaux", "Gaming / Divertissement", "Rencontres", "Tech", "Shopping"];
+// Map emoji + couleur par nom de service (matching insensible à la casse)
+const SERVICE_META: Record<string, { emoji: string; color: string }> = {
+  whatsapp:    { emoji: "💬", color: "bg-green-500"   },
+  telegram:    { emoji: "✈️",  color: "bg-sky-500"     },
+  signal:      { emoji: "🔒", color: "bg-blue-600"    },
+  viber:       { emoji: "📳", color: "bg-violet-500"  },
+  line:        { emoji: "💚", color: "bg-green-600"   },
+  wechat:      { emoji: "🟢", color: "bg-green-400"   },
+  skype:       { emoji: "☁️",  color: "bg-blue-500"    },
+  tiktok:      { emoji: "🎵", color: "bg-black"       },
+  instagram:   { emoji: "📸", color: "bg-pink-600"    },
+  facebook:    { emoji: "👤", color: "bg-blue-700"    },
+  twitter:     { emoji: "🐦", color: "bg-sky-400"     },
+  snapchat:    { emoji: "👻", color: "bg-yellow-400"  },
+  linkedin:    { emoji: "💼", color: "bg-blue-800"    },
+  pinterest:   { emoji: "📌", color: "bg-red-500"     },
+  reddit:      { emoji: "🤖", color: "bg-orange-500"  },
+  discord:     { emoji: "🎮", color: "bg-indigo-600"  },
+  steam:       { emoji: "🕹️", color: "bg-gray-800"    },
+  twitch:      { emoji: "📺", color: "bg-purple-600"  },
+  netflix:     { emoji: "🎬", color: "bg-red-600"     },
+  spotify:     { emoji: "🎵", color: "bg-green-700"   },
+  tinder:      { emoji: "❤️",  color: "bg-red-500"     },
+  bumble:      { emoji: "🐝", color: "bg-yellow-500"  },
+  google:      { emoji: "🔍", color: "bg-blue-500"    },
+  apple:       { emoji: "🍎", color: "bg-gray-700"    },
+  amazon:      { emoji: "📦", color: "bg-orange-400"  },
+  paypal:      { emoji: "💳", color: "bg-blue-600"    },
+  airbnb:      { emoji: "🏠", color: "bg-rose-500"    },
+  uber:        { emoji: "🚗", color: "bg-black"       },
+  shein:       { emoji: "👗", color: "bg-pink-500"    },
+  aliexpress:  { emoji: "🛒", color: "bg-red-600"     },
+  ebay:        { emoji: "🛍️", color: "bg-blue-700"    },
+  shopee:      { emoji: "🟠", color: "bg-orange-500"  },
+  gmail:       { emoji: "📧", color: "bg-red-500"     },
+  yahoo:       { emoji: "🌐", color: "bg-purple-600"  },
+  microsoft:   { emoji: "🪟", color: "bg-blue-500"    },
+  outlook:     { emoji: "📧", color: "bg-blue-600"    },
+  twitter_x:   { emoji: "🐦", color: "bg-sky-400"     },
+};
+const DEFAULT_SERVICE_META = { emoji: "📱", color: "bg-primary" };
+
+function getServiceMeta(name: string) {
+  const key = name.toLowerCase().replace(/[^a-z0-9]/g, "");
+  return SERVICE_META[key] ?? DEFAULT_SERVICE_META;
+}
 
 // Indicatif d'appel ISO 3166-1 alpha-2 → dial code (couverture mondiale)
 const COUNTRY_DIAL: Record<string, string> = {
@@ -239,6 +285,25 @@ const Boutique = () => {
     staleTime: 10 * 60 * 1000,
   });
 
+  // Catalogue SMSpool — services disponibles pour le pays sélectionné
+  const { data: smspoolServices, isLoading: loadingServices } = useQuery({
+    queryKey: ["smspool-services", selectedCountry],
+    queryFn: async () => {
+      const resp = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/winpack-catalog?action=services&country=${selectedCountry}`,
+        { headers: { apikey: import.meta.env.VITE_SUPABASE_ANON_KEY } }
+      );
+      const json = await resp.json();
+      if (!json.success) return [];
+      return (json.data as { id: string; name: string; instock: number }[]).map((s) => {
+        const meta = getServiceMeta(s.name);
+        return { id: s.id, name: s.name, emoji: meta.emoji, color: meta.color, instock: s.instock };
+      });
+    },
+    enabled: !!user,
+    staleTime: 5 * 60 * 1000,
+  });
+
   // ── Récupère le subscription_id à partir du numéro livré ──────────────────
   const fetchSubscriptionId = useCallback(async (userId: string, number: string): Promise<string | null> => {
     const { data } = await supabase
@@ -346,11 +411,10 @@ const Boutique = () => {
 
   // ── Filtres services ──────────────────────────────────────────────────────
   const filteredServices = useMemo(() => {
-    let list = ALL_SERVICES;
-    if (activeCategory !== "Tous") list = list.filter((s) => s.category === activeCategory);
-    if (search.trim()) list = list.filter((s) => s.name.toLowerCase().includes(search.toLowerCase()));
-    return list;
-  }, [activeCategory, search]);
+    const base = smspoolServices ?? ALL_SERVICES;
+    if (!search.trim()) return base;
+    return base.filter((s) => s.name.toLowerCase().includes(search.toLowerCase()));
+  }, [smspoolServices, search]);
 
   // ── Sélection du service → redirection auto vers paiement ─────────────────
   const handleSelectService = useCallback((s: Service) => {
@@ -727,26 +791,17 @@ const Boutique = () => {
                   />
                 </div>
 
-                {/* Catégories */}
-                <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
-                  {CATEGORIES.map((cat) => (
-                    <button
-                      key={cat}
-                      onClick={() => { setActiveCategory(cat); setSearch(""); }}
-                      className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-medium transition-all ${
-                        activeCategory === cat
-                          ? "gradient-primary text-primary-foreground shadow-sm"
-                          : "bg-card text-muted-foreground shadow-sm"
-                      }`}
-                    >
-                      {cat}
-                    </button>
-                  ))}
-                </div>
+
 
                 {/* Grille services — clic = paiement direct */}
+                {loadingServices && (
+                  <div className="flex items-center justify-center py-8 text-sm text-muted-foreground gap-2">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Chargement des services…
+                  </div>
+                )}
                 <div className="grid grid-cols-4 gap-2 max-h-80 overflow-y-auto pr-1">
-                  {filteredServices.map((s) => (
+                  {!loadingServices && filteredServices.map((s) => (
                     <motion.button
                       key={s.id}
                       whileTap={{ scale: 0.95 }}
