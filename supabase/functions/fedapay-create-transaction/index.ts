@@ -51,6 +51,9 @@ serve(async (req) => {
       payment_type,
       callback_url,
       customer_email,
+      service,
+      country,
+      product_type,
     } = body ?? {};
 
     if (!amount || !description || !callback_url) {
@@ -75,6 +78,9 @@ serve(async (req) => {
         metadata: {
           user_id,
           payment_type: payment_type ?? "number_purchase",
+          service: service ?? "whatsapp",
+          country: country ?? "0",
+          product_type: product_type ?? "simple",
         },
       }),
     });
