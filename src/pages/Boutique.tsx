@@ -21,7 +21,8 @@ interface Service {
   name: string;
   emoji: string;
   color: string;
-  category: string;
+  category?: string;
+  instock?: number;
 }
 
 // ─── Constantes ──────────────────────────────────────────────────────────────
@@ -222,7 +223,6 @@ const PRODUCTS = {
       "Compatible +1 000 services",
     ],
     gradientClass: "from-blue-500 to-blue-700",
-    includesPartner: false,
   }
 };;
 
@@ -244,7 +244,6 @@ const Boutique = () => {
   const [selectedProduct, setSelectedProduct] = useState<Product>("simple");
 
   // UI
-  const [activeCategory, setActiveCategory] = useState("Tous");
   const [search, setSearch] = useState("");
   const [countrySearch, setCountrySearch] = useState("");
   const [showCountryDropdown, setShowCountryDropdown] = useState(false);
@@ -544,7 +543,7 @@ const Boutique = () => {
         <AnimatePresence mode="wait">
 
           {/* ═══════════════════════════════════════════════════════════
-              ÉCRAN 1 — CHOIX DE L'OFFRE (Achat Direct ou Pack Partenaire)
+              ÉCRAN 1 — SÉLECTION PAYS & SERVICE
           ═══════════════════════════════════════════════════════════ */}
           {step === "offer" && (
             <motion.div
@@ -566,7 +565,6 @@ const Boutique = () => {
 
               <div className="space-y-3">
                 {Object.values(PRODUCTS)
-                  .filter((p) => !(p.includesPartner && profile?.is_partner))
                   .map((p) => (
                     <motion.button
                       key={p.id}
@@ -585,9 +583,6 @@ const Boutique = () => {
                         <div className="flex-1">
                           <div className="flex items-center gap-2 flex-wrap">
                             <p className="font-bold text-foreground">{p.name}</p>
-                            {p.includesPartner && (
-                              <span className="rounded-full bg-amber-500/20 px-2 py-0.5 text-[10px] font-bold text-amber-600">RECOMMANDÉ</span>
-                            )}
                           </div>
                           <p className="text-xs text-muted-foreground mt-0.5">{p.description}</p>
                         </div>
@@ -601,7 +596,7 @@ const Boutique = () => {
                       <div className="mt-3 space-y-1.5 border-t border-border/50 pt-3">
                         {p.features.map((f) => (
                           <div key={f} className="flex items-start gap-1.5">
-                            <Check className={`h-3.5 w-3.5 shrink-0 mt-0.5 ${p.includesPartner ? "text-amber-600" : "text-primary"}`} />
+                            <Check className={`h-3.5 w-3.5 shrink-0 mt-0.5 "text-primary"`} />
                             <p className="text-xs text-muted-foreground">{f}</p>
                           </div>
                         ))}
@@ -609,31 +604,16 @@ const Boutique = () => {
                     </motion.button>
                   ))}
 
-                {profile?.is_partner && (
-                  <div className="space-y-2">
-                    <ContinueActivationBanner />
-                    <div className="flex items-center gap-2 rounded-xl border border-green-200 bg-green-50 px-4 py-2.5">
-                      <Check className="h-4 w-4 text-green-600 shrink-0" />
-                      <p className="text-xs text-green-700 font-medium">Pack Officiel acheté — Numéro à 2 000 FCFA pour les prochains.</p>
-                    </div>
-                  </div>
-                )}
-              </div>
+                              </div>
 
               <Button
                 onClick={() => {
-                  if (selectedProduct === "partner") {
-                    requireAuth(() => navigate("/pack-partenaire"));
-                  } else {
-                    requireAuth(() => setStep("select"));
-                  }
+                  requireAuth(() => setStep("select"));
                 }}
                 disabled={isPaying}
                 className="h-13 w-full rounded-xl gradient-primary text-primary-foreground font-bold text-base shadow-glow py-4 disabled:opacity-50"
               >
-                {selectedProduct === "partner"
-                  ? "Continuer — Choisir mon pays"
-                  : "Continuer — Choisir pays & service"}
+                "Continuer — Choisir pays & service"
               </Button>
 
               {/* Comment ça marche */}
