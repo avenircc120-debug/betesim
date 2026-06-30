@@ -1,4 +1,3 @@
-
 // WINPACK — Catalogue interne (pays & services).
 // L'API du fournisseur de numéros n'est jamais exposée au client.
 // Le frontend appelle uniquement cette fonction côté serveur.
@@ -19,7 +18,6 @@ Deno.serve(async (req) => {
 
     const url = new URL(req.url);
     const action = url.searchParams.get("action") ?? "countries";
-    const country = url.searchParams.get("country") ?? "";
 
     let result: any[] = [];
 
@@ -49,20 +47,33 @@ Deno.serve(async (req) => {
       result = [...pinned, ...rest];
 
     } else if (action === "services") {
-      if (!country) throw new Error("country requis");
-      const params = new URLSearchParams({ key: apiKey, country });
-      const res = await fetch("https://api.smspool.net/service/retrieve_all_country", {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: params.toString(),
+      // POST /service/retrieve_all_country is Cloudflare-blocked from server environments.
+      // GET /service/retrieve_all with Bearer auth works and returns all available services.
+      const res = await fetch("https://api.smspool.net/service/retrieve_all", {
+        headers: { Authorization: `Bearer ${apiKey}` },
       });
       const raw = await res.json();
-      const arr = Array.isArray(raw) ? raw : Object.values(raw);
+
+      // SMSpool can return an array directly or { services: [...] } or { data: [...] }
+      let arr: any[] = [];
+      if (Array.isArray(raw)) {
+        arr = raw;
+      } else if (Array.isArray(raw.services)) {
+        arr = raw.services;
+      } else if (Array.isArray(raw.data)) {
+        arr = raw.data;
+      } else {
+        // Flat object like { "1": { name: "WhatsApp", ... }, "2": { ... } }
+        arr = Object.values(raw).filter(
+          (v: any) => typeof v === "object" && v !== null && !Array.isArray(v)
+        );
+      }
+
       result = arr
         .map((s: any) => ({
-          id: String(s.ID ?? s.id ?? ""),
-          name: s.name ?? "",
-          instock: Number(s.instock ?? 0),
+          id: String(s.ID ?? s.id ?? s.service_id ?? ""),
+          name: (s.name ?? s.service_name ?? "").trim(),
+          instock: Number(s.instock ?? s.available ?? 0),
           price: Number(s.price ?? 0),
         }))
         .filter((s: any) => s.id && s.name)
