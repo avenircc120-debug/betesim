@@ -1,5 +1,4 @@
-
-import { ShoppingBag, TrendingUp, Users, ArrowUpRight, Sparkles, Trophy, Download, Phone } from "lucide-react";
+import { ShoppingBag, TrendingUp, Trophy, Download, Phone, ArrowUpRight, Sparkles, Users, Smartphone } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import WalletBanner from "@/components/WalletBanner";
@@ -59,6 +58,8 @@ const Index = () => {
   return (
     <div className="min-h-screen bg-background pb-24">
       <div className="mx-auto max-w-lg space-y-5 px-4 pt-5">
+
+        {/* Header */}
         <motion.div {...fadeUp} className="flex items-center justify-between">
           <div>
             <p className="text-sm text-muted-foreground">Bienvenue 👋</p>
@@ -91,67 +92,42 @@ const Index = () => {
           </div>
         </motion.div>
 
+        {/* Wallet */}
         <motion.div {...fadeUp} transition={{ delay: 0.05 }}>
           <WalletBanner profile={profile ?? null} />
         </motion.div>
 
-        {/* Reprise du tunnel Pack Officiel si commencé mais non terminé */}
+        {/* Reprise tunnel si commencé */}
         {user && (
           <motion.div {...fadeUp} transition={{ delay: 0.07 }}>
             <ContinueActivationBanner />
           </motion.div>
         )}
 
-        {/* Tableau de bord — Le Choix : 2 grandes cartes */}
-        <motion.div {...fadeUp} transition={{ delay: 0.1 }} className="space-y-2">
-          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground px-1">
-            Que voulez-vous faire ?
-          </p>
-          <div className="grid grid-cols-2 gap-3">
-            <motion.button
-              whileTap={{ scale: 0.97 }}
-              onClick={() => navigate("/boutique?product=simple")}
-              className="group flex flex-col items-start gap-3 rounded-2xl bg-card p-4 shadow-card text-left transition-shadow hover:shadow-card-hover border border-primary/20"
-            >
-              <div className="flex h-11 w-11 items-center justify-center rounded-2xl gradient-primary shadow-glow">
-                <ShoppingBag className="h-5 w-5 text-primary-foreground" />
-              </div>
-              <div>
-                <p className="font-bold text-foreground text-sm leading-tight">Achat de service</p>
-                <p className="text-[11px] text-muted-foreground mt-0.5 leading-tight">
-                  WhatsApp, TikTok…<br/>dès 2 000 FCFA
-                </p>
-              </div>
-              <ArrowUpRight className="ml-auto h-4 w-4 text-primary transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
-            </motion.button>
-
-            <motion.button
-              whileTap={{ scale: 0.97 }}
-              onClick={() => navigate("/boutique?product=partner")}
-              className="group flex flex-col items-start gap-3 rounded-2xl bg-amber-500/5 p-4 shadow-card text-left transition-shadow hover:shadow-card-hover border border-amber-400/30 relative overflow-hidden"
-            >
-              <div className="absolute top-2 right-2 rounded-full bg-amber-500 px-2 py-0.5 text-[9px] font-bold text-white uppercase">
-                Pack
-              </div>
-              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-amber-500 shadow-glow">
-                <Users className="h-5 w-5 text-white" />
-              </div>
-              <div>
-                <p className="font-bold text-foreground text-sm leading-tight">Pack Partenaire</p>
-                <p className="text-[11px] text-amber-700 mt-0.5 leading-tight">
-                  Telegram Pro<br/>+ Bot dédié
-                </p>
-              </div>
-              <ArrowUpRight className="ml-auto h-4 w-4 text-amber-500 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
-            </motion.button>
-          </div>
+        {/* CTA principal — Achat SIM Virtuelle (pleine largeur) */}
+        <motion.div {...fadeUp} transition={{ delay: 0.1 }}>
+          <motion.button
+            whileTap={{ scale: 0.97 }}
+            onClick={() => navigate("/boutique")}
+            className="group flex w-full items-center gap-4 rounded-2xl gradient-primary p-5 shadow-glow text-left"
+          >
+            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-white/20">
+              <Smartphone className="h-7 w-7 text-white" />
+            </div>
+            <div className="flex-1">
+              <p className="text-lg font-bold text-white leading-tight">Acheter une SIM Virtuelle</p>
+              <p className="text-sm text-white/80 mt-0.5">WhatsApp, TikTok, Telegram… dès 2 000 FCFA</p>
+            </div>
+            <ArrowUpRight className="h-6 w-6 text-white transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
+          </motion.button>
         </motion.div>
 
+        {/* Stats */}
         <motion.div {...fadeUp} transition={{ delay: 0.15 }} className="grid grid-cols-3 gap-3">
           <div className="rounded-2xl bg-card p-4 shadow-card text-center">
             <Phone className="mx-auto mb-1.5 h-5 w-5 text-primary" />
             <p className="text-xl font-bold text-foreground">{purchasedCount ?? 0}</p>
-            <p className="text-xs text-muted-foreground">Numéros achetés</p>
+            <p className="text-xs text-muted-foreground">SIM achetées</p>
           </div>
           <div className="rounded-2xl bg-card p-4 shadow-card text-center">
             <Users className="mx-auto mb-1.5 h-5 w-5 text-accent" />
@@ -167,6 +143,7 @@ const Index = () => {
           </div>
         </motion.div>
 
+        {/* Raccourcis */}
         <motion.div {...fadeUp} transition={{ delay: 0.2 }} className="grid grid-cols-3 gap-3">
           <motion.button
             whileTap={{ scale: 0.97 }}
@@ -200,6 +177,7 @@ const Index = () => {
           </motion.button>
         </motion.div>
 
+        {/* Installer l'app */}
         <motion.div {...fadeUp} transition={{ delay: 0.25 }}>
           <motion.button
             whileTap={{ scale: 0.97 }}
@@ -217,6 +195,7 @@ const Index = () => {
           </motion.button>
         </motion.div>
 
+        {/* Parrainage — visible seulement si partenaire */}
         {isPartner && (
           <motion.div {...fadeUp} transition={{ delay: 0.3 }} className="rounded-2xl bg-card p-5 shadow-card space-y-4">
             <div className="flex items-center gap-3">
@@ -232,23 +211,6 @@ const Index = () => {
           </motion.div>
         )}
 
-        {!isPartner && (
-          <motion.div {...fadeUp} transition={{ delay: 0.3 }}>
-            <button
-              onClick={() => navigate("/boutique")}
-              className="group flex w-full items-center gap-4 rounded-2xl border border-amber-400/30 bg-amber-500/10 p-5 transition-colors hover:bg-amber-500/15"
-            >
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-amber-500">
-                <Users className="h-6 w-6 text-white" />
-              </div>
-              <div className="text-left flex-1">
-                <p className="font-semibold text-foreground">Devenez Partenaire</p>
-                <p className="text-sm text-amber-600">Pack à 2 500 FCFA — débloquez le parrainage et gagnez des commissions</p>
-              </div>
-              <ArrowUpRight className="h-5 w-5 text-amber-500" />
-            </button>
-          </motion.div>
-        )}
       </div>
       <BottomNav />
     </div>
