@@ -8,7 +8,7 @@ import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "framer-motion";
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { createFedaPayTransaction } from "@/lib/fedapay";
 
@@ -200,6 +200,9 @@ const Boutique = () => {
   // UI
   const [activeCategory, setActiveCategory] = useState("Tous");
   const [search, setSearch] = useState("");
+  const [countrySearch, setCountrySearch] = useState("");
+  const [showCountryDropdown, setShowCountryDropdown] = useState(false);
+  const countryInputRef = useRef<HTMLDivElement>(null);
   const [isPaying, setIsPaying] = useState(false);
 
   // Révélation après paiement
@@ -434,6 +437,25 @@ const Boutique = () => {
   // ── Dérivés ───────────────────────────────────────────────────────────────
   const product        = PRODUCTS[selectedProduct];
   const walletBalance  = profile?.fcfa_balance ?? 0;
+  // Click outside closes country dropdown
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (countryInputRef.current && !countryInputRef.current.contains(e.target as Node)) {
+        setShowCountryDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  // Filtered countries by search
+  const filteredCountries = useMemo(() => {
+    if (!catalogCountries) return [];
+    const q = countrySearch.trim().toLowerCase();
+    if (!q) return catalogCountries;
+    return catalogCountries.filter(c => c.name.toLowerCase().includes(q));
+  }, [catalogCountries, countrySearch]);
+
   const canPayFromWallet = walletBalance >= product.price;
 
   const selectedCountryDisplay = selectedCountry === "0"
@@ -612,26 +634,76 @@ const Boutique = () => {
                   Choisissez le pays
                 </h2>
 
-                <div className="relative">
-                  <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none z-10" />
-                  <select
-                    value={selectedCountry}
-                    onChange={(e) => {
-                      setSelectedCountry(e.target.value);
-                      const opt = e.target.options[e.target.selectedIndex];
-                      setSelectedCountryName(opt.text);
-                    }}
-                    className="w-full rounded-xl border border-border bg-card pl-9 pr-4 py-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 appearance-none"
-                  >
-                    <option value="0">🌍 N'importe quel pays (recommandé)</option>
-                    {loadingCountries && <option disabled>Chargement des pays…</option>}
-                    {(catalogCountries ?? []).map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.short_name ? `[${c.short_name}] ` : ""}{c.name}
-                      </option>
-                    ))}
-                  </select>
-                  <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">▾</div>
+                <div className="relative" ref={countryInputRef}>
+                  {/* Input de recherche */}
+                  <div className="relative">
+                    <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none z-10" />
+                    <input
+                      type="text"
+                      value={countrySearch}
+                      onChange={(e) => { setCountrySearch(e.target.value); setShowCountryDropdown(true); }}
+                      onFocus={() => setShowCountryDropdown(true)}
+                      placeholder={
+                        selectedCountry === "0"
+                          ? "🌍 N'importe quel pays (recommandé)"
+                          : (catalogCountries?.find(c => c.id === selectedCountry)?.name ?? "Rechercher un pays…")
+                      }
+                      className="w-full rounded-xl border border-border bg-card pl-9 pr-9 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+                    />
+                    {countrySearch && (
+                      <button
+                        type="button"
+                        onClick={() => { setCountrySearch(""); setSelectedCountry("0"); setSelectedCountryName("N'importe quel pays"); }}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                      >✕</button>
+                    )}
+                  </div>
+
+                  {/* Dropdown liste pays */}
+                  {showCountryDropdown && (
+                    <div className="absolute z-50 mt-1 w-full rounded-xl border border-border bg-card shadow-lg max-h-56 overflow-y-auto">
+                      {/* Option par défaut */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedCountry("0");
+                          setSelectedCountryName("N'importe quel pays");
+                          setCountrySearch("");
+                          setShowCountryDropdown(false);
+                        }}
+                        className="flex w-full items-center gap-2 px-4 py-2.5 text-sm hover:bg-muted/50 transition-colors border-b border-border/50"
+                      >
+                        <span>🌍</span>
+                        <span className="font-medium">N'importe quel pays</span>
+                        <span className="ml-auto text-xs text-muted-foreground">Recommandé</span>
+                      </button>
+
+                      {/* Résultats filtrés */}
+                      {loadingCountries && (
+                        <div className="px-4 py-3 text-sm text-muted-foreground">Chargement…</div>
+                      )}
+                      {filteredCountries.length === 0 && !loadingCountries && (
+                        <div className="px-4 py-3 text-sm text-muted-foreground">Aucun pays trouvé</div>
+                      )}
+                      {filteredCountries.map((c) => (
+                        <button
+                          key={c.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedCountry(c.id);
+                            setSelectedCountryName(c.name);
+                            setCountrySearch("");
+                            setShowCountryDropdown(false);
+                          }}
+                          className={`flex w-full items-center gap-2 px-4 py-2.5 text-sm hover:bg-muted/50 transition-colors ${selectedCountry === c.id ? 'bg-primary/5 font-semibold text-primary' : 'text-foreground'}`}
+                        >
+                          {c.short_name && <span className="text-xs font-mono text-muted-foreground w-8 shrink-0">[{c.short_name}]</span>}
+                          <span>{c.name}</span>
+                          {selectedCountry === c.id && <span className="ml-auto text-primary">✓</span>}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
 
