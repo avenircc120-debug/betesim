@@ -834,30 +834,50 @@ Deno.serve(async (req: Request) => {
         }
 
         if (data === "lv_browse_wholesale") {
-          const r = await getReseller(sb, chatId);
-          if (!r || !r.wholesaler_id) {
-            await sendMessage(chatId, [
-              `📦 <b>Parcourir les produits grossistes</b>`,
-              ``,
-              `Tu n'es pas encore lié à un grossiste.`,
-              `Demande son lien de recrutement et clique dessus.`,
-            ].join("\n"), { inline_keyboard: [[{ text: "🏠 Accueil", callback_data: "lv_home" }]] });
+          const { data: wholesalers } = await sb.from("lv_wholesalers")
+            .select("id,shop_name,full_name,telegram_chat_id")
+            .eq("is_active", true).order("created_at", { ascending: false }).limit(30);
+          if (!wholesalers?.length) {
+            await sendMessage(chatId, "📭 Aucun grossiste disponible pour l'instant.",
+              { inline_keyboard: [[{ text: "◀ Dashboard", callback_data: "lv_dashboard" }]] });
             return;
           }
+          const buttons = wholesalers.map((w: any) => [{
+            text: `🏗️ ${w.shop_name || w.full_name}`,
+            callback_data: `lv_grossiste:${w.id}`,
+          }]);
+          await sendMessage(chatId, [
+            `🛒 <b>Choisir un grossiste</b>`,
+            ``,
+            `Sélectionne un grossiste pour voir ses produits.`,
+            `Tu peux choisir les articles que tu veux mettre dans ta boutique et fixer ton prix de revente.`,
+          ].join("\n"), { inline_keyboard: [...buttons, [{ text: "◀ Dashboard", callback_data: "lv_dashboard" }]] });
+          return;
+        }
+
+        if (data.startsWith("lv_grossiste:")) {
+          const wholesalerId = data.slice(13);
+          const { data: w } = await sb.from("lv_wholesalers")
+            .select("id,shop_name,full_name").eq("id", wholesalerId).maybeSingle();
           const { data: products } = await sb.from("lv_products")
-            .select("id,name,base_price,stock,is_active")
-            .eq("wholesaler_id", r.wholesaler_id).eq("is_active", true).limit(20);
+            .select("id,name,base_price,stock,photo_url")
+            .eq("wholesaler_id", wholesalerId).eq("is_active", true)
+            .order("created_at", { ascending: false }).limit(25);
           if (!products?.length) {
-            await sendMessage(chatId, "📭 Aucun produit de ton grossiste pour l'instant.");
+            await sendMessage(chatId, `📭 <b>${escapeHtml(w?.shop_name || "Ce grossiste")}</b> n'a pas encore de produits.`,
+              { inline_keyboard: [[{ text: "◀ Retour grossistes", callback_data: "lv_browse_wholesale" }]] });
             return;
           }
           const buttons = products.map((p: any) => [{
-            text: `${p.name} — Base: ${Number(p.base_price).toLocaleString("fr-FR")} F · Stock: ${p.stock}`,
+            text: `${p.name} — ${Number(p.base_price).toLocaleString("fr-FR")} F (stock: ${p.stock})`,
             callback_data: `lv_selectprod:${p.id}`,
           }]);
-          await sendMessage(chatId, `🛍️ <b>Catalogue de ton grossiste (${products.length})</b>\n\nClique pour ajouter à ta boutique :`, {
-            inline_keyboard: [...buttons, [{ text: "◀ Dashboard", callback_data: "lv_dashboard" }]],
-          });
+          await sendMessage(chatId, [
+            `🏗️ <b>${escapeHtml(w?.shop_name || "Grossiste")}</b>`,
+            ``,
+            `${products.length} produit${products.length > 1 ? "s" : ""} disponible${products.length > 1 ? "s" : ""}.`,
+            `Clique sur un produit pour l'ajouter à ta boutique et fixer ton prix.`,
+          ].join("\n"), { inline_keyboard: [...buttons, [{ text: "◀ Retour grossistes", callback_data: "lv_browse_wholesale" }]] });
           return;
         }
 
