@@ -94,10 +94,51 @@ Règles :
 5. Salutation → accueil chaleureux + propose de voir le catalogue.
 6. Style : amical, direct, 1-2 emojis max. Jamais de liste de commandes.`;
 
-async function askGroq(userMessage: string, firstName: string, context = ""): Promise<string | null> {
+// ─── Mémoire conversationnelle Groq ─────────────────────────────────────────
+// Chaque utilisateur a un historique des 10 derniers messages (5 échanges).
+// Groq reçoit cet historique → il se souvient du contexte entre les messages.
+const GROQ_HISTORY_MAX = 10; // messages (= 5 échanges user/assistant)
+
+type GroqMessage = { role: "user" | "assistant"; content: string };
+
+async function getGroqHistory(sb: any, chatId: number): Promise<GroqMessage[]> {
+  try {
+    const { data } = await sb.from("bot_sessions")
+      .select("groq_history")
+      .eq("telegram_chat_id", chatId)
+      .maybeSingle();
+    return Array.isArray(data?.groq_history) ? data.groq_history : [];
+  } catch { return []; }
+}
+
+async function saveGroqHistory(sb: any, chatId: number, history: GroqMessage[]): Promise<void> {
+  try {
+    const trimmed = history.slice(-GROQ_HISTORY_MAX);
+    await sb.rpc("upsert_groq_history", { p_chat_id: chatId, p_history: trimmed });
+  } catch (e: any) {
+    console.error("[groq memory] save error:", e?.message);
+  }
+}
+
+async function clearGroqHistory(sb: any, chatId: number): Promise<void> {
+  try {
+    await sb.rpc("clear_groq_history", { p_chat_id: chatId });
+  } catch (e: any) {
+    console.error("[groq memory] clear error:", e?.message);
+  }
+}
+
+// Appel Groq avec historique conversationnel
+async function askGroq(
+  userMessage: string,
+  firstName: string,
+  context = "",
+  history: GroqMessage[] = []
+): Promise<string | null> {
   const apiKey = Deno.env.get("GROQ_API_KEY");
   if (!apiKey) return null;
   try {
+    const systemContent = GROQ_SYSTEM + (context ? `\n\nContexte utilisateur : ${context}` : "");
     const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
@@ -105,8 +146,9 @@ async function askGroq(userMessage: string, firstName: string, context = ""): Pr
       body: JSON.stringify({
         model: "llama-3.1-8b-instant",
         messages: [
-          { role: "system", content: GROQ_SYSTEM + (context ? `\n\nContexte utilisateur : ${context}` : "") },
-          { role: "user", content: `[${firstName}]: ${userMessage}` },
+          { role: "system",  content: systemContent },
+          ...history,                                          // ← mémoire des échanges précédents
+          { role: "user",    content: `[${firstName}]: ${userMessage}` },
         ],
         max_tokens: 200, temperature: 0.6,
       }),
@@ -1233,6 +1275,8 @@ Deno.serve(async (req: Request) => {
         if (text.startsWith("/start")) {
           const param = text.split(" ")[1] || "";
           await clearBotState(sb, chatId);
+          // Réinitialiser la mémoire Groq sur /start (nouveau départ conversationnel)
+          await clearGroqHistory(sb, chatId);
 
           if (param.startsWith("join_reseller_")) {
             const wholesalerChatId = Number(param.replace("join_reseller_",""));
@@ -1546,8 +1590,18 @@ Deno.serve(async (req: Request) => {
           const catalog = await fetchCatalogForGroq(sb);
           if (catalog) ctx = catalog;
         }
-        const reply = await askGroq(text, firstName, ctx);
-        await sendWithMenu(chatId, reply || `Bonjour ${escapeHtml(firstName)} ! 👋 Comment puis-je t'aider ?`);
+        // Mémoire Groq : charger l'historique conversationnel de cet utilisateur
+        const groqHistory = await getGroqHistory(sb, chatId);
+        const reply = await askGroq(text, firstName, ctx, groqHistory);
+        const finalReply = reply || `Bonjour ${escapeHtml(firstName)} ! 👋 Comment puis-je t'aider ?`;
+        await sendWithMenu(chatId, finalReply);
+
+        // Sauvegarder l'échange en mémoire (fire-and-forget, ne bloque pas la réponse)
+        saveGroqHistory(sb, chatId, [
+          ...groqHistory,
+          { role: 'user',      content: `[${firstName}]: ${text}` },
+          { role: 'assistant', content: finalReply },
+        ]).catch((e: any) => console.error('[groq memory] save:', e?.message));
         return;
       }
 
