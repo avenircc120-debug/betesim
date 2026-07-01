@@ -25,6 +25,7 @@ import LoginPage from './pages/LoginPage';
 import Admin from './pages/Admin';
 import Onboarding from './pages/Onboarding';
 import VendeurPage from './pages/VendeurPage';
+import AjouterProduitVendeur from './pages/AjouterProduitVendeur';
 import RevendeurDashboard from './pages/RevendeurDashboard';
 import Marketplace from './pages/Marketplace';
 import AjouterProduit from './pages/Pronostics';
@@ -123,7 +124,8 @@ const AppContent = () => {
       <Routes>
         {/* ── Pages standalone — accessibles sans authentification ── */}
         <Route path="/ajouter-produit" element={<AjouterProduit />} />
-        <Route path="/vitrine"         element={<Vitrine />} />
+        <Route path="/add-vendeur"      element={<AjouterProduitVendeur />} />
+        <Route path="/vitrine"          element={<Vitrine />} />
 
         {/* ── Reste de l'app avec authentification ── */}
         <Route path="*" element={
