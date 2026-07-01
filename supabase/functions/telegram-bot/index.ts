@@ -1345,7 +1345,7 @@ Deno.serve(async (req: Request) => {
           }
         }
 
-        const ctx = role !== "visiteur"
+        let ctx = role !== "visiteur"
           ? `L'utilisateur est ${role} sur ${PLATFORM}. Prénom : ${actorName}. Solde wallet : ${balance !== null ? balance.toLocaleString('fr-FR') + ' FCFA' : 'inconnu'}.`
           : "";
         // Acheteur/visiteur → injecter le catalogue réel pour que Groq réponde précisément
