@@ -76,21 +76,23 @@ const sendWithMenu = (chatId: number, text: string, extra: any[][] = []) =>
   sendMessage(chatId, text, NAV_KEYBOARD(chatId, extra));
 
 // ─── Groq IA — guide conversationnel ────────────────────────────────────────
-const GROQ_SYSTEM = `Tu es l'assistant IA de ${PLATFORM}, une plateforme de commerce et livraison en Afrique de l'Ouest.
+const GROQ_SYSTEM = `Tu es l'assistant IA de ${PLATFORM}, plateforme de commerce et livraison en Afrique de l'Ouest (Bénin, Côte d'Ivoire, Sénégal…).
+Tu aides SURTOUT les acheteurs à trouver des produits et finaliser leur achat.
 
 Profils disponibles :
-- 🛍️ Acheteur : parcourir le catalogue, ajouter au panier, commander
+- 🛍️ Acheteur : parcourir le catalogue, ajouter au panier, payer via Mobile Money
 - 💼 Grossiste : ajouter des produits, gérer les stocks, recruter des revendeurs
-- 📦 Revendeur : choisir des produits d'un grossiste, fixer ses prix, vendre
-- 👤 Vendeur : partager un lien général, toucher des commissions
-- 🚚 Livreur : recevoir des missions, confirmer les livraisons, être payé
+- 📦 Revendeur : choisir des produits d'un grossiste, fixer ses prix de revente
+- 👤 Vendeur : partager un lien de parrainage, toucher des commissions
+- 🚚 Livreur : recevoir des missions, confirmer les livraisons par scan QR
 
 Règles :
-1. Réponds TOUJOURS en français, phrases courtes (2-3 max).
-2. Guide l'utilisateur vers la bonne option avec les boutons disponibles.
-3. Salutation → réponse chaleureuse + demande le besoin.
-4. Question vague → propose les profils.
-5. Jamais de liste de commandes. Style : amical, 1-2 emojis max.`;
+1. Réponds en français ou dans la langue du message, 2-3 phrases max.
+2. Si un CATALOGUE est fourni dans le contexte, utilise-le pour répondre précisément.
+3. Produit trouvé dans le catalogue → cite son nom + prix + dis de cliquer sur «🛍️ Je veux acheter».
+4. Produit absent → suggère de voir la vitrine complète.
+5. Salutation → accueil chaleureux + propose de voir le catalogue.
+6. Style : amical, direct, 1-2 emojis max. Jamais de liste de commandes.`;
 
 async function askGroq(userMessage: string, firstName: string, context = ""): Promise<string | null> {
   const apiKey = Deno.env.get("GROQ_API_KEY");
@@ -117,6 +119,35 @@ async function askGroq(userMessage: string, firstName: string, context = ""): Pr
   }
 }
 
+
+// ─── Catalogue réel pour contexte Groq ───────────────────────────────────────
+async function fetchCatalogForGroq(sb: any): Promise<string> {
+  try {
+    const { data: rps } = await sb.from('lv_reseller_products')
+      .select('retail_price, product:product_id(name, stock)')
+      .eq('is_active', true).limit(8);
+
+    const { data: wps } = await sb.from('lv_products')
+      .select('name, base_price, stock')
+      .eq('is_active', true).limit(6);
+
+    const lines: string[] = [];
+    for (const rp of rps ?? []) {
+      const p = rp.product as any;
+      if (!p?.name) continue;
+      const stk = p.stock != null ? ` (stock: ${p.stock})` : '';
+      lines.push(`- ${p.name} : ${Number(rp.retail_price).toLocaleString('fr-FR')} FCFA${stk}`);
+    }
+    for (const wp of wps ?? []) {
+      if (!lines.some(l => l.includes(wp.name))) {
+        const stk = wp.stock != null ? ` (stock: ${wp.stock})` : '';
+        lines.push(`- ${wp.name} : ${Number(wp.base_price).toLocaleString('fr-FR')} FCFA${stk}`);
+      }
+    }
+    if (lines.length === 0) return 'Aucun produit disponible pour le moment.';
+    return `Catalogue disponible sur ${PLATFORM} :\n${lines.slice(0, 10).join('\n')}`;
+  } catch { return ''; }
+}
 // ─── Recherche produit — détection intention achat ──────────────────────────
 const BUY_KEYWORDS = [
   "acheter","achète","commander","je veux","je voudrais","je cherche",
@@ -1317,6 +1348,11 @@ Deno.serve(async (req: Request) => {
         const ctx = role !== "visiteur"
           ? `L'utilisateur est ${role} sur ${PLATFORM}. Prénom : ${actorName}. Solde wallet : ${balance !== null ? balance.toLocaleString('fr-FR') + ' FCFA' : 'inconnu'}.`
           : "";
+        // Acheteur/visiteur → injecter le catalogue réel pour que Groq réponde précisément
+        if (!w && !r && !v && !d) {
+          const catalog = await fetchCatalogForGroq(sb);
+          if (catalog) ctx = catalog;
+        }
         const reply = await askGroq(text, firstName, ctx);
         await sendWithMenu(chatId, reply || `Bonjour ${escapeHtml(firstName)} ! 👋 Comment puis-je t'aider ?`);
         return;
