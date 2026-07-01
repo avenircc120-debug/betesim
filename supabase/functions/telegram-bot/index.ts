@@ -123,9 +123,12 @@ async function askGroq(userMessage: string, firstName: string, context = ""): Pr
 // ─── Catalogue réel pour contexte Groq ───────────────────────────────────────
 async function fetchCatalogForGroq(sb: any): Promise<string> {
   try {
+    // RBAC : le contexte Groq pour les Acheteurs n'inclut que les produits Revendeur/Vendeur
     const { data: rps } = await sb.from('lv_reseller_products')
-      .select('retail_price, product:product_id(name, stock)')
-      .eq('is_active', true).limit(8);
+      .select('retail_price, author_role, product:product_id(name, stock)')
+      .eq('is_active', true)
+      .in('author_role', ['revendeur', 'vendeur'])
+      .limit(8);
 
     const { data: wps } = await sb.from('lv_products')
       .select('name, base_price, stock')
@@ -184,9 +187,11 @@ async function searchProductsForBuyer(sb: any, keyword: string): Promise<any[]> 
   if (!products?.length) return [];
 
   const ids = products.map((p:any)=>p.id);
+  // RBAC : exclure les publications Grossiste de la recherche Acheteur
   const { data: rps } = await sb.from("lv_reseller_products")
-    .select("id,retail_price,product_id,reseller:reseller_id(shop_name,full_name)")
-    .in("product_id",ids).eq("is_active",true).limit(4);
+    .select("id,retail_price,product_id,author_role,reseller:reseller_id(shop_name,full_name)")
+    .in("product_id",ids).eq("is_active",true)
+    .in("author_role",["revendeur","vendeur"]).limit(4);
 
   const rpMap: Record<string,any> = {};
   for (const rp of rps??[]) rpMap[rp.product_id] = rp;
@@ -238,6 +243,23 @@ async function getVendor(sb: any, chatId: number) {
 async function getDelivery(sb: any, chatId: number) {
   const { data } = await sb.from("lv_delivery_persons").select("*").eq("telegram_chat_id", chatId).maybeSingle();
   return data;
+}
+
+// ─── RBAC : résolution du rôle Livrauto ──────────────────────────────────────
+// Renvoie le rôle effectif d'un utilisateur à partir de son telegram_chat_id.
+// Ordre de priorité : grossiste > revendeur > vendeur > livreur > acheteur.
+async function getLvRole(sb: any, chatId: number): Promise<string> {
+  const [w, r, v, d] = await Promise.all([
+    getWholesaler(sb, chatId),
+    getReseller(sb, chatId),
+    getVendor(sb, chatId),
+    getDelivery(sb, chatId),
+  ]);
+  if (w) return 'grossiste';
+  if (r) return 'revendeur';
+  if (v) return 'vendeur';
+  if (d) return 'livreur';
+  return 'acheteur';
 }
 
 function makeLink(chatId: number, role: string): string {
@@ -302,9 +324,10 @@ async function sendWholesalerDashboard(chatId: number, w: any, sb: any) {
     `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
     lines.length ? `\n<b>Mes produits :</b>\n${lines.join("\n")}` : `\n<i>Aucun produit encore.</i>`,
   ].join("\n"), [
-    [{ text: "➕ Ajouter un produit",        callback_data: "lv_add_product"    }],
-    [{ text: "📋 Gérer mes produits",         callback_data: "lv_my_products"    }],
-    [{ text: "🔗 Lien recrutement revendeurs", callback_data: "lv_recruit_link"   }],
+    [{ text: "➕ Ajouter un produit",           callback_data: "lv_add_product"      }],
+    [{ text: "📋 Gérer mes produits",            callback_data: "lv_my_products"      }],
+    [{ text: "🔗 Lien recrutement revendeurs",   callback_data: "lv_recruit_link"     }],
+    [{ text: "🏗️→👤 Affecter à un Vendeur",    callback_data: "lv_assign_to_vendor" }],
   ]);
 }
 
@@ -342,6 +365,11 @@ async function sendResellerDashboard(chatId: number, r: any, sb: any) {
 async function sendVendorDashboard(chatId: number, v: any, _sb: any) {
   const wallet = Number(v.lv_wallet_balance || 0);
   const link = v.referral_link || makeLink(chatId, "buy");
+  // RBAC : compter les produits affectés par des Grossistes à ce Vendeur
+  const { count: assignedCount } = await _sb.from("lv_vendor_products")
+    .select("id", { count: "exact", head: true })
+    .eq("vendor_id", v.id).eq("is_active", true);
+
   await sendWithMenu(chatId, [
     `👤 <b>Dashboard Vendeur</b>`,
     ``,
@@ -349,12 +377,14 @@ async function sendVendorDashboard(chatId: number, v: any, _sb: any) {
     `👁 Clics : <b>${v.total_clicks || 0}</b>`,
     `👥 Inscrits via ton lien : <b>${v.total_referrals || 0}</b>`,
     `💰 Revenus réseau : <b>${wallet.toLocaleString("fr-FR")} FCFA</b>`,
+    assignedCount ? `📦 Produits reçus de Grossistes : <b>${assignedCount}</b>` : ``,
     `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
     ``,
     `🔗 Ton lien : <code>${link}</code>`,
-  ].join("\n"), [
-    [{ text: "📋 Copier mon lien",    callback_data: "lv_vendor_link"   }],
-    [{ text: "💸 Retirer mes gains", callback_data: "lv_withdraw"        }],
+  ].filter(Boolean).join("\n"), [
+    [{ text: "📋 Copier mon lien",              callback_data: "lv_vendor_link"         }],
+    [{ text: "📦 Mes produits reçus",           callback_data: "lv_vendor_assigned_prods" }],
+    [{ text: "💸 Retirer mes gains",            callback_data: "lv_withdraw"             }],
   ]);
 }
 
@@ -395,10 +425,13 @@ async function sendBuyerCatalog(chatId: number, sb: any, resellerLink?: string) 
     if (r) resellerId = r.id;
   }
 
-  const query = sb.from("lv_reseller_products")
-    .select("id,retail_price,product:product_id(name,description,stock)")
-    .eq("is_active", true);
-  if (resellerId) query.eq("reseller_id", resellerId);
+  // RBAC : les Acheteurs ne voient que les publications Revendeur et Vendeur
+  // Les publications author_role='grossiste' sont réservées aux Revendeurs (filtrage bot)
+  let query = sb.from("lv_reseller_products")
+    .select("id,retail_price,author_role,product:product_id(name,description,stock)")
+    .eq("is_active", true)
+    .in("author_role", ["revendeur", "vendeur"]);
+  if (resellerId) query = query.eq("reseller_id", resellerId);
 
   const { data: items } = await query.limit(20);
 
@@ -834,6 +867,118 @@ Deno.serve(async (req: Request) => {
           return;
         }
 
+        // ── RBAC : Grossiste → affecter produits à un Vendeur ─────────────────
+        if (data === "lv_assign_to_vendor") {
+          const w = await getWholesaler(sb, chatId);
+          if (!w) { await sendMessage(chatId, "🔒 Profil grossiste requis."); return; }
+          // Lister les Vendeurs disponibles
+          const { data: vendors } = await sb.from("lv_vendors")
+            .select("id,full_name,telegram_chat_id")
+            .order("created_at", { ascending: false }).limit(30);
+          if (!vendors?.length) {
+            await sendMessage(chatId, "📭 Aucun Vendeur inscrit sur la plateforme.",
+              { inline_keyboard: [[{ text: "◀ Dashboard", callback_data: "lv_dashboard" }]] });
+            return;
+          }
+          const buttons = vendors.map((v: any) => [{
+            text: `👤 ${escapeHtml(v.full_name || "Vendeur")}`,
+            callback_data: `lv_gv_pick_vendor:${v.id}`,
+          }]);
+          await sendMessage(chatId, [
+            `🏗️→👤 <b>Affecter un produit à un Vendeur</b>`,
+            ``,
+            `Sélectionne le Vendeur qui recevra le produit.`,
+            `Il apparaîtra dans son dashboard et sera visible par ses Acheteurs.`,
+          ].join("\n"), {
+            inline_keyboard: [...buttons, [{ text: "◀ Dashboard", callback_data: "lv_dashboard" }]],
+          });
+          return;
+        }
+
+        if (data.startsWith("lv_gv_pick_vendor:")) {
+          const vendorId = data.slice(18);
+          const w = await getWholesaler(sb, chatId);
+          if (!w) { await sendMessage(chatId, "🔒 Profil grossiste requis."); return; }
+          const { data: products } = await sb.from("lv_products")
+            .select("id,name,base_price,stock")
+            .eq("wholesaler_id", w.id).eq("is_active", true)
+            .order("created_at", { ascending: false }).limit(25);
+          if (!products?.length) {
+            await sendMessage(chatId, "📭 Tu n'as pas encore de produits actifs.",
+              { inline_keyboard: [[{ text: "➕ Ajouter un produit", callback_data: "lv_add_product" }]] });
+            return;
+          }
+          const buttons = products.map((p: any) => [{
+            text: `${escapeHtml(p.name)} — ${Number(p.base_price).toLocaleString("fr-FR")} F (stock: ${p.stock})`,
+            callback_data: `lv_gv_pick_prod:${vendorId}:${p.id}`,
+          }]);
+          await sendMessage(chatId, [
+            `📦 <b>Choisir le produit à affecter</b>`,
+            ``,
+            `Quel produit veux-tu pousser vers ce Vendeur ?`,
+          ].join("\n"), {
+            inline_keyboard: [...buttons, [{ text: "◀ Retour vendeurs", callback_data: "lv_assign_to_vendor" }]],
+          });
+          return;
+        }
+
+        if (data.startsWith("lv_gv_pick_prod:")) {
+          const parts = data.slice(16).split(":");
+          const vendorId = parts[0], prodId = parts[1];
+          const w = await getWholesaler(sb, chatId);
+          if (!w) { await sendMessage(chatId, "🔒 Profil grossiste requis."); return; }
+          const { data: p } = await sb.from("lv_products").select("*").eq("id", prodId).maybeSingle();
+          if (!p) { await sendMessage(chatId, "❌ Produit introuvable."); return; }
+          await setBotState(sb, chatId, "lv_await_gv_price", {
+            vendorId, prodId, wholesalerId: w.id,
+            productName: p.name, basePrice: p.base_price,
+          });
+          await sendMessage(chatId, [
+            `💰 <b>Fixer le prix de revente pour ce Vendeur</b>`,
+            ``,
+            `Produit : <b>${escapeHtml(p.name)}</b>`,
+            `Prix de base : <b>${Number(p.base_price).toLocaleString("fr-FR")} FCFA</b>`,
+            ``,
+            `À quel prix doit-il vendre ? (doit être supérieur au prix de base)`,
+            `<i>Exemple : ${Math.round(Number(p.base_price) * 1.25).toLocaleString("fr-FR")}</i>`,
+          ].join("\n"), {
+            inline_keyboard: [[{ text: "❌ Annuler", callback_data: "lv_assign_to_vendor" }]],
+          });
+          return;
+        }
+
+        // Liste des produits affectés à un Vendeur (vue Vendeur)
+        if (data === "lv_vendor_assigned_prods") {
+          const v = await getVendor(sb, chatId);
+          if (!v) { await sendMessage(chatId, "🔒 Profil vendeur requis."); return; }
+          const { data: assigned } = await sb.from("lv_vendor_products")
+            .select("id,retail_price,is_active,note,product:product_id(name,description,stock),wholesaler:wholesaler_id(shop_name,full_name)")
+            .eq("vendor_id", v.id).order("created_at", { ascending: false }).limit(20);
+          if (!assigned?.length) {
+            await sendWithMenu(chatId, [
+              `📦 <b>Produits reçus de Grossistes</b>`,
+              ``,
+              `Aucun produit ne t'a encore été affecté par un Grossiste.`,
+              ``,
+              `<i>Quand un Grossiste t'affecte un produit, il apparaît ici et dans la vitrine Acheteurs.</i>`,
+            ].join("\n"));
+            return;
+          }
+          const lines = (assigned ?? []).map((a: any) => {
+            const p = a.product as any;
+            const w = a.wholesaler as any;
+            const status = a.is_active ? "🟢" : "⚫";
+            return `${status} <b>${escapeHtml(p?.name || "Produit")}</b> — ${Number(a.retail_price).toLocaleString("fr-FR")} FCFA\n   📦 Stock: ${p?.stock || 0} | 🏗️ ${escapeHtml(w?.shop_name || w?.full_name || "Grossiste")}${a.note ? `\n   💬 ${escapeHtml(a.note)}` : ""}\n`;
+          });
+          await sendWithMenu(chatId, [
+            `📦 <b>Produits reçus de Grossistes (${assigned.length})</b>`,
+            ``,
+            ...lines,
+            `<i>Ces produits sont visibles dans ta vitrine Acheteurs.</i>`,
+          ].join("\n"));
+          return;
+        }
+
         if (data === "lv_recruit_link") {
           const w = await getWholesaler(sb, chatId);
           if (!w) { await sendMessage(chatId, "🔒 Profil grossiste requis."); return; }
@@ -1201,9 +1346,11 @@ Deno.serve(async (req: Request) => {
             await sendMessage(chatId, `⚠️ Prix doit être supérieur à ${Number(d.basePrice).toLocaleString("fr-FR")} FCFA.`);
             return;
           }
+          // RBAC : tag author_role pour que ce produit soit visible aux Acheteurs
           await sb.from("lv_reseller_products").upsert({
             reseller_id: d.resellerId, product_id: d.prodId,
             retail_price: retail, is_active: true,
+            author_role: 'revendeur',   // Publication Revendeur → visible Acheteurs
           }, { onConflict: "reseller_id,product_id" });
           await clearBotState(sb, chatId);
           const platformCut = Math.round(retail * PLATFORM_FEE_PCT);
@@ -1218,6 +1365,48 @@ Deno.serve(async (req: Request) => {
             `💵 <b>Ton gain net/vente : ${myGain.toLocaleString("fr-FR")} FCFA</b>`,
           ].join("\n"), [
             [{ text: "🛍️ Ajouter d'autres produits", callback_data: "lv_browse_wholesale" }],
+          ]);
+          return;
+        }
+
+        // RBAC : Grossiste → Vendeur — prix de revente saisi
+        if (session?.state === "lv_await_gv_price") {
+          const d = session.data as any;
+          const retail = parseFloat(text.replace(/[^0-9.]/g,""));
+          if (isNaN(retail) || retail <= Number(d.basePrice || 0)) {
+            await sendMessage(chatId, `⚠️ Le prix doit être supérieur à ${Number(d.basePrice).toLocaleString("fr-FR")} FCFA.`);
+            return;
+          }
+          // Upsert dans lv_vendor_products
+          const { error } = await sb.from("lv_vendor_products").upsert({
+            wholesaler_id: d.wholesalerId,
+            vendor_id:     d.vendorId,
+            product_id:    d.prodId,
+            retail_price:  retail,
+            is_active:     true,
+          }, { onConflict: "vendor_id,product_id" });
+
+          await clearBotState(sb, chatId);
+
+          if (error) {
+            await sendMessage(chatId, `❌ Erreur lors de l'affectation : ${error.message}`);
+            return;
+          }
+
+          const platformCut = Math.round(retail * PLATFORM_FEE_PCT);
+          const vendeurGain = Math.max(0, retail - platformCut - Number(d.basePrice || 0));
+          await sendWithMenu(chatId, [
+            `✅ <b>Produit affecté avec succès !</b>`,
+            ``,
+            `📦 <b>${escapeHtml(d.productName || "Produit")}</b>`,
+            `💰 Prix de revente : <b>${retail.toLocaleString("fr-FR")} FCFA</b>`,
+            `🏦 Plateforme (-10%) : -${platformCut.toLocaleString("fr-FR")} FCFA`,
+            `🏗️ Ton prix de base : -${Number(d.basePrice).toLocaleString("fr-FR")} FCFA`,
+            `💵 Gain net Vendeur/vente : ${vendeurGain.toLocaleString("fr-FR")} FCFA`,
+            ``,
+            `<i>Le produit est maintenant visible dans la vitrine Acheteurs du Vendeur.</i>`,
+          ].join("\n"), [
+            [{ text: "🏗️→👤 Affecter à un autre Vendeur", callback_data: "lv_assign_to_vendor" }],
           ]);
           return;
         }
