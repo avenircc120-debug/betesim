@@ -176,8 +176,8 @@ SELECT
   p.description                 AS product_description,
   p.image_url                   AS product_image,
   p.stock                       AS product_stock,
-  r.shop_name                   AS seller_name,
-  r.full_name                   AS seller_full_name,
+  r.full_name                    AS seller_name,
+  NULL::TEXT                     AS seller_full_name,
   NULL::UUID                    AS wholesaler_id,
   rp.reseller_id                AS reseller_id,
   NULL::UUID                    AS vendor_id
