@@ -400,12 +400,21 @@ async function sendResellerDashboard(chatId: number, r: any, sb: any) {
 }
 
 async function sendVendorDashboard(chatId: number, v: any, _sb: any) {
-  const wallet = Number(v.lv_wallet_balance || 0);
-  const link = v.referral_link || makeLink(chatId, "buy");
+  const wallet  = Number(v.lv_wallet_balance || 0);
+  const link    = v.referral_link || makeLink(chatId, "buy");
+  const appUrl  = Deno.env.get("APP_URL") || "https://betesim.vercel.app";
+
   // RBAC : compter les produits affectés par des Grossistes à ce Vendeur
   const { count: assignedCount } = await _sb.from("lv_vendor_products")
     .select("id", { count: "exact", head: true })
     .eq("vendor_id", v.id).eq("is_active", true);
+
+  // Compter les produits propres du Vendeur (flux isolé)
+  const { count: ownCount } = await _sb.from("lv_vendor_own_products")
+    .select("id", { count: "exact", head: true })
+    .eq("vendor_id", v.id).eq("is_active", true);
+
+  const addProdUrl = `${appUrl}/add-vendeur?chatId=${chatId}&vendorId=${encodeURIComponent(v.id)}`;
 
   await sendWithMenu(chatId, [
     `👤 <b>Dashboard Vendeur</b>`,
@@ -415,12 +424,15 @@ async function sendVendorDashboard(chatId: number, v: any, _sb: any) {
     `👥 Inscrits via ton lien : <b>${v.total_referrals || 0}</b>`,
     `💰 Revenus réseau : <b>${wallet.toLocaleString("fr-FR")} FCFA</b>`,
     assignedCount ? `📦 Produits reçus de Grossistes : <b>${assignedCount}</b>` : ``,
+    ownCount      ? `🛍️ Mes propres produits : <b>${ownCount}</b>`             : ``,
     `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
     ``,
     `🔗 Ton lien : <code>${link}</code>`,
   ].filter(Boolean).join("\n"), [
-    [{ text: "📋 Copier mon lien",              callback_data: "lv_vendor_link"         }],
-    [{ text: "📦 Mes produits reçus",           callback_data: "lv_vendor_assigned_prods" }],
+    [{ text: "➕ Ajouter un produit",           url: addProdUrl                          }],
+    [{ text: "🛍️ Mes propres produits",         callback_data: "lv_vendor_own_prods"     }],
+    [{ text: "📋 Copier mon lien",              callback_data: "lv_vendor_link"          }],
+    [{ text: "📦 Produits reçus (Grossiste)",   callback_data: "lv_vendor_assigned_prods"}],
     [{ text: "💸 Retirer mes gains",            callback_data: "lv_withdraw"             }],
   ]);
 }
@@ -1019,6 +1031,45 @@ Deno.serve(async (req: Request) => {
             ``,
             ...lines,
             `<i>Ces produits sont visibles dans ta vitrine Acheteurs.</i>`,
+          ].join("\n"));
+          return;
+        }
+
+        // ── Vendeur : liste des produits propres (flux isolé Grossiste) ──────────
+        if (data === "lv_vendor_own_prods") {
+          const v = await getVendor(sb, chatId);
+          if (!v) { await sendMessage(chatId, "🔒 Profil Vendeur requis."); return; }
+          const { data: ownProds } = await sb.from("lv_vendor_own_products")
+            .select("id,name,price,stock,is_active")
+            .eq("vendor_id", v.id)
+            .order("created_at", { ascending: false })
+            .limit(20);
+          if (!ownProds?.length) {
+            const appUrl   = Deno.env.get("APP_URL") || "https://betesim.vercel.app";
+            const addUrl   = `${appUrl}/add-vendeur?chatId=${chatId}&vendorId=${encodeURIComponent(v.id)}`;
+            await sendMessage(chatId, [
+              `🛍️ <b>Mes produits</b>`,
+              ``,
+              `Tu n'as pas encore ajouté de produit.`,
+              `Utilise le bouton ci-dessous pour en ajouter un !`,
+            ].join("\n"), {
+              inline_keyboard: [
+                [{ text: "➕ Ajouter un produit", url: addUrl }],
+                [{ text: "◀ Dashboard",           callback_data: "lv_dashboard" }],
+              ],
+            });
+            return;
+          }
+          const lines = ownProds.map((p: any) =>
+            `${p.is_active ? "🟢" : "⚫"} <b>${escapeHtml(p.name)}</b> — ${Number(p.price).toLocaleString("fr-FR")} FCFA · ${p.stock} en stock`
+          );
+          await sendWithMenu(chatId, [
+            `🛍️ <b>Mes produits (${ownProds.length})</b>`,
+            ``,
+            ...lines,
+            ``,
+            `<i>Ces produits t'appartiennent exclusivement.
+Aucun grossiste ni revendeur n'y a accès.</i>`,
           ].join("\n"));
           return;
         }
