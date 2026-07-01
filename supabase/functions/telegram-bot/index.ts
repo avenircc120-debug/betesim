@@ -1278,7 +1278,33 @@ Deno.serve(async (req: Request) => {
           // Réinitialiser la mémoire Groq sur /start (nouveau départ conversationnel)
           await clearGroqHistory(sb, chatId);
 
-          if (param.startsWith("join_reseller_")) {
+          // Lien de recrutement moderne : wref_{wholesaler_uuid}
+            if (param.startsWith("wref_")) {
+              const wholesalerId = param.replace("wref_", "");
+              const { data: wByUuid } = await sb.from("lv_wholesalers")
+                .select("*").eq("id", wholesalerId).maybeSingle();
+              if (wByUuid) {
+                const existingR = await getReseller(sb, chatId);
+                if (existingR) {
+                  await sendResellerDashboard(chatId, existingR, sb);
+                  await sendMessage(chatId, `📦 Tu es déjà revendeur ! Voici les produits de <b>${escapeHtml(wByUuid.shop_name || "ce grossiste")}</b> :`,
+                    { inline_keyboard: [[{ text: "🛒 Voir catalogue", callback_data: `lv_grossiste:${wByUuid.id}` }]] });
+                  return;
+                }
+                await setBotState(sb, chatId, "lv_await_reseller_name", { wholesalerId: wByUuid.id });
+                await sendMessage(chatId, [
+                  `📦 <b>Rejoindre ${escapeHtml(wByUuid.shop_name || "ce grossiste")}</b>`,
+                  ``,
+                  `Tu es invité à devenir revendeur de <b>${escapeHtml(wByUuid.shop_name || "ce grossiste")}</b>.`,
+                  `Dès ton inscription, tu reçois instantanément son catalogue.`,
+                  ``,
+                  `Quel est ton nom complet ?`,
+                ].join("\n"), { inline_keyboard: [[{ text: "❌ Annuler", callback_data: "lv_home" }]] });
+                return;
+              }
+            }
+
+            if (param.startsWith("join_reseller_")) {
             const wholesalerChatId = Number(param.replace("join_reseller_",""));
             const w = await getWholesaler(sb, wholesalerChatId);
             if (w) {
@@ -1311,7 +1337,49 @@ Deno.serve(async (req: Request) => {
           return;
         }
 
-        if (text === "/dashboard" || text === "/pro") {
+        if (text === "/mon_stock" || text === "/stock") {
+            const w = await getWholesaler(sb, chatId);
+            if (!w) { await sendMessage(chatId, "🔒 Commande réservée aux grossistes.\nTape /start pour t'inscrire."); return; }
+            const { data: stockProds } = await sb.from("lv_products")
+              .select("id,name,base_price,stock,is_active")
+              .eq("wholesaler_id", w.id).order("created_at", { ascending: false }).limit(15);
+            if (!stockProds?.length) {
+              await sendMessage(chatId, "📭 Aucun produit encore. Ajoutes-en un !", {
+                inline_keyboard: [[{ text: "➕ Ajouter", callback_data: "lv_add_product" }]],
+              });
+              return;
+            }
+            const stockButtons = stockProds.map((p: any) => [{
+              text: `${p.is_active?"🟢":"⚫"} ${p.name} — ${Number(p.base_price).toLocaleString("fr-FR")} F · ${p.stock} en stock`,
+              callback_data: `lv_editprod:${p.id}`,
+            }]);
+            await sendMessage(chatId, `📦 <b>Mon Stock (${stockProds.length} produit${stockProds.length>1?"s":""})</b>\n\nSélectionne un produit pour modifier son prix ou sa quantité.`, {
+              inline_keyboard: [...stockButtons, [{ text: "➕ Ajouter un produit", callback_data: "lv_add_product" }]],
+            });
+            return;
+          }
+
+          if (text === "/partager" || text === "/share") {
+            const w = await getWholesaler(sb, chatId);
+            if (!w) { await sendMessage(chatId, "🔒 Commande réservée aux grossistes.\nTape /start pour t'inscrire."); return; }
+            const botName = Deno.env.get("BOT_USERNAME") || "livrauto_bot";
+            const partLink = `https://t.me/${botName}?start=wref_${w.id}`;
+            await sb.from("lv_wholesalers").update({ recruitment_link: partLink }).eq("id", w.id);
+            await sendMessage(chatId, [
+              `🔗 <b>Ton lien de recrutement revendeurs</b>`,
+              ``,
+              `<code>${partLink}</code>`,
+              ``,
+              `📤 Partage ce lien. Dès le clic, l'utilisateur est enregistré comme revendeur lié à ta boutique et reçoit instantanément ton catalogue.`,
+            ].join("\n"), {
+              inline_keyboard: [
+                [{ text: "👥 Mes revendeurs actifs", callback_data: "lv_my_resellers" }],
+              ],
+            });
+            return;
+          }
+
+          if (text === "/dashboard" || text === "/pro") {
           const [w, r, v, d] = await Promise.all([
             getWholesaler(sb, chatId), getReseller(sb, chatId),
             getVendor(sb, chatId), getDelivery(sb, chatId),
