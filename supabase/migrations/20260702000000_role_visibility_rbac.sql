@@ -154,6 +154,12 @@ CREATE INDEX IF NOT EXISTS lv_products_wholesaler_active_idx
   ON lv_products(wholesaler_id, is_active)
   WHERE is_active = TRUE;
 
+-- Index additionnel identifié au code review : searchProductsForBuyer fait un IN sur product_id
+-- Sans cet index, la jointure lv_products → lv_reseller_products est coûteuse à volume
+CREATE INDEX IF NOT EXISTS lv_rp_product_id_role_active_idx
+  ON lv_reseller_products(product_id, is_active, author_role)
+  WHERE is_active = TRUE;
+
 -- ── 8. Vue lv_feed_acheteur : feed consolidé pour les Acheteurs ──────────────
 --    Sources : lv_reseller_products (author_role IN revendeur|vendeur)
 --              + lv_vendor_products affectés aux Vendeurs (via Grossiste)

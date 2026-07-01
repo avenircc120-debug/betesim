@@ -123,16 +123,13 @@ async function askGroq(userMessage: string, firstName: string, context = ""): Pr
 // ─── Catalogue réel pour contexte Groq ───────────────────────────────────────
 async function fetchCatalogForGroq(sb: any): Promise<string> {
   try {
-    // RBAC : le contexte Groq pour les Acheteurs n'inclut que les produits Revendeur/Vendeur
+    // RBAC : le contexte Groq n'inclut QUE les publications Revendeur/Vendeur
+    // Les produits Grossiste (lv_products) sont EXCLURE pour ne pas exposer le catalogue pro aux Acheteurs
     const { data: rps } = await sb.from('lv_reseller_products')
       .select('retail_price, author_role, product:product_id(name, stock)')
       .eq('is_active', true)
       .in('author_role', ['revendeur', 'vendeur'])
-      .limit(8);
-
-    const { data: wps } = await sb.from('lv_products')
-      .select('name, base_price, stock')
-      .eq('is_active', true).limit(6);
+      .limit(10);
 
     const lines: string[] = [];
     for (const rp of rps ?? []) {
@@ -140,12 +137,6 @@ async function fetchCatalogForGroq(sb: any): Promise<string> {
       if (!p?.name) continue;
       const stk = p.stock != null ? ` (stock: ${p.stock})` : '';
       lines.push(`- ${p.name} : ${Number(rp.retail_price).toLocaleString('fr-FR')} FCFA${stk}`);
-    }
-    for (const wp of wps ?? []) {
-      if (!lines.some(l => l.includes(wp.name))) {
-        const stk = wp.stock != null ? ` (stock: ${wp.stock})` : '';
-        lines.push(`- ${wp.name} : ${Number(wp.base_price).toLocaleString('fr-FR')} FCFA${stk}`);
-      }
     }
     if (lines.length === 0) return 'Aucun produit disponible pour le moment.';
     return `Catalogue disponible sur ${PLATFORM} :\n${lines.slice(0, 10).join('\n')}`;
@@ -196,12 +187,16 @@ async function searchProductsForBuyer(sb: any, keyword: string): Promise<any[]> 
   const rpMap: Record<string,any> = {};
   for (const rp of rps??[]) rpMap[rp.product_id] = rp;
 
-  return products.slice(0,3).map((p:any)=>{
+  // RBAC : retourner UNIQUEMENT les produits ayant une publication Revendeur/Vendeur
+  // Exclure les produits sans publication (wp_<id>) qui exposeraient le catalogue Grossiste
+  return products
+    .filter((p:any) => rpMap[p.id])   // garder seulement ceux avec publication visible
+    .slice(0,3).map((p:any)=>{
     const rp = rpMap[p.id];
     return {
-      id:    rp ? rp.id : `wp_${p.id}`,
+      id:    rp.id,
       name:  p.name,
-      price: rp ? Number(rp.retail_price) : null,
+      price: Number(rp.retail_price),
       stock: p.stock,
     };
   }).filter((p:any)=>p.stock>0||true);
@@ -714,9 +709,13 @@ Deno.serve(async (req: Request) => {
         // Détail produit → ajouter au panier
         if (data.startsWith("lv_item:")) {
           const rpId = data.slice(8);
+          // RBAC : vérifier que cet article est visible par les Acheteurs (author_role revendeur|vendeur)
+          // Bloque l'accès aux publications Grossiste même via callback direct (service_role bypass)
           const { data: rp } = await sb.from("lv_reseller_products")
-            .select("id,retail_price,product:product_id(name,description,stock)")
-            .eq("id", rpId).maybeSingle();
+            .select("id,retail_price,author_role,product:product_id(name,description,stock)")
+            .eq("id", rpId)
+            .in("author_role", ["revendeur", "vendeur"])
+            .maybeSingle();
           if (!rp) { await sendMessage(chatId, "❌ Produit introuvable."); return; }
           const p = rp.product as any;
           const appUrlItem = Deno.env.get("APP_URL") || "https://betesim.vercel.app";
@@ -927,7 +926,10 @@ Deno.serve(async (req: Request) => {
           const vendorId = parts[0], prodId = parts[1];
           const w = await getWholesaler(sb, chatId);
           if (!w) { await sendMessage(chatId, "🔒 Profil grossiste requis."); return; }
-          const { data: p } = await sb.from("lv_products").select("*").eq("id", prodId).maybeSingle();
+          // RBAC SÉCURITÉ : vérifier que ce produit appartient BIEN au grossiste courant
+          // Empêche un callback forgé d'affecter un produit d'un autre grossiste
+          const { data: p } = await sb.from("lv_products")
+            .select("*").eq("id", prodId).eq("wholesaler_id", w.id).maybeSingle();
           if (!p) { await sendMessage(chatId, "❌ Produit introuvable."); return; }
           await setBotState(sb, chatId, "lv_await_gv_price", {
             vendorId, prodId, wholesalerId: w.id,
@@ -1386,12 +1388,14 @@ Deno.serve(async (req: Request) => {
             is_active:     true,
           }, { onConflict: "vendor_id,product_id" });
 
-          await clearBotState(sb, chatId);
-
+          // FIX : clearBotState APRÈS la vérification d'erreur pour conserver le contexte en cas d'échec
           if (error) {
-            await sendMessage(chatId, `❌ Erreur lors de l'affectation : ${error.message}`);
+            console.error('[lv_await_gv_price] Erreur upsert:', error.message);
+            await sendMessage(chatId, `❌ Erreur lors de l'affectation : ${error.message}\n\nReessaie ou annule.`,
+              { inline_keyboard: [[{ text: "❌ Annuler", callback_data: "lv_assign_to_vendor" }]] });
             return;
           }
+          await clearBotState(sb, chatId);
 
           const platformCut = Math.round(retail * PLATFORM_FEE_PCT);
           const vendeurGain = Math.max(0, retail - platformCut - Number(d.basePrice || 0));
