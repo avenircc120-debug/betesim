@@ -207,7 +207,11 @@ async function transcribeVoice(fileUrl: string): Promise<string | null> {
   const apiKey = Deno.env.get("GROQ_API_KEY");
   if (!apiKey) return null;
   try {
-    const audioRes = await fetch(fileUrl);
+    const audioRes = await fetch(fileUrl, { signal: AbortSignal.timeout(15000) });
+    if (!audioRes.ok) {
+      console.error("[Whisper] download failed:", audioRes.status, audioRes.statusText);
+      return null;
+    }
     const audioBlob = await audioRes.blob();
     const form = new FormData();
     form.append("file", audioBlob, "voice.ogg");
@@ -217,9 +221,14 @@ async function transcribeVoice(fileUrl: string): Promise<string | null> {
     const res = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
       method: "POST",
       headers: { Authorization: `Bearer ${apiKey}` },
-      signal: AbortSignal.timeout(15000),
+      signal: AbortSignal.timeout(20000),
       body: form,
     });
+    if (!res.ok) {
+      const err = await res.text().catch(() => "");
+      console.error("[Whisper] Groq error:", res.status, err.slice(0, 200));
+      return null;
+    }
     const text = await res.text();
     return text?.trim() || null;
   } catch (e: any) {
@@ -737,6 +746,16 @@ Deno.serve(async (req: Request) => {
   // Webhook ping
   if (req.method === "GET") return new Response(JSON.stringify({ ok: true, bot: PLATFORM }), { headers: { "Content-Type": "application/json" } });
 
+  // Authentification Telegram — vérification du header X-Telegram-Bot-Api-Secret-Token
+  const webhookSecret = Deno.env.get("TELEGRAM_WEBHOOK_SECRET");
+  if (webhookSecret) {
+    const headerSecret = req.headers.get("X-Telegram-Bot-Api-Secret-Token") ?? "";
+    if (headerSecret !== webhookSecret) {
+      console.warn("[Security] Requête rejetée — secret token invalide");
+      return new Response("Unauthorized", { status: 401 });
+    }
+  }
+
   const processing = (async () => {
     try {
       const update = await req.json();
@@ -1247,7 +1266,9 @@ Aucun grossiste ni revendeur n'y a accès.</i>`,
         await sendAction(chatId); // "typing..."
 
         // 1. Récupérer le fichier audio depuis Telegram
-        const fileRes  = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/getFile?file_id=${voice.file_id}`);
+        const tgToken  = Deno.env.get("TELEGRAM_BOT_TOKEN");
+        if (!tgToken) { await sendMessage(chatId, "❌ Configuration manquante."); return; }
+        const fileRes  = await fetch(`${TG_API}/bot${tgToken}/getFile?file_id=${voice.file_id}`);
         const fileData = await fileRes.json() as any;
         const filePath = fileData?.result?.file_path;
         if (!filePath) {
@@ -1256,7 +1277,7 @@ Aucun grossiste ni revendeur n'y a accès.</i>`,
         }
 
         // 2. Transcrire avec Groq Whisper
-        const fileUrl = `https://api.telegram.org/file/bot${BOT_TOKEN}/${filePath}`;
+        const fileUrl = `${TG_API}/file/bot${tgToken}/${filePath}`;
         const transcribed = await transcribeVoice(fileUrl);
         if (!transcribed) {
           await sendWithMenu(chatId, "🎙️ Je n'ai pas réussi à comprendre. Essaie à nouveau ou écris ton message.");
