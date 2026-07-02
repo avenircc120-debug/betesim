@@ -1277,8 +1277,12 @@ Aucun grossiste ni revendeur n'y a accès.</i>`,
 
         const groqRes = await askGroqLivrauto(transcribed, role, userData);
         const replyText = groqRes?.reply || `Bonjour ${escapeHtml(firstName)} ! 👋 Comment puis-je t'aider ?`;
-        const kb = groqRes?.buttons?.length ? groqRes.buttons : undefined;
-        await sendWithMenu(chatId, replyText, kb ?? []);
+        const kb = groqRes?.buttons?.length ? groqRes.buttons : null;
+        if (kb) {
+          await sendMessage(chatId, replyText, { inline_keyboard: kb });
+        } else {
+          await sendWithMenu(chatId, replyText);
+        }
         return;
       }
 
@@ -1625,8 +1629,12 @@ Aucun grossiste ni revendeur n'y a accès.</i>`,
         const userData = await getUserDataForGroq(sb, chatId, role, actor ?? { full_name: firstName });
         const groqRes  = await askGroqLivrauto(text, role, userData);
         const replyText = groqRes?.reply || `Bonjour ${escapeHtml(firstName)} ! 👋 Comment puis-je t'aider ?`;
-        const kb = groqRes?.buttons?.length ? groqRes.buttons : [];
-        await sendWithMenu(chatId, replyText, kb);
+        const kb = groqRes?.buttons?.length ? groqRes.buttons : null;
+        if (kb) {
+          await sendMessage(chatId, replyText, { inline_keyboard: kb });
+        } else {
+          await sendWithMenu(chatId, replyText);
+        }
         return;
       }
 
