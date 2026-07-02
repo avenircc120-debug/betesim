@@ -75,6 +75,159 @@ const NAV_KEYBOARD = (chatId: number, extra: any[][] = []) => {
 const sendWithMenu = (chatId: number, text: string, extra: any[][] = []) =>
   sendMessage(chatId, text, NAV_KEYBOARD(chatId, extra));
 
+
+// ─── GROQ IA — assistant Livrauto intelligent (voix + texte) ────────────────
+
+// Carte complète des boutons Livrauto par rôle
+const LV_BUTTONS: Record<string, {text:string; roles:string[]}> = {
+  lv_dashboard:           { text:"📊 Mon Dashboard",           roles:["all"] },
+  lv_wallet:              { text:"💰 Mon Wallet",              roles:["all"] },
+  lv_support:             { text:"🆘 Support",                 roles:["all"] },
+  lv_catalog:             { text:"🛍️ Catalogue produits",      roles:["acheteur","visiteur"] },
+  lv_cart:                { text:"🛒 Mon Panier",              roles:["acheteur","visiteur"] },
+  lv_checkout:            { text:"✅ Valider ma commande",      roles:["acheteur"] },
+  lv_add_product:         { text:"➕ Ajouter un produit",      roles:["grossiste"] },
+  lv_my_products:         { text:"📋 Mes produits",            roles:["grossiste"] },
+  lv_recruit_link:        { text:"🔗 Lien recrutement revendeurs", roles:["grossiste"] },
+  lv_withdraw:            { text:"💸 Retirer mes gains",       roles:["grossiste","revendeur","vendeur","livreur"] },
+  lv_browse_wholesale:    { text:"🏗️ Catalogues grossistes",  roles:["revendeur"] },
+  lv_my_store_link:       { text:"🔗 Mon lien boutique",       roles:["revendeur"] },
+  lv_vendor_own_prods:    { text:"🛍️ Mes propres produits",   roles:["vendeur"] },
+  lv_vendor_link:         { text:"📋 Mon lien parrainage",     roles:["vendeur"] },
+  lv_toggle_availability: { text:"🔄 Disponibilité livreur",  roles:["livreur"] },
+};
+
+function groqButtonsForRole(role: string): string {
+  return Object.entries(LV_BUTTONS)
+    .filter(([,v]) => v.roles.includes("all") || v.roles.includes(role))
+    .map(([k,v]) => `  "${k}" → "${v.text}"`)
+    .join("\n");
+}
+
+async function getUserDataForGroq(sb: any, chatId: number, role: string, actor: any): Promise<Record<string,any>> {
+  const data: Record<string,any> = {
+    role,
+    prenom: actor?.full_name || actor?.shop_name || "Inconnu",
+    wallet_fcfa: actor?.lv_wallet_balance ?? 0,
+  };
+
+  try {
+    if (role === "grossiste") {
+      const [{ count: nbProd }, { count: nbOrd }] = await Promise.all([
+        sb.from("lv_products").select("id",{count:"exact",head:true}).eq("wholesaler_id", actor.id).eq("is_active",true),
+        sb.from("lv_orders").select("id",{count:"exact",head:true}).eq("wholesaler_id", actor.id),
+      ]);
+      data.produits_actifs = nbProd ?? 0;
+      data.commandes_totales = nbOrd ?? 0;
+    } else if (role === "revendeur") {
+      const [{ count: nbCat }, { count: nbOrd }] = await Promise.all([
+        sb.from("lv_reseller_products").select("id",{count:"exact",head:true}).eq("reseller_id", actor.id).eq("is_active",true),
+        sb.from("lv_orders").select("id",{count:"exact",head:true}).eq("reseller_id", actor.id),
+      ]);
+      data.produits_catalogue = nbCat ?? 0;
+      data.commandes_totales = nbOrd ?? 0;
+    } else if (role === "vendeur") {
+      const { count: nbProd } = await sb.from("lv_vendor_own_products")
+        .select("id",{count:"exact",head:true}).eq("vendor_id", actor.id).eq("is_active",true);
+      data.produits_propres = nbProd ?? 0;
+    } else if (role === "livreur") {
+      const { count: nbLiv } = await sb.from("lv_deliveries")
+        .select("id",{count:"exact",head:true}).eq("delivery_person_id", actor.id).eq("status","delivered");
+      data.livraisons_effectuees = nbLiv ?? 0;
+      data.disponible = actor.is_available ?? false;
+    } else if (role === "acheteur" || role === "visiteur") {
+      const { count: nbCart } = await sb.from("lv_carts")
+        .select("id",{count:"exact",head:true}).eq("telegram_chat_id", chatId);
+      data.articles_panier = nbCart ?? 0;
+    }
+  } catch { /* données partielles OK */ }
+
+  return data;
+}
+
+async function askGroqLivrauto(
+  userMessage: string,
+  role: string,
+  userData: Record<string,any>
+): Promise<{ reply: string; buttons?: {text:string;callback_data:string}[][] } | null> {
+  const apiKey = Deno.env.get("GROQ_API_KEY");
+  if (!apiKey) return null;
+
+  const systemPrompt = `Tu es l'assistant IA de Livrauto, plateforme e-commerce & livraison en Afrique de l'Ouest (Bénin, Côte d'Ivoire, Sénégal…).
+
+PROFIL ACTUEL DU CLIENT :
+${JSON.stringify(userData, null, 2)}
+
+BOUTONS DISPONIBLES POUR CE PROFIL :
+${groqButtonsForRole(role)}
+
+RÈGLES ABSOLUES :
+1. Réponds UNIQUEMENT en JSON valide, jamais de texte brut :
+   {"reply":"ton message","buttons":[[{"text":"Label","callback_data":"lv_xxx"}]]}
+2. "buttons" est optionnel. Ajoute-le SEULEMENT si l'utilisateur demande une action/navigation.
+3. Maximum 2 rangées de boutons, les plus pertinents.
+4. Utilise les données réelles du client pour répondre (solde, nb produits, etc.).
+5. Si le client demande "mon dashboard", "tableau de bord", "menu" → inclus lv_dashboard.
+6. Si le client demande son solde → donne le chiffre exact depuis wallet_fcfa.
+7. Style : bref, chaleureux, 1-3 phrases, 1-2 emojis max.
+8. Réponds dans la langue du client.`;
+
+  try {
+    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      signal: AbortSignal.timeout(10000),
+      body: JSON.stringify({
+        model: "llama-3.3-70b-versatile",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user",   content: userMessage },
+        ],
+        max_tokens: 350,
+        temperature: 0.4,
+        response_format: { type: "json_object" },
+      }),
+    });
+    const d = await res.json() as any;
+    const raw = d?.choices?.[0]?.message?.content?.trim();
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return {
+      reply:   parsed.reply   || parsed.text    || `Bonjour ! Comment puis-je t'aider ?`,
+      buttons: parsed.buttons || parsed.keyboard || undefined,
+    };
+  } catch (e: any) {
+    console.error("[Groq] erreur:", e?.message);
+    return null;
+  }
+}
+
+// Transcription vocale via Groq Whisper
+async function transcribeVoice(fileUrl: string): Promise<string | null> {
+  const apiKey = Deno.env.get("GROQ_API_KEY");
+  if (!apiKey) return null;
+  try {
+    const audioRes = await fetch(fileUrl);
+    const audioBlob = await audioRes.blob();
+    const form = new FormData();
+    form.append("file", audioBlob, "voice.ogg");
+    form.append("model", "whisper-large-v3-turbo");
+    form.append("language", "fr");
+    form.append("response_format", "text");
+    const res = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(15000),
+      body: form,
+    });
+    const text = await res.text();
+    return text?.trim() || null;
+  } catch (e: any) {
+    console.error("[Whisper] erreur:", e?.message);
+    return null;
+  }
+}
+
 // ─── Recherche produit — détection intention achat ──────────────────────────
 const BUY_KEYWORDS = [
   "acheter","achète","commander","je veux","je voudrais","je cherche",
@@ -1084,6 +1237,51 @@ Aucun grossiste ni revendeur n'y a accès.</i>`,
         return;
       }
 
+
+      // ── Messages vocaux ──────────────────────────────────────────────────────
+      if (update.message?.voice) {
+        const chatId    = update.message.chat.id;
+        const firstName = update.message.from?.first_name || "ami";
+        const voice     = update.message.voice;
+
+        await sendAction(chatId); // "typing..."
+
+        // 1. Récupérer le fichier audio depuis Telegram
+        const fileRes  = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/getFile?file_id=${voice.file_id}`);
+        const fileData = await fileRes.json() as any;
+        const filePath = fileData?.result?.file_path;
+        if (!filePath) {
+          await sendMessage(chatId, "❌ Impossible de traiter ce message vocal.");
+          return;
+        }
+
+        // 2. Transcrire avec Groq Whisper
+        const fileUrl = `https://api.telegram.org/file/bot${BOT_TOKEN}/${filePath}`;
+        const transcribed = await transcribeVoice(fileUrl);
+        if (!transcribed) {
+          await sendWithMenu(chatId, "🎙️ Je n'ai pas réussi à comprendre. Essaie à nouveau ou écris ton message.");
+          return;
+        }
+
+        // 3. Afficher ce qui a été compris
+        await sendMessage(chatId, `🎙️ <i>« ${escapeHtml(transcribed)} »</i>`);
+
+        // 4. Traiter comme un message texte via GROQ
+        const [w, r, v, d] = await Promise.all([
+          getWholesaler(sb, chatId), getReseller(sb, chatId),
+          getVendor(sb, chatId), getDelivery(sb, chatId),
+        ]);
+        const role  = w ? "grossiste" : r ? "revendeur" : v ? "vendeur" : d ? "livreur" : "visiteur";
+        const actor = w || r || v || d;
+        const userData = await getUserDataForGroq(sb, chatId, role, actor ?? { full_name: firstName });
+
+        const groqRes = await askGroqLivrauto(transcribed, role, userData);
+        const replyText = groqRes?.reply || `Bonjour ${escapeHtml(firstName)} ! 👋 Comment puis-je t'aider ?`;
+        const kb = groqRes?.buttons?.length ? groqRes.buttons : undefined;
+        await sendWithMenu(chatId, replyText, kb ?? []);
+        return;
+      }
+
       // ── Messages texte ──────────────────────────────────────────────────────
       if (update.message?.text) {
         const chatId    = update.message.chat.id;
@@ -1423,10 +1621,12 @@ Aucun grossiste ni revendeur n'y a accès.</i>`,
           }
         }
 
-        let ctx = role !== "visiteur"
-          ? `L'utilisateur est ${role} sur ${PLATFORM}. Prénom : ${actorName}. Solde wallet : ${balance !== null ? balance.toLocaleString('fr-FR') + ' FCFA' : 'inconnu'}.`
-          : "";
-        await sendWithMenu(chatId, `Bonjour ${escapeHtml(firstName)} ! 👋 Comment puis-je t'aider ?`);
+        // Groq IA — réponse intelligente avec boutons et données réelles
+        const userData = await getUserDataForGroq(sb, chatId, role, actor ?? { full_name: firstName });
+        const groqRes  = await askGroqLivrauto(text, role, userData);
+        const replyText = groqRes?.reply || `Bonjour ${escapeHtml(firstName)} ! 👋 Comment puis-je t'aider ?`;
+        const kb = groqRes?.buttons?.length ? groqRes.buttons : [];
+        await sendWithMenu(chatId, replyText, kb);
         return;
       }
 
