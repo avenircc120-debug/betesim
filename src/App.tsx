@@ -28,7 +28,6 @@ import VendeurPage from './pages/VendeurPage';
 import AjouterProduitVendeur from './pages/AjouterProduitVendeur';
 import RevendeurDashboard from './pages/RevendeurDashboard';
 import Marketplace from './pages/Marketplace';
-import AjouterProduit from './pages/Pronostics';
 import Vitrine from './pages/Vitrine';
 
 const queryClient = new QueryClient({
@@ -123,7 +122,6 @@ const AppContent = () => {
     <BrowserRouter>
       <Routes>
         {/* ── Pages standalone — accessibles sans authentification ── */}
-        <Route path="/ajouter-produit" element={<AjouterProduit />} />
         <Route path="/add-vendeur"      element={<AjouterProduitVendeur />} />
         <Route path="/vitrine"          element={<Vitrine />} />
 
