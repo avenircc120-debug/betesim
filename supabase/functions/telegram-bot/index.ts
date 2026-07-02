@@ -75,115 +75,6 @@ const NAV_KEYBOARD = (chatId: number, extra: any[][] = []) => {
 const sendWithMenu = (chatId: number, text: string, extra: any[][] = []) =>
   sendMessage(chatId, text, NAV_KEYBOARD(chatId, extra));
 
-// ─── Groq IA — guide conversationnel ────────────────────────────────────────
-const GROQ_SYSTEM = `Tu es l'assistant IA de ${PLATFORM}, plateforme de commerce et livraison en Afrique de l'Ouest (Bénin, Côte d'Ivoire, Sénégal…).
-Tu aides SURTOUT les acheteurs à trouver des produits et finaliser leur achat.
-
-Profils disponibles :
-- 🛍️ Acheteur : parcourir le catalogue, ajouter au panier, payer via Mobile Money
-- 💼 Grossiste : ajouter des produits, gérer les stocks, recruter des revendeurs
-- 📦 Revendeur : choisir des produits d'un grossiste, fixer ses prix de revente
-- 👤 Vendeur : partager un lien de parrainage, toucher des commissions
-- 🚚 Livreur : recevoir des missions, confirmer les livraisons par scan QR
-
-Règles :
-1. Réponds en français ou dans la langue du message, 2-3 phrases max.
-2. Si un CATALOGUE est fourni dans le contexte, utilise-le pour répondre précisément.
-3. Produit trouvé dans le catalogue → cite son nom + prix + dis de cliquer sur «🛍️ Je veux acheter».
-4. Produit absent → suggère de voir la vitrine complète.
-5. Salutation → accueil chaleureux + propose de voir le catalogue.
-6. Style : amical, direct, 1-2 emojis max. Jamais de liste de commandes.`;
-
-// ─── Mémoire conversationnelle Groq ─────────────────────────────────────────
-// Chaque utilisateur a un historique des 10 derniers messages (5 échanges).
-// Groq reçoit cet historique → il se souvient du contexte entre les messages.
-const GROQ_HISTORY_MAX = 10; // messages (= 5 échanges user/assistant)
-
-type GroqMessage = { role: "user" | "assistant"; content: string };
-
-async function getGroqHistory(sb: any, chatId: number): Promise<GroqMessage[]> {
-  try {
-    const { data } = await sb.from("bot_sessions")
-      .select("groq_history")
-      .eq("telegram_chat_id", chatId)
-      .maybeSingle();
-    return Array.isArray(data?.groq_history) ? data.groq_history : [];
-  } catch { return []; }
-}
-
-async function saveGroqHistory(sb: any, chatId: number, history: GroqMessage[]): Promise<void> {
-  try {
-    const trimmed = history.slice(-GROQ_HISTORY_MAX);
-    await sb.rpc("upsert_groq_history", { p_chat_id: chatId, p_history: trimmed });
-  } catch (e: any) {
-    console.error("[groq memory] save error:", e?.message);
-  }
-}
-
-async function clearGroqHistory(sb: any, chatId: number): Promise<void> {
-  try {
-    await sb.rpc("clear_groq_history", { p_chat_id: chatId });
-  } catch (e: any) {
-    console.error("[groq memory] clear error:", e?.message);
-  }
-}
-
-// Appel Groq avec historique conversationnel
-async function askGroq(
-  userMessage: string,
-  firstName: string,
-  context = "",
-  history: GroqMessage[] = []
-): Promise<string | null> {
-  const apiKey = Deno.env.get("GROQ_API_KEY");
-  if (!apiKey) return null;
-  try {
-    const systemContent = GROQ_SYSTEM + (context ? `\n\nContexte utilisateur : ${context}` : "");
-    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-      signal: AbortSignal.timeout(8000),
-      body: JSON.stringify({
-        model: "llama-3.1-8b-instant",
-        messages: [
-          { role: "system",  content: systemContent },
-          ...history,                                          // ← mémoire des échanges précédents
-          { role: "user",    content: `[${firstName}]: ${userMessage}` },
-        ],
-        max_tokens: 200, temperature: 0.6,
-      }),
-    });
-    const d = await res.json() as any;
-    return d?.choices?.[0]?.message?.content?.trim() ?? null;
-  } catch (e: any) {
-    console.error("Groq error:", e?.message);
-    return null;
-  }
-}
-
-
-// ─── Catalogue réel pour contexte Groq ───────────────────────────────────────
-async function fetchCatalogForGroq(sb: any): Promise<string> {
-  try {
-    // RBAC : le contexte Groq n'inclut QUE les publications Revendeur/Vendeur
-    // Les produits Grossiste (lv_products) sont EXCLURE pour ne pas exposer le catalogue pro aux Acheteurs
-    const { data: rps } = await sb.from('lv_reseller_products')
-      .select('retail_price, author_role, product:product_id(name, stock)')
-      .eq('is_active', true)
-      .in('author_role', ['revendeur', 'vendeur'])
-      .limit(10);
-
-    const lines: string[] = [];
-    for (const rp of rps ?? []) {
-      const p = rp.product as any;
-      if (!p?.name) continue;
-      const stk = p.stock != null ? ` (stock: ${p.stock})` : '';
-      lines.push(`- ${p.name} : ${Number(rp.retail_price).toLocaleString('fr-FR')} FCFA${stk}`);
-    }
-    if (lines.length === 0) return 'Aucun produit disponible pour le moment.';
-    return `Catalogue disponible sur ${PLATFORM} :\n${lines.slice(0, 10).join('\n')}`;
-  } catch { return ''; }
-}
 // ─── Recherche produit — détection intention achat ──────────────────────────
 const BUY_KEYWORDS = [
   "acheter","achète","commander","je veux","je voudrais","je cherche",
@@ -1204,9 +1095,6 @@ Aucun grossiste ni revendeur n'y a accès.</i>`,
         if (text.startsWith("/start")) {
           const param = text.split(" ")[1] || "";
           await clearBotState(sb, chatId);
-          // Réinitialiser la mémoire Groq sur /start (nouveau départ conversationnel)
-          await clearGroqHistory(sb, chatId);
-
           // Lien de recrutement moderne : wref_{wholesaler_uuid}
             if (param.startsWith("wref_")) {
               const wholesalerId = param.replace("wref_", "");
@@ -1538,23 +1426,7 @@ Aucun grossiste ni revendeur n'y a accès.</i>`,
         let ctx = role !== "visiteur"
           ? `L'utilisateur est ${role} sur ${PLATFORM}. Prénom : ${actorName}. Solde wallet : ${balance !== null ? balance.toLocaleString('fr-FR') + ' FCFA' : 'inconnu'}.`
           : "";
-        // Acheteur/visiteur → injecter le catalogue réel pour que Groq réponde précisément
-        if (!w && !r && !v && !d) {
-          const catalog = await fetchCatalogForGroq(sb);
-          if (catalog) ctx = catalog;
-        }
-        // Mémoire Groq : charger l'historique conversationnel de cet utilisateur
-        const groqHistory = await getGroqHistory(sb, chatId);
-        const reply = await askGroq(text, firstName, ctx, groqHistory);
-        const finalReply = reply || `Bonjour ${escapeHtml(firstName)} ! 👋 Comment puis-je t'aider ?`;
-        await sendWithMenu(chatId, finalReply);
-
-        // Sauvegarder l'échange en mémoire (fire-and-forget, ne bloque pas la réponse)
-        saveGroqHistory(sb, chatId, [
-          ...groqHistory,
-          { role: 'user',      content: `[${firstName}]: ${text}` },
-          { role: 'assistant', content: finalReply },
-        ]).catch((e: any) => console.error('[groq memory] save:', e?.message));
+        await sendWithMenu(chatId, `Bonjour ${escapeHtml(firstName)} ! 👋 Comment puis-je t'aider ?`);
         return;
       }
 
