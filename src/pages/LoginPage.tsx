@@ -1,5 +1,5 @@
 import { useState } from "react";
-    import { Eye, EyeOff, ChevronDown, Loader2, Mail } from "lucide-react";
+    import { Eye, EyeOff, ChevronDown, Loader2 } from "lucide-react";
     import { motion, AnimatePresence } from "framer-motion";
     import { useNavigate, useLocation } from "react-router-dom";
     import { useAuth } from "@/hooks/useAuth";
@@ -102,7 +102,6 @@ import { useState } from "react";
 
     const [tab, setTab] = useState<Tab>("connexion");
     const [loading, setLoading] = useState(false);
-    const [registeredEmail, setRegisteredEmail] = useState<string | null>(null);
 
     // Connexion
     const [loginEmail, setLoginEmail] = useState("");
@@ -157,26 +156,9 @@ import { useState } from "react";
       });
       setLoading(false);
       if (error) { toast.error(error.message); return; }
-      // Afficher l'écran de vérification email
-      setRegisteredEmail(regEmail);
+      toast.success("Compte créé ! Vous êtes connecté.");
+      navigate(from, { replace: true });
     };
-
-    /* ── Si inscription réussie → écran vérification ── */
-    if (registeredEmail) {
-      return (
-        <div className="min-h-screen bg-gray-50 flex flex-col">
-          {/* Même top bar */}
-          <div className="flex items-center justify-center pt-14 pb-6">
-            <div className="flex rounded-full bg-gray-100 p-1 gap-1">
-              <button className="rounded-full px-6 py-2 text-sm font-semibold text-gray-500">Connexion</button>
-              <button className="rounded-full px-6 py-2 text-sm font-semibold bg-orange-500 text-white shadow">Inscription</button>
-            </div>
-          </div>
-          <EmailVerificationScreen
-            email={registeredEmail}
-            onBack={() => { setRegisteredEmail(null); setTab("connexion"); }}
-          />
-        </div>
       );
     }
 
