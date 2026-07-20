@@ -17,6 +17,12 @@ import { supabase } from "@/integrations/supabase/client";
 
 const Compte = () => {
   const { user, signOut, showAuthModal } = useAuth();
+
+    // Redirect to login if not authenticated
+    if (!user) {
+      navigate("/login", { state: { from: "/compte" } });
+      return null;
+    }
   const { data: profile } = useProfile();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
