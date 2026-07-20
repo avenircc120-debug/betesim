@@ -1,155 +1,176 @@
-
 import { useState } from "react";
-import { Download, ArrowUpRight, Users, RefreshCw, Phone, FileText } from "lucide-react";
-import BottomNav from "@/components/BottomNav";
-import { useAuth } from "@/hooks/useAuth";
-import { useQuery } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
-import { format } from "date-fns";
-import { fr } from "date-fns/locale";
-import { motion, AnimatePresence } from "framer-motion";
+    import { Search, Bell, Inbox, Menu } from "lucide-react";
+    import { useNavigate } from "react-router-dom";
+    import { motion, AnimatePresence } from "framer-motion";
+    import BottomNav from "@/components/BottomNav";
+    import DrawerMenu from "@/components/DrawerMenu";
+    import { useAuth } from "@/hooks/useAuth";
+    import { useQuery } from "@tanstack/react-query";
+    import { supabase } from "@/integrations/supabase/client";
 
-const filters = ["Tout", "Achat numéro", "Parrainage", "Retrait", "Remboursement"] as const;
+    type FilterType = "Actifs" | "En attente" | "Expirés" | "Tous";
+    const FILTERS: FilterType[] = ["Actifs", "En attente", "Expirés", "Tous"];
 
-const typeConfig: Record<string, { icon: typeof Download; color: string; label: string }> = {
-  deposit: { icon: Download, color: "gradient-primary", label: "Dépôt" },
-  withdrawal: { icon: ArrowUpRight, color: "gradient-accent", label: "Retrait" },
-  withdrawal_request: { icon: ArrowUpRight, color: "gradient-accent", label: "Demande de retrait" },
-  conversion: { icon: RefreshCw, color: "gradient-primary", label: "Conversion π → FCFA" },
-  referral_bonus: { icon: Users, color: "gradient-gold", label: "Commission parrainage" },
-  number_purchase: { icon: Phone, color: "gradient-primary", label: "Achat numéro" },
-  number_purchase_wallet: { icon: Phone, color: "gradient-primary", label: "Achat numéro (wallet)" },
-  partner_activation: { icon: Users, color: "gradient-gold", label: "Pack Partenaire activé" },
-  refund_wallet: { icon: RefreshCw, color: "gradient-accent", label: "Remboursement (wallet bloqué)" },
-};
+    const statusMap: Record<FilterType, string | null> = {
+    "Actifs":     "active",
+    "En attente": "pending",
+    "Expirés":    "expired",
+    "Tous":       null,
+    };
 
-const NEGATIVE_TYPES = new Set(["withdrawal", "withdrawal_request", "number_purchase", "number_purchase_wallet"]);
+    const Historique = () => {
+    const navigate = useNavigate();
+    const { user } = useAuth();
+    const [filter, setFilter] = useState<FilterType>("Tous");
+    const [search, setSearch] = useState("");
+    const [drawerOpen, setDrawerOpen] = useState(false);
 
-const statusConfig: Record<string, { bg: string; label: string }> = {
-  pending: { bg: "bg-warning/10 text-warning", label: "En attente" },
-  validated: { bg: "bg-accent/10 text-accent", label: "Validé" },
-  failed: { bg: "bg-destructive/10 text-destructive", label: "Échoué" },
-};
+    const { data: numbers = [], isLoading } = useQuery({
+      queryKey: ["virtual_numbers", user?.id, filter],
+      queryFn: async () => {
+        if (!user) return [];
+        let q = supabase
+          .from("virtual_numbers")
+          .select("*")
+          .eq("user_id", user.id)
+          .order("created_at", { ascending: false });
 
-const Historique = () => {
-  const { user } = useAuth();
-  const [filter, setFilter] = useState<typeof filters[number]>("Tout");
+        const st = statusMap[filter];
+        if (st) q = q.eq("status", st);
 
-  const { data: transactions, isLoading } = useQuery({
-    queryKey: ["transactions", user?.id, filter],
-    queryFn: async () => {
-      if (!user) return [];
-      let query = supabase
-        .from("transactions")
-        .select("*")
-        .eq("user_id", user.id)
-        .order("created_at", { ascending: false });
+        const { data } = await q;
+        return data ?? [];
+      },
+      enabled: !!user,
+    });
 
-      if (filter === "Achat numéro") query = query.in("type", ["number_purchase", "number_purchase_wallet", "partner_activation"]);
-      else if (filter === "Parrainage") query = query.eq("type", "referral_bonus");
-      else if (filter === "Retrait") query = query.in("type", ["withdrawal", "withdrawal_request"]);
-      else if (filter === "Remboursement") query = query.eq("type", "refund_wallet");
+    const filtered = numbers.filter((n: any) => {
+      if (!search.trim()) return true;
+      const s = search.toLowerCase();
+      return (
+        n.service_name?.toLowerCase().includes(s) ||
+        n.country?.toLowerCase().includes(s) ||
+        n.number?.includes(s)
+      );
+    });
 
-      const { data } = await query;
-      return data ?? [];
-    },
-    enabled: !!user,
-  });
-
-  return (
-    <div className="min-h-screen bg-background pb-24">
-      <div className="mx-auto max-w-lg px-4 pt-5">
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
-          <h1 className="text-2xl font-bold text-foreground">Historique</h1>
-          <p className="text-sm text-muted-foreground">Toutes vos transactions</p>
-        </motion.div>
-
-        <div className="mt-4 flex gap-2 overflow-x-auto pb-4 scrollbar-hide">
-          {filters.map((f) => (
+    return (
+      <div className="min-h-screen bg-gray-50 pb-24">
+        {/* Header */}
+        <div className="bg-white px-4 pt-12 pb-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
             <button
-              key={f}
-              onClick={() => setFilter(f)}
-              className={`shrink-0 rounded-full px-4 py-2 text-sm font-medium transition-all ${
-                filter === f
-                  ? "gradient-primary text-primary-foreground shadow-card"
-                  : "bg-card text-muted-foreground shadow-sm"
-              }`}
+              onClick={() => setDrawerOpen(true)}
+              className="text-gray-700"
             >
-              {f}
+              <Menu className="h-6 w-6" />
             </button>
-          ))}
+            <h1 className="text-2xl font-bold text-gray-900">Mes</h1>
+          </div>
+          <div className="flex items-center gap-3">
+            <button className="flex items-center gap-1 rounded-full bg-orange-50 px-3 py-1.5">
+              <span className="text-base">🪙</span>
+              <span className="text-sm font-semibold text-orange-500">0</span>
+            </button>
+            <button className="text-gray-500">
+              <Bell className="h-5 w-5" />
+            </button>
+          </div>
         </div>
 
-        <div className="space-y-2.5">
+        <div className="px-4 pt-4 space-y-3">
+          {/* Filter pills */}
+          <div className="flex gap-2">
+            {FILTERS.map((f) => (
+              <button
+                key={f}
+                onClick={() => setFilter(f)}
+                className={`flex-1 rounded-full py-2.5 text-sm font-semibold transition-all ${
+                  filter === f
+                    ? "bg-orange-500 text-white shadow-md"
+                    : "bg-white text-gray-500 border border-gray-200"
+                }`}
+              >
+                {f}
+              </button>
+            ))}
+          </div>
+
+          {/* Search */}
+          <div className="flex items-center gap-2 rounded-2xl bg-white border border-gray-200 px-4 py-3">
+            <Search className="h-4 w-4 text-gray-400 shrink-0" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Rechercher par service ou pays..."
+              className="flex-1 bg-transparent text-sm text-gray-700 placeholder-gray-400 outline-none"
+            />
+          </div>
+
+          {/* Content */}
           {isLoading && (
-            <div className="space-y-2.5">
+            <div className="space-y-3 pt-2">
               {[1, 2, 3].map((i) => (
-                <div key={i} className="h-20 animate-pulse rounded-2xl bg-card" />
+                <div key={i} className="h-20 animate-pulse rounded-2xl bg-white" />
               ))}
             </div>
           )}
 
-          {!isLoading && transactions?.length === 0 && (
+          {!isLoading && filtered.length === 0 && (
             <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
+              initial={{ opacity: 0, scale: 0.97 }}
               animate={{ opacity: 1, scale: 1 }}
-              className="flex flex-col items-center gap-3 rounded-2xl bg-card p-10 shadow-card"
+              className="flex flex-col items-center gap-4 pt-20"
             >
-              <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-muted">
-                <FileText className="h-8 w-8 text-muted-foreground" />
+              <div className="flex h-20 w-20 items-center justify-center rounded-full bg-gray-100">
+                <Inbox className="h-10 w-10 text-gray-400" />
               </div>
-              <p className="font-medium text-muted-foreground">Aucune transaction</p>
-              <p className="text-sm text-muted-foreground/70">Vos transactions apparaîtront ici</p>
+              <p className="text-base font-medium text-gray-500">Aucun numéro trouvé</p>
+              <button
+                onClick={() => navigate("/boutique")}
+                className="rounded-full bg-orange-500 px-8 py-3 text-sm font-bold text-white shadow-md active:scale-95 transition-transform"
+              >
+                Obtenir un numéro
+              </button>
             </motion.div>
           )}
 
           <AnimatePresence>
-            {transactions?.map((tx, index) => {
-              const config = typeConfig[tx.type] ?? typeConfig.deposit;
-              const status = statusConfig[tx.status] ?? statusConfig.pending;
-              const Icon = config.icon;
-              const isPositive = !NEGATIVE_TYPES.has(tx.type);
-              const numberInfo = (tx as any).virtual_number;
-
-              return (
-                <motion.div
-                  key={tx.id}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: index * 0.03 }}
-                  className="flex items-center gap-3 rounded-2xl bg-card p-4 shadow-card"
-                >
-                  <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${config.color}`}>
-                    <Icon className="h-5 w-5 text-primary-foreground" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-semibold text-foreground">{config.label}</p>
-                    {numberInfo ? (
-                      <p className="text-xs font-mono text-accent truncate">{numberInfo}</p>
-                    ) : (
-                      <p className="text-xs text-muted-foreground truncate">{tx.description}</p>
-                    )}
-                    <p className="text-xs text-muted-foreground">
-                      {format(new Date(tx.created_at), "d MMM yyyy, HH:mm", { locale: fr })}
-                    </p>
-                  </div>
-                  <div className="text-right shrink-0">
-                    <p className={`font-bold ${isPositive ? "text-accent" : "text-destructive"}`}>
-                      {isPositive ? "+" : "-"}{(tx.amount_fcfa ?? 0).toLocaleString("fr-FR")} FCFA
-                    </p>
-                    <span className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold ${status.bg}`}>
-                      {status.label}
-                    </span>
-                  </div>
-                </motion.div>
-              );
-            })}
+            {filtered.map((num: any, i: number) => (
+              <motion.div
+                key={num.id}
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: i * 0.04 }}
+                className="flex items-center gap-3 rounded-2xl bg-white p-4 shadow-sm"
+              >
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-orange-100">
+                  <span className="text-lg">📱</span>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-semibold text-gray-900">{num.service_name ?? "Service"}</p>
+                  <p className="text-xs font-mono text-orange-500">{num.number}</p>
+                  <p className="text-xs text-gray-400">{num.country}</p>
+                </div>
+                <span className={`shrink-0 rounded-full px-3 py-1 text-xs font-bold ${
+                  num.status === "active"
+                    ? "bg-green-100 text-green-600"
+                    : num.status === "pending"
+                    ? "bg-yellow-100 text-yellow-600"
+                    : "bg-gray-100 text-gray-500"
+                }`}>
+                  {num.status === "active" ? "Actif" : num.status === "pending" ? "En attente" : "Expiré"}
+                </span>
+              </motion.div>
+            ))}
           </AnimatePresence>
         </div>
-      </div>
-      <BottomNav />
-    </div>
-  );
-};
 
-export default Historique;
+        <DrawerMenu open={drawerOpen} onClose={() => setDrawerOpen(false)} />
+        <BottomNav />
+      </div>
+    );
+    };
+
+    export default Historique;
+    
