@@ -55,14 +55,14 @@ import { useState } from "react";
             <h1 className="text-2xl font-bold text-gray-900">Mes</h1>
           </div>
           <div className="flex items-center gap-3">
-            {user ? (
+            {loading ? null : user ? (
               <button className="flex items-center gap-1 rounded-full bg-orange-50 px-3 py-1.5">
                 <span className="text-base">🪙</span>
                 <span className="text-sm font-semibold text-orange-500">0</span>
               </button>
             ) : (
               <button
-                onClick={() => navigate("/login", { state: { from: "/historique" } })}
+                onClick={() => navigate("/login", { state: { from: "/numeros" } })}
                 className="flex items-center gap-1.5 rounded-full bg-orange-500 px-3 py-1.5 text-sm font-semibold text-white"
               >
                 <LogIn className="h-4 w-4" />
@@ -76,7 +76,7 @@ import { useState } from "react";
         </div>
 
         {/* Si non connecté — écran de connexion */}
-        {!user ? (
+        {loading ? null : !user ? (
           <motion.div
             initial={{ opacity: 0, scale: 0.97 }}
             animate={{ opacity: 1, scale: 1 }}
@@ -90,7 +90,7 @@ import { useState } from "react";
               <p className="text-sm text-gray-500">Connectez-vous pour voir vos numéros virtuels achetés.</p>
             </div>
             <button
-              onClick={() => navigate("/login", { state: { from: "/historique" } })}
+              onClick={() => navigate("/login", { state: { from: "/numeros" } })}
               className="flex items-center gap-2 rounded-2xl bg-orange-500 px-8 py-3.5 text-sm font-bold text-white shadow-md active:scale-95 transition-transform"
             >
               <LogIn className="h-4 w-4" />
@@ -144,7 +144,7 @@ import { useState } from "react";
                 </div>
                 <p className="text-base font-medium text-gray-500">Aucun numéro trouvé</p>
                 <button
-                  onClick={() => navigate("/boutique")}
+                  onClick={() => navigate("/accueil")}
                   className="rounded-full bg-orange-500 px-8 py-3 text-sm font-bold text-white shadow-md active:scale-95 transition-transform"
                 >
                   Obtenir un numéro
