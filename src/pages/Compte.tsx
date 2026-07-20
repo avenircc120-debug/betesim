@@ -16,13 +16,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 
 const Compte = () => {
-  const { user, signOut, showAuthModal } = useAuth();
-
-    // Redirect to login if not authenticated
-    if (!user) {
-      navigate("/login", { state: { from: "/compte" } });
-      return null;
-    }
+  const { user, loading, signOut, showAuthModal } = useAuth();
   const { data: profile } = useProfile();
   const queryClient = useQueryClient();
   const navigate = useNavigate();

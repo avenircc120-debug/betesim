@@ -18,7 +18,7 @@ import { X, LayoutDashboard, Smartphone, CreditCard, Settings, LogOut } from "lu
 
     export default function DrawerMenu({ open, onClose }: DrawerMenuProps) {
     const { user, signOut } = useAuth();
-    const { profile } = useProfile();
+    const { data: profile } = useProfile();
     const navigate = useNavigate();
     const location = useLocation();
 

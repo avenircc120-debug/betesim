@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { auth, onAuthStateChanged, signOutUser, type User } from "@/lib/firebase";
 import { supabase } from "@/integrations/supabase/client";
+import type { User } from "@supabase/supabase-js";
 
 export type NormalizedUser = {
   uid: string;
@@ -12,14 +12,20 @@ export type NormalizedUser = {
   phoneNumber: string | null;
 };
 
-function normalizeUser(firebaseUser: User): NormalizedUser {
+function normalizeUser(u: User): NormalizedUser {
+  const meta = u.user_metadata ?? {};
+  const displayName =
+    meta.display_name ||
+    meta.full_name ||
+    [meta.first_name, meta.last_name].filter(Boolean).join(" ") ||
+    null;
   return {
-    uid: firebaseUser.uid,
-    id: firebaseUser.uid,
-    email: firebaseUser.email,
-    displayName: firebaseUser.displayName,
-    photoURL: firebaseUser.photoURL,
-    phoneNumber: firebaseUser.phoneNumber,
+    uid: u.id,
+    id: u.id,
+    email: u.email ?? null,
+    displayName,
+    photoURL: meta.avatar_url ?? null,
+    phoneNumber: u.phone ?? meta.phone ?? null,
   };
 }
 
@@ -46,45 +52,42 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const location = useLocation();
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (firebaseUser) => {
-      const normalized = firebaseUser ? normalizeUser(firebaseUser) : null;
-      setUser(normalized);
+    // Récupère la session existante au démarrage
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ? normalizeUser(session.user) : null);
       setLoading(false);
-      if (normalized) {
-        supabase.functions.invoke("ensure-profile", {
-          body: {
-            user_id: normalized.uid,
-            email: normalized.email,
-            display_name: normalized.displayName,
-            photo_url: normalized.photoURL,
-            phone_number: normalized.phoneNumber,
-          },
-        }).catch((e) => console.warn("ensure-profile failed:", e));
-      }
     });
-    return () => unsub();
+
+    // Écoute les changements d'état auth (connexion, déconnexion, token refresh)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ? normalizeUser(session.user) : null);
+      setLoading(false);
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
   const signOut = async () => {
-    await signOutUser();
+    await supabase.auth.signOut();
+    navigate("/login");
   };
 
   const goToLogin = useCallback(() => {
     const from = location.pathname + location.search;
-    navigate(`/login?redirect=${encodeURIComponent(from)}`);
+    navigate(`/login`, { state: { from } });
   }, [navigate, location]);
 
   const showAuthModal = useCallback(() => {
     goToLogin();
   }, [goToLogin]);
 
-  const requireAuth = useCallback((action: () => void) => {
-    if (user) {
-      action();
-    } else {
-      goToLogin();
-    }
-  }, [user, goToLogin]);
+  const requireAuth = useCallback(
+    (action: () => void) => {
+      if (user) action();
+      else goToLogin();
+    },
+    [user, goToLogin]
+  );
 
   return (
     <AuthContext.Provider value={{ user, loading, signOut, showAuthModal, requireAuth }}>

@@ -30,7 +30,7 @@ import { useState } from "react";
 
     const WalletPage = () => {
     const navigate = useNavigate();
-    const { user } = useAuth();
+    const { user, loading } = useAuth();
     const { data: profile } = useProfile();
     const [selected, setSelected] = useState<Pack>(PACKS[4]);
     const [drawerOpen, setDrawerOpen] = useState(false);

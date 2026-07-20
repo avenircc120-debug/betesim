@@ -16,7 +16,7 @@ import { useState } from "react";
 
     const Historique = () => {
     const navigate = useNavigate();
-    const { user } = useAuth();
+    const { user, loading } = useAuth();
     const [filter, setFilter] = useState<FilterType>("Tous");
     const [search, setSearch] = useState("");
     const [drawerOpen, setDrawerOpen] = useState(false);
