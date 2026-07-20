@@ -180,7 +180,6 @@ import { useState } from "react";
           </div>
         );
       }
-      );
     }
 
     return (
