@@ -10,7 +10,7 @@ import { useState, Component, ReactNode } from 'react';
     import Boutique from './pages/Boutique';
     import WalletPage from './pages/WalletPage';
     import Historique from './pages/Historique';
-    import Compte from './pages/Compte';
+    import Profil from './pages/Profil';
     import NotFound from './pages/NotFound';
     import AuthCallback from './pages/AuthCallback';
     import LoginPage from './pages/LoginPage';
@@ -53,11 +53,11 @@ import { useState, Component, ReactNode } from 'react';
       <Toaster />
       <Sonner />
       <Routes>
-        <Route path="/" element={<Navigate to="/boutique" replace />} />
-        <Route path="/boutique"   element={<Boutique />} />
-        <Route path="/historique" element={<Historique />} />
-        <Route path="/wallet"     element={<WalletPage />} />
-        <Route path="/compte"     element={<Compte />} />
+        <Route path="/" element={<Navigate to="/accueil" replace />} />
+        <Route path="/accueil"   element={<Boutique />} />
+        <Route path="/numeros"   element={<Historique />} />
+        <Route path="/recharger" element={<WalletPage />} />
+        <Route path="/profil"    element={<Profil />} />
         <Route path="/auth/callback" element={<AuthCallback />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
