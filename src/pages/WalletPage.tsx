@@ -37,7 +37,7 @@ import { useState } from "react";
 
     const handleBuy = () => {
       if (!user) {
-        navigate("/login", { state: { from: "/wallet" } });
+        navigate("/login", { state: { from: "/recharger" } });
         return;
       }
       // TODO: intégrer le paiement
@@ -55,7 +55,7 @@ import { useState } from "react";
             <h1 className="text-2xl font-bold text-gray-900">Rechargeur</h1>
           </div>
           <div className="flex items-center gap-3">
-            {user ? (
+            {loading ? null : user ? (
               <button className="flex items-center gap-1 rounded-full bg-orange-50 px-3 py-1.5">
                 <span className="text-base">🪙</span>
                 <span className="text-sm font-semibold text-orange-500">
@@ -127,9 +127,11 @@ import { useState } from "react";
             onClick={handleBuy}
             className="w-full rounded-2xl bg-orange-500 py-4 text-center text-base font-bold text-white shadow-lg"
           >
-            {user
-              ? `Confirmateur & Payeur · ${selected.fcfa.toLocaleString("fr-FR")} FCFA`
-              : `Se connecter pour payer · ${selected.fcfa.toLocaleString("fr-FR")} FCFA`}
+            {loading
+              ? "Chargement…"
+              : user
+                ? `Recharger · ${selected.fcfa.toLocaleString("fr-FR")} FCFA`
+                : `Se connecter pour recharger · ${selected.fcfa.toLocaleString("fr-FR")} FCFA`}
           </motion.button>
         </div>
 
