@@ -7,7 +7,6 @@ import { useState, Component, ReactNode } from 'react';
     import { AuthProvider } from '@/hooks/useAuth';
     import SplashScreen from '@/components/SplashScreen';
     import InAppNotificationBanner from '@/components/InAppNotificationBanner';
-    import ProfileGate from '@/components/ProfileGate';
     import Boutique from './pages/Boutique';
     import WalletPage from './pages/WalletPage';
     import Historique from './pages/Historique';
@@ -21,14 +20,6 @@ import { useState, Component, ReactNode } from 'react';
     const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
     });
-
-    const isTelegramWebApp = () => {
-    try {
-      if (new URLSearchParams(window.location.search).get('tg') === '1') return true;
-      const tg = (window as any).Telegram?.WebApp;
-      return !!(tg && tg.initData && tg.initData.length > 0);
-    } catch { return false; }
-    };
 
     interface EBState { error: Error | null }
     class ErrorBoundary extends Component<{ children: ReactNode }, EBState> {
@@ -52,26 +43,24 @@ import { useState, Component, ReactNode } from 'react';
     }
     }
 
-    const AuthenticatedLayout = ({ showSplash, onSplashComplete }: {
+    const AppLayout = ({ showSplash, onSplashComplete }: {
     showSplash: boolean;
     onSplashComplete: () => void;
     }) => (
     <AuthProvider>
-      <ProfileGate>
-        {showSplash && <SplashScreen onComplete={onSplashComplete} />}
-        <InAppNotificationBanner />
-        <Toaster />
-        <Sonner />
-        <Routes>
-          <Route path="/" element={<Navigate to="/boutique" replace />} />
-          <Route path="/boutique" element={<Boutique />} />
-          <Route path="/historique" element={<Historique />} />
-          <Route path="/wallet" element={<WalletPage />} />
-          <Route path="/compte" element={<Compte />} />
-          <Route path="/auth/callback" element={<AuthCallback />} />
-          <Route path="*" element={<NotFound />} />
-        </Routes>
-      </ProfileGate>
+      {showSplash && <SplashScreen onComplete={onSplashComplete} />}
+      <InAppNotificationBanner />
+      <Toaster />
+      <Sonner />
+      <Routes>
+        <Route path="/" element={<Navigate to="/boutique" replace />} />
+        <Route path="/boutique"   element={<Boutique />} />
+        <Route path="/historique" element={<Historique />} />
+        <Route path="/wallet"     element={<WalletPage />} />
+        <Route path="/compte"     element={<Compte />} />
+        <Route path="/auth/callback" element={<AuthCallback />} />
+        <Route path="*" element={<NotFound />} />
+      </Routes>
     </AuthProvider>
     );
 
@@ -83,11 +72,11 @@ import { useState, Component, ReactNode } from 'react';
           <TooltipProvider>
             <BrowserRouter>
               <Routes>
-                <Route path="/login" element={<LoginPage />} />
+                <Route path="/login"         element={<LoginPage />} />
                 <Route path="/reset-password" element={<ResetPassword />} />
-                <Route path="/onboarding" element={<Onboarding />} />
+                <Route path="/onboarding"    element={<Onboarding />} />
                 <Route path="*" element={
-                  <AuthenticatedLayout
+                  <AppLayout
                     showSplash={showSplash}
                     onSplashComplete={() => setShowSplash(false)}
                   />
