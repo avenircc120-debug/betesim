@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
-    import { Search, Bell, Phone, Play, ChevronRight, Loader2, ArrowLeft } from "lucide-react";
+    import { Search, Bell, Phone, Play, ChevronRight, Loader2, ArrowLeft, Menu } from "lucide-react";
     import BottomNav from "@/components/BottomNav";
+    import DrawerMenu from "@/components/DrawerMenu";
     import { useAuth } from "@/hooks/useAuth";
     import { useProfile } from "@/hooks/useProfile";
     import { supabase } from "@/integrations/supabase/client";
@@ -77,6 +78,7 @@ import { useState, useEffect } from "react";
     const { profile } = useProfile();
     const navigate = useNavigate();
 
+    const [drawerOpen, setDrawerOpen] = useState(false);
     const [step, setStep] = useState<Step>(1);
     const [search, setSearch] = useState("");
     const [countrySearch, setCountrySearch] = useState("");
@@ -180,6 +182,8 @@ import { useState, useEffect } from "react";
 
     return (
       <div className="min-h-screen bg-[#f5f5f5] pb-24">
+        <DrawerMenu open={drawerOpen} onClose={() => setDrawerOpen(false)} />
+
         {/* Header */}
         <div className="bg-white px-4 py-4 flex items-center justify-between shadow-sm sticky top-0 z-10">
           {step > 1 ? (
@@ -187,7 +191,9 @@ import { useState, useEffect } from "react";
               <ArrowLeft className="w-5 h-5 text-gray-600" />
             </button>
           ) : (
-            <div className="w-8 h-8" />
+            <button onClick={() => setDrawerOpen(true)} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 transition-colors">
+              <Menu className="w-5 h-5 text-gray-600" />
+            </button>
           )}
           <h1 className="text-xl font-bold text-gray-900">Tableau de bord</h1>
           <div className="flex items-center gap-3">
@@ -200,7 +206,6 @@ import { useState, useEffect } from "react";
         </div>
 
         <div className="px-4 py-4 space-y-4">
-          {/* Active numbers card */}
           <motion.div
             initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
             className="bg-white rounded-2xl p-4 shadow-sm"
@@ -214,7 +219,6 @@ import { useState, useEffect } from "react";
             <p className="text-4xl font-bold text-gray-900">{activeNumbers}</p>
           </motion.div>
 
-          {/* Tutorials */}
           <motion.div
             initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.05 }}
@@ -240,7 +244,6 @@ import { useState, useEffect } from "react";
             ))}
           </motion.div>
 
-          {/* Service selection */}
           <motion.div
             initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1 }}
@@ -255,7 +258,6 @@ import { useState, useEffect } from "react";
               </p>
             </div>
 
-            {/* Step indicator */}
             <div className="flex items-center">
               {[1, 2, 3].map((s, i) => (
                 <div key={s} className="flex items-center flex-1 last:flex-none">
