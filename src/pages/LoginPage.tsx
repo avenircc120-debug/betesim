@@ -52,44 +52,6 @@ import { useState } from "react";
     );
 
     /* ─────────────────────────────────────────
-     Écran : Vérifiez votre boîte mail
-    ───────────────────────────────────────── */
-    const EmailVerificationScreen = ({ email, onBack }: { email: string; onBack: () => void }) => (
-    <motion.div
-      initial={{ opacity: 0, scale: 0.96 }}
-      animate={{ opacity: 1, scale: 1 }}
-      className="mx-4 mt-8 rounded-3xl bg-white shadow-lg p-8 flex flex-col items-center text-center gap-5"
-    >
-      {/* Icône enveloppe */}
-      <div className="flex h-20 w-20 items-center justify-center rounded-full bg-orange-100">
-        <Mail className="h-10 w-10 text-orange-500" />
-      </div>
-
-      <div className="space-y-3">
-        <h2 className="text-2xl font-extrabold text-gray-900">Vérifiez votre boîte mail</h2>
-        <p className="text-sm text-gray-500 leading-relaxed">
-          Nous avons envoyé un lien de confirmation à{" "}
-          <span className="font-semibold text-orange-500">{email}</span>.
-          Veuillez cliquer sur ce lien pour activer votre compte Betesim.
-        </p>
-      </div>
-
-      {/* Tip spam */}
-      <div className="w-full rounded-xl bg-gray-50 border border-gray-200 px-4 py-3">
-        <p className="text-xs text-gray-500 leading-relaxed">
-          Si vous ne recevez rien d'ici quelques minutes, n'oubliez pas de vérifier vos{" "}
-          <span className="font-semibold">spams</span>.
-        </p>
-      </div>
-
-      <button
-        onClick={onBack}
-        className="w-full rounded-2xl bg-orange-500 py-4 text-base font-bold text-white shadow-md active:scale-95 transition-transform"
-      >
-        Retour à la connexion
-      </button>
-    </motion.div>
-    );
 
     /* ─────────────────────────────────────────
      Page principale
