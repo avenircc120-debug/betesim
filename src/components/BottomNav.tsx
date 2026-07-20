@@ -3,10 +3,10 @@ import { Home, Smartphone, CreditCard, User } from "lucide-react";
     import { motion } from "framer-motion";
 
     const tabs = [
-    { path: "/boutique",   label: "Accueil",    icon: Home },
-    { path: "/historique", label: "Numéros",    icon: Smartphone },
-    { path: "/wallet",     label: "Rechargeur", icon: CreditCard },
-    { path: "/compte",     label: "Profil",     icon: User },
+    { path: "/accueil",   label: "Accueil",    icon: Home },
+    { path: "/numeros",   label: "Numéros",    icon: Smartphone },
+    { path: "/recharger", label: "Rechargeur", icon: CreditCard },
+    { path: "/profil",    label: "Profil",     icon: User },
     ];
 
     const BottomNav = () => {
