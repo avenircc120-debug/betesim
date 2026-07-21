@@ -199,14 +199,24 @@ function getBgColor(name: string): string {
 }
 
 // ─── Composant logo service ─────────────────────────────────────────────────
+// Cache module-level pour éviter le scintillement entre re-renders
+const _logoSourceCache = new Map<string, number>();
+
 function ServiceLogo({ name }: { name: string }) {
-  const [srcIndex, setSrcIndex] = useState(0);
   const domain = getServiceDomain(name);
   const sources = [
     `https://logo.clearbit.com/${domain}`,
     `https://t2.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=https://${domain}&size=128`,
     `https://icons.duckduckgo.com/ip3/${domain}.ico`,
   ];
+  const cached = _logoSourceCache.get(name) ?? 0;
+  const [srcIndex, setSrcIndex] = useState(cached);
+
+  const handleError = () => {
+    const next = srcIndex + 1;
+    _logoSourceCache.set(name, next);
+    setSrcIndex(next);
+  };
 
   if (srcIndex >= sources.length) {
     return (
@@ -220,7 +230,7 @@ function ServiceLogo({ name }: { name: string }) {
       src={sources[srcIndex]}
       alt={name}
       className="w-10 h-10 rounded-full object-contain bg-white border border-gray-100 p-0.5"
-      onError={() => setSrcIndex((i) => i + 1)}
+      onError={handleError}
       loading="lazy"
     />
   );
