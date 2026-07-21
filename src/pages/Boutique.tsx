@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { Search, Bell, Phone, ChevronRight, Loader2, ArrowLeft, Menu, RefreshCw } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { Search, ChevronRight, Loader2, ArrowLeft, Menu, RefreshCw, Phone, Wifi } from "lucide-react";
 import BottomNav from "@/components/BottomNav";
 import DrawerMenu from "@/components/DrawerMenu";
 import { useAuth } from "@/hooks/useAuth";
@@ -26,59 +26,227 @@ interface Country {
 
 interface PriceInfo {
   instock: number;
-  price: number; // en USD
+  price: number;
 }
 
-function getServiceEmoji(name: string): string {
-  const n = name.toLowerCase();
-  if (n.includes("whatsapp")) return "💬";
-  if (n.includes("telegram")) return "✈️";
-  if (n.includes("snapchat")) return "👻";
-  if (n.includes("instagram")) return "📸";
-  if (n.includes("tiktok")) return "🎵";
-  if (n.includes("facebook")) return "👤";
-  if (n.includes("twitter") || n === "x") return "🐦";
-  if (n.includes("google")) return "🔍";
-  if (n.includes("discord")) return "🎮";
-  if (n.includes("netflix")) return "🎬";
-  if (n.includes("spotify")) return "🎶";
-  if (n.includes("uber")) return "🚗";
-  if (n.includes("airbnb")) return "🏠";
-  if (n.includes("amazon")) return "📦";
-  if (n.includes("apple")) return "🍎";
-  if (n.includes("microsoft")) return "🪟";
-  if (n.includes("linkedin")) return "💼";
-  if (n.includes("tinder")) return "❤️";
-  if (n.includes("reddit")) return "🤖";
-  if (n.includes("steam")) return "🕹️";
-  if (n.includes("twitch")) return "📺";
-  if (n.includes("yahoo")) return "📧";
-  if (n.includes("line")) return "💚";
-  if (n.includes("viber")) return "📳";
-  if (n.includes("wechat")) return "🟢";
-  if (n.includes("paypal")) return "💳";
-  if (n.includes("ebay")) return "🛒";
-  if (n.includes("microsoft")) return "🪟";
-  if (n.includes("outlook")) return "📨";
-  if (n.includes("zoom")) return "📹";
-  return "📱";
+// ─── Mapping service name → domaine pour le logo ───────────────────────────
+const SERVICE_DOMAINS: Record<string, string> = {
+  whatsapp: "whatsapp.com",
+  telegram: "telegram.org",
+  snapchat: "snapchat.com",
+  instagram: "instagram.com",
+  tiktok: "tiktok.com",
+  facebook: "facebook.com",
+  twitter: "twitter.com",
+  x: "x.com",
+  google: "google.com",
+  discord: "discord.com",
+  netflix: "netflix.com",
+  spotify: "spotify.com",
+  uber: "uber.com",
+  airbnb: "airbnb.com",
+  amazon: "amazon.com",
+  apple: "apple.com",
+  microsoft: "microsoft.com",
+  linkedin: "linkedin.com",
+  tinder: "tinder.com",
+  reddit: "reddit.com",
+  steam: "steampowered.com",
+  twitch: "twitch.tv",
+  yahoo: "yahoo.com",
+  "line": "line.me",
+  viber: "viber.com",
+  wechat: "wechat.com",
+  paypal: "paypal.com",
+  ebay: "ebay.com",
+  "amazon aws": "aws.amazon.com",
+  "gmail": "gmail.com",
+  outlook: "outlook.com",
+  zoom: "zoom.us",
+  skype: "skype.com",
+  pinterest: "pinterest.com",
+  tumblr: "tumblr.com",
+  vk: "vk.com",
+  "ok.ru": "ok.ru",
+  odnoklassniki: "ok.ru",
+  signal: "signal.org",
+  clubhouse: "clubhouse.com",
+  bumble: "bumble.com",
+  badoo: "badoo.com",
+  "hinge": "hinge.co",
+  grindr: "grindr.com",
+  pof: "pof.com",
+  meetic: "meetic.fr",
+  zoosk: "zoosk.com",
+  coinbase: "coinbase.com",
+  binance: "binance.com",
+  kraken: "kraken.com",
+  bybit: "bybit.com",
+  bitfinex: "bitfinex.com",
+  kucoin: "kucoin.com",
+  okx: "okx.com",
+  "crypto.com": "crypto.com",
+  robinhood: "robinhood.com",
+  revolut: "revolut.com",
+  "n26": "n26.com",
+  stripe: "stripe.com",
+  wise: "wise.com",
+  "cash app": "cash.app",
+  cashapp: "cash.app",
+  venmo: "venmo.com",
+  "google pay": "pay.google.com",
+  "apple pay": "apple.com",
+  "samsung pay": "samsung.com",
+  shopify: "shopify.com",
+  aliexpress: "aliexpress.com",
+  alibaba: "alibaba.com",
+  lazada: "lazada.com",
+  jumia: "jumia.com",
+  "booking.com": "booking.com",
+  booking: "booking.com",
+  expedia: "expedia.com",
+  airasia: "airasia.com",
+  lyft: "lyft.com",
+  "grab": "grab.com",
+  ola: "olacabs.com",
+  deliveroo: "deliveroo.com",
+  "uber eats": "ubereats.com",
+  doordash: "doordash.com",
+  "just eat": "just-eat.com",
+  github: "github.com",
+  gitlab: "gitlab.com",
+  stackoverflow: "stackoverflow.com",
+  "stack overflow": "stackoverflow.com",
+  "microsoft teams": "microsoft.com",
+  slack: "slack.com",
+  notion: "notion.so",
+  figma: "figma.com",
+  canva: "canva.com",
+  dropbox: "dropbox.com",
+  "google drive": "drive.google.com",
+  trello: "trello.com",
+  jira: "atlassian.com",
+  asana: "asana.com",
+  "monday.com": "monday.com",
+  "1password": "1password.com",
+  lastpass: "lastpass.com",
+  dashlane: "dashlane.com",
+  nordvpn: "nordvpn.com",
+  expressvpn: "expressvpn.com",
+  surfshark: "surfshark.com",
+  "hbo max": "max.com",
+  hbomax: "max.com",
+  "disney+": "disneyplus.com",
+  disneyplus: "disneyplus.com",
+  hulu: "hulu.com",
+  "amazon prime": "primevideo.com",
+  "apple tv": "tv.apple.com",
+  "youtube": "youtube.com",
+  "youtube premium": "youtube.com",
+  deezer: "deezer.com",
+  "apple music": "music.apple.com",
+  soundcloud: "soundcloud.com",
+  "ea": "ea.com",
+  "electronic arts": "ea.com",
+  "epic games": "epicgames.com",
+  "epic": "epicgames.com",
+  "battle.net": "battle.net",
+  "blizzard": "blizzard.com",
+  "ubisoft": "ubisoft.com",
+  "rockstar": "rockstargames.com",
+  "playstation": "playstation.com",
+  "xbox": "xbox.com",
+  "nintendo": "nintendo.com",
+  "roblox": "roblox.com",
+  "minecraft": "minecraft.net",
+  "fortnite": "epicgames.com",
+  "league of legends": "leagueoflegends.com",
+  "riot games": "riotgames.com",
+  imo: "imo.im",
+  kakao: "kakao.com",
+  "kakaotalk": "kakao.com",
+  naver: "naver.com",
+  "zalo": "zalo.me",
+  lazaro: "lazaro.com",
+  "huawei": "huawei.com",
+  "xiaomi": "xiaomi.com",
+  "oppo": "oppo.com",
+  "vivo": "vivo.com",
+};
+
+function getServiceDomain(name: string): string {
+  const key = name.toLowerCase().trim();
+  if (SERVICE_DOMAINS[key]) return SERVICE_DOMAINS[key];
+  // Essai générique : supprimer espaces et caractères spéciaux
+  const slug = key.replace(/[^a-z0-9]/g, "");
+  return `${slug}.com`;
 }
 
-function getCountryFlag(shortName: string): string {
-  if (!shortName || shortName.length < 2) return "🌐";
-  try {
-    const code = shortName.toUpperCase().slice(0, 2);
-    return String.fromCodePoint(
-      ...code.split("").map((c) => 0x1f1e0 - 65 + c.charCodeAt(0))
+// ─── Couleur de fond par initiale ──────────────────────────────────────────
+const BG_COLORS = [
+  "bg-blue-100 text-blue-600",
+  "bg-green-100 text-green-600",
+  "bg-purple-100 text-purple-600",
+  "bg-pink-100 text-pink-600",
+  "bg-yellow-100 text-yellow-700",
+  "bg-indigo-100 text-indigo-600",
+  "bg-red-100 text-red-600",
+  "bg-teal-100 text-teal-600",
+];
+function getBgColor(name: string): string {
+  const idx = (name.charCodeAt(0) || 0) % BG_COLORS.length;
+  return BG_COLORS[idx];
+}
+
+// ─── Composant logo service ─────────────────────────────────────────────────
+function ServiceLogo({ name }: { name: string }) {
+  const [failed, setFailed] = useState(false);
+  const domain = getServiceDomain(name);
+  const src = `https://logo.clearbit.com/${domain}`;
+
+  if (failed) {
+    return (
+      <span className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold ${getBgColor(name)}`}>
+        {name.charAt(0).toUpperCase()}
+      </span>
     );
-  } catch {
-    return "🌐";
   }
+  return (
+    <img
+      src={src}
+      alt={name}
+      className="w-10 h-10 rounded-full object-contain bg-white border border-gray-100"
+      onError={() => setFailed(true)}
+      loading="lazy"
+    />
+  );
+}
+
+// ─── Composant drapeau pays ─────────────────────────────────────────────────
+function CountryFlag({ short_name, name, size = "md" }: { short_name: string; name: string; size?: "sm" | "md" | "lg" }) {
+  const [failed, setFailed] = useState(false);
+  const code = short_name.toLowerCase().slice(0, 2);
+  const src = `https://flagcdn.com/w40/${code}.png`;
+  const cls = size === "lg" ? "w-10 h-7" : size === "sm" ? "w-6 h-4" : "w-8 h-5";
+
+  if (failed || !code || code.length < 2) {
+    return <span className="text-2xl">🌐</span>;
+  }
+  return (
+    <img
+      src={src}
+      alt={name}
+      className={`${cls} object-cover rounded shadow-sm`}
+      onError={() => setFailed(true)}
+      loading="lazy"
+    />
+  );
 }
 
 const POPULAR_NAMES = new Set([
   "whatsapp", "telegram", "snapchat", "instagram", "tiktok",
-  "facebook", "twitter", "x", "google", "discord",
+  "facebook", "twitter", "x", "google", "discord", "youtube",
+  "spotify", "netflix", "tinder", "paypal", "uber",
 ]);
 
 export default function Boutique() {
@@ -100,8 +268,8 @@ export default function Boutique() {
   const [loadingPrice, setLoadingPrice] = useState(false);
   const [ordering, setOrdering] = useState(false);
   const [activeNumbers, setActiveNumbers] = useState(0);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
-  // Nombre de numéros actifs
   useEffect(() => {
     if (!user) return;
     supabase
@@ -113,13 +281,13 @@ export default function Boutique() {
   }, [user]);
 
   // Charger TOUS les services SMSPool en temps réel
-  const loadServices = () => {
+  const loadServices = useCallback(() => {
     setLoadingServices(true);
     supabase.functions
       .invoke("smspool-lookup", { body: { action: "all_services" } })
       .then(({ data, error }) => {
         if (error || !data?.success) {
-          toast.error("Impossible de charger les services");
+          toast.error("Impossible de charger les services SMSPool");
           setServices([]);
           return;
         }
@@ -128,7 +296,7 @@ export default function Boutique() {
           name: s.name ?? "",
           favourite: Number(s.favourite ?? 0),
         }));
-        // Populaires en tête, puis alphabétique
+        // Populaires en tête, puis favoris SMSPool, puis alphabétique
         mapped.sort((a, b) => {
           const aP = POPULAR_NAMES.has(a.name.toLowerCase()) ? 1 : 0;
           const bP = POPULAR_NAMES.has(b.name.toLowerCase()) ? 1 : 0;
@@ -137,15 +305,14 @@ export default function Boutique() {
           return a.name.localeCompare(b.name);
         });
         setServices(mapped);
+        setLastUpdated(new Date());
       })
       .finally(() => setLoadingServices(false));
-  };
-
-  useEffect(() => {
-    loadServices();
   }, []);
 
-  // Sélection d'un service → charger les pays en temps réel
+  useEffect(() => { loadServices(); }, [loadServices]);
+
+  // Sélection service → charger les pays SMSPool en temps réel
   const handleServiceSelect = async (service: Service) => {
     setSelectedService(service);
     setStep(2);
@@ -165,7 +332,7 @@ export default function Boutique() {
     }
   };
 
-  // Sélection d'un pays → chercher le prix en temps réel pour ce service+pays
+  // Sélection pays → prix en temps réel pour ce service+pays
   const handleCountrySelect = async (country: Country) => {
     setSelectedCountry(country);
     setStep(3);
@@ -189,15 +356,8 @@ export default function Boutique() {
   };
 
   const goBack = () => {
-    if (step === 2) {
-      setStep(1);
-      setSelectedService(null);
-      setCountries([]);
-    } else if (step === 3) {
-      setStep(2);
-      setSelectedCountry(null);
-      setPriceInfo(null);
-    }
+    if (step === 2) { setStep(1); setSelectedService(null); setCountries([]); }
+    else if (step === 3) { setStep(2); setSelectedCountry(null); setPriceInfo(null); }
   };
 
   const handleOrder = async () => {
@@ -224,8 +384,6 @@ export default function Boutique() {
     c.name.toLowerCase().includes(countrySearch.toLowerCase())
   );
 
-  const isPopular = (name: string) => POPULAR_NAMES.has(name.toLowerCase());
-
   const priceFCFA = priceInfo && priceInfo.price > 0
     ? Math.round(priceInfo.price * 600).toLocaleString("fr-FR")
     : null;
@@ -237,58 +395,25 @@ export default function Boutique() {
       {/* Header */}
       <div className="bg-white px-4 py-4 flex items-center justify-between shadow-sm sticky top-0 z-10">
         {step > 1 ? (
-          <button
-            onClick={goBack}
-            className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 transition-colors"
-          >
+          <button onClick={goBack} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 transition-colors">
             <ArrowLeft className="w-5 h-5 text-gray-600" />
           </button>
         ) : (
-          <button
-            onClick={() => setDrawerOpen(true)}
-            className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 transition-colors"
-          >
+          <button onClick={() => setDrawerOpen(true)} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 transition-colors">
             <Menu className="w-5 h-5 text-gray-600" />
           </button>
         )}
         <h1 className="text-xl font-bold text-gray-900">Tableau de bord</h1>
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1.5 bg-orange-50 border border-orange-200 rounded-full px-3 py-1.5">
-            <span className="text-orange-500 text-xs">🔗</span>
-            <span className="text-orange-600 font-bold text-sm">{activeNumbers}</span>
-          </div>
+        <div className="flex items-center gap-1.5 bg-orange-50 border border-orange-200 rounded-full px-3 py-1.5">
+          <Phone className="w-3.5 h-3.5 text-orange-500" />
+          <span className="text-orange-600 font-bold text-sm">{activeNumbers}</span>
         </div>
       </div>
 
       <div className="px-4 py-4 space-y-4">
-        {/* Carte numéros actifs */}
+        {/* Solde wallet */}
         <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="bg-white rounded-2xl p-4 shadow-sm"
-        >
-          <div className="flex items-center gap-3 mb-3">
-            <div className="w-10 h-10 bg-orange-50 rounded-xl flex items-center justify-center">
-              <Phone className="w-5 h-5 text-orange-500" />
-            </div>
-            <span className="text-gray-500 text-sm font-medium">Numéros actifs</span>
-          </div>
-          <div className="flex items-end justify-between">
-            <p className="text-4xl font-black text-gray-900">{activeNumbers}</p>
-            <button
-              onClick={() => navigate("/numeros")}
-              className="text-orange-500 text-sm font-semibold hover:text-orange-600 transition-colors"
-            >
-              Voir tout →
-            </button>
-          </div>
-        </motion.div>
-
-        {/* Carte solde */}
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.05 }}
+          initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
           className="bg-gradient-to-r from-orange-500 to-orange-400 rounded-2xl p-4 shadow-sm shadow-orange-200"
         >
           <p className="text-orange-100 text-sm font-medium mb-1">Solde wallet</p>
@@ -297,117 +422,97 @@ export default function Boutique() {
           </p>
         </motion.div>
 
-        {/* Sélecteur service → pays → commande */}
+        {/* Sélecteur principal */}
         <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1 }}
+          initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.08 }}
           className="bg-white rounded-2xl p-4 shadow-sm space-y-4"
         >
-          {/* En-tête étapes */}
+          {/* Barre étapes */}
           <div className="flex items-center justify-between">
             <div>
               <h2 className="text-gray-900 font-bold text-base">
-                {step === 1 ? "Choisir un service" : step === 2 ? "Choisir un pays" : "Confirmer la commande"}
+                {step === 1 ? "Choisir un service" : step === 2 ? "Choisir un pays" : "Confirmer"}
               </h2>
-              <p className="text-gray-400 text-sm mt-0.5">
-                {step === 1
-                  ? `${filteredServices.length} service${filteredServices.length > 1 ? "s" : ""} disponibles`
-                  : step === 2
-                  ? `${filteredCountries.length} pays disponibles`
-                  : `${selectedService?.name} — ${selectedCountry?.name}`}
+              <p className="text-gray-400 text-xs mt-0.5 flex items-center gap-1">
+                {step === 1 && !loadingServices && (
+                  <>
+                    <Wifi className="w-3 h-3 text-green-400" />
+                    <span className="text-green-500 font-medium">{services.length} services en direct depuis SMSPool</span>
+                  </>
+                )}
+                {step === 1 && loadingServices && "Chargement depuis SMSPool…"}
+                {step === 2 && !loadingCountries && (
+                  <>
+                    <Wifi className="w-3 h-3 text-green-400" />
+                    <span className="text-green-500 font-medium">{countries.length} pays en direct depuis SMSPool</span>
+                  </>
+                )}
+                {step === 2 && loadingCountries && "Chargement depuis SMSPool…"}
+                {step === 3 && `${selectedService?.name} · ${selectedCountry?.name}`}
               </p>
             </div>
             <div className="flex items-center">
               {[1, 2, 3].map((s, i) => (
                 <div key={s} className="flex items-center">
-                  <div
-                    className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold transition-all ${
-                      step === s
-                        ? "bg-orange-500 text-white shadow-md shadow-orange-200"
-                        : step > s
-                        ? "bg-orange-100 text-orange-500"
-                        : "bg-gray-100 text-gray-400"
-                    }`}
-                  >
-                    {s}
-                  </div>
-                  {i < 2 && (
-                    <div
-                      className={`w-5 h-0.5 mx-0.5 transition-colors ${
-                        step > s ? "bg-orange-300" : "bg-gray-100"
-                      }`}
-                    />
-                  )}
+                  <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-all ${
+                    step === s ? "bg-orange-500 text-white shadow-md shadow-orange-200"
+                    : step > s ? "bg-orange-100 text-orange-500"
+                    : "bg-gray-100 text-gray-400"
+                  }`}>{s}</div>
+                  {i < 2 && <div className={`w-4 h-0.5 mx-0.5 transition-colors ${step > s ? "bg-orange-300" : "bg-gray-100"}`} />}
                 </div>
               ))}
             </div>
           </div>
 
           <AnimatePresence mode="wait">
-            {/* STEP 1 — Services */}
+
+            {/* ── STEP 1 — Services ─────────────────────────────────────── */}
             {step === 1 && (
-              <motion.div
-                key="step1"
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -20 }}
-                transition={{ duration: 0.2 }}
-                className="space-y-3"
-              >
-                {/* Barre de recherche services */}
+              <motion.div key="step1" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} transition={{ duration: 0.18 }} className="space-y-3">
+
+                {/* Barre de recherche */}
                 <div className="relative">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                   <input
                     type="text"
-                    placeholder="Rechercher un service… (ex : WhatsApp, Netflix)"
+                    placeholder="Rechercher un service… (WhatsApp, Netflix…)"
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
-                    className="w-full pl-9 pr-10 py-3 bg-gray-50 border border-gray-100 rounded-xl text-sm outline-none focus:border-orange-300 focus:bg-white transition-colors"
+                    className="w-full pl-9 pr-9 py-3 bg-gray-50 border border-gray-100 rounded-xl text-sm outline-none focus:border-orange-300 focus:bg-white transition-colors"
                   />
                   {search && (
-                    <button
-                      onClick={() => setSearch("")}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-300 hover:text-gray-500 text-lg leading-none"
-                    >
-                      ×
-                    </button>
+                    <button onClick={() => setSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-300 hover:text-gray-500 text-xl leading-none">×</button>
                   )}
                 </div>
 
                 {loadingServices ? (
-                  <div className="flex flex-col items-center py-10 gap-2">
-                    <Loader2 className="w-6 h-6 animate-spin text-orange-500" />
-                    <p className="text-gray-400 text-sm">Chargement des services SMSPool…</p>
+                  <div className="flex flex-col items-center py-12 gap-3">
+                    <Loader2 className="w-7 h-7 animate-spin text-orange-500" />
+                    <p className="text-gray-400 text-sm">Chargement en direct depuis SMSPool…</p>
                   </div>
                 ) : filteredServices.length === 0 ? (
-                  <div className="flex flex-col items-center py-8 gap-3">
-                    <p className="text-gray-400 text-sm">Aucun service trouvé pour « {search} »</p>
-                    <button
-                      onClick={() => setSearch("")}
-                      className="text-orange-500 text-sm font-semibold hover:text-orange-600"
-                    >
-                      Effacer la recherche
-                    </button>
+                  <div className="flex flex-col items-center py-8 gap-2">
+                    <p className="text-gray-400 text-sm">Aucun résultat pour «&nbsp;{search}&nbsp;»</p>
+                    <button onClick={() => setSearch("")} className="text-orange-500 text-sm font-semibold">Effacer</button>
                   </div>
                 ) : (
-                  <div className="space-y-1 max-h-[45vh] overflow-y-auto pr-1">
+                  <div className="space-y-0.5 max-h-[50vh] overflow-y-auto -mx-1 px-1">
                     {filteredServices.map((service) => (
                       <button
                         key={service.id}
                         onClick={() => handleServiceSelect(service)}
-                        className="w-full flex items-center gap-3 p-3 hover:bg-orange-50 active:bg-orange-100 rounded-xl transition-colors group"
+                        className="w-full flex items-center gap-3 px-2 py-2.5 hover:bg-orange-50 active:bg-orange-100 rounded-xl transition-colors group"
                       >
-                        <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center text-xl shrink-0 group-hover:bg-orange-100 transition-colors">
-                          {getServiceEmoji(service.name)}
+                        {/* Logo en temps réel */}
+                        <div className="shrink-0">
+                          <ServiceLogo name={service.name} />
                         </div>
                         <div className="flex-1 text-left min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
+                          <div className="flex items-center gap-2">
                             <span className="text-gray-900 font-semibold text-sm truncate">{service.name}</span>
-                            {isPopular(service.name) && (
-                              <span className="bg-orange-100 text-orange-600 text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap shrink-0">
-                                Populaire
-                              </span>
+                            {POPULAR_NAMES.has(service.name.toLowerCase()) && (
+                              <span className="shrink-0 bg-orange-100 text-orange-600 text-[9px] font-bold px-1.5 py-0.5 rounded-full">Populaire</span>
                             )}
                           </div>
                         </div>
@@ -417,32 +522,23 @@ export default function Boutique() {
                   </div>
                 )}
 
-                {/* Bouton rafraîchir */}
+                {/* Rafraîchir */}
                 {!loadingServices && services.length > 0 && (
-                  <button
-                    onClick={loadServices}
-                    className="w-full flex items-center justify-center gap-2 py-2 text-gray-400 text-xs hover:text-orange-500 transition-colors"
-                  >
+                  <button onClick={loadServices} className="w-full flex items-center justify-center gap-1.5 py-2 text-gray-400 text-xs hover:text-orange-500 transition-colors">
                     <RefreshCw className="w-3 h-3" />
-                    Actualiser les services
+                    {lastUpdated ? `Actualisé à ${lastUpdated.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}` : "Actualiser"}
                   </button>
                 )}
               </motion.div>
             )}
 
-            {/* STEP 2 — Pays */}
+            {/* ── STEP 2 — Pays ─────────────────────────────────────────── */}
             {step === 2 && (
-              <motion.div
-                key="step2"
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -20 }}
-                transition={{ duration: 0.2 }}
-                className="space-y-3"
-              >
+              <motion.div key="step2" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} transition={{ duration: 0.18 }} className="space-y-3">
+
                 {/* Service sélectionné */}
-                <div className="flex items-center gap-2 bg-orange-50 rounded-xl px-3 py-2">
-                  <span className="text-lg">{getServiceEmoji(selectedService?.name ?? "")}</span>
+                <div className="flex items-center gap-2 bg-orange-50 border border-orange-100 rounded-xl px-3 py-2">
+                  <ServiceLogo name={selectedService?.name ?? ""} />
                   <span className="text-orange-700 font-semibold text-sm">{selectedService?.name}</span>
                 </div>
 
@@ -451,50 +547,41 @@ export default function Boutique() {
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                   <input
                     type="text"
-                    placeholder="Rechercher un pays… (ex : France, USA)"
+                    placeholder="Rechercher un pays… (France, USA, Nigeria…)"
                     value={countrySearch}
                     onChange={(e) => setCountrySearch(e.target.value)}
-                    className="w-full pl-9 pr-10 py-3 bg-gray-50 border border-gray-100 rounded-xl text-sm outline-none focus:border-orange-300 focus:bg-white transition-colors"
+                    className="w-full pl-9 pr-9 py-3 bg-gray-50 border border-gray-100 rounded-xl text-sm outline-none focus:border-orange-300 focus:bg-white transition-colors"
                   />
                   {countrySearch && (
-                    <button
-                      onClick={() => setCountrySearch("")}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-300 hover:text-gray-500 text-lg leading-none"
-                    >
-                      ×
-                    </button>
+                    <button onClick={() => setCountrySearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-300 hover:text-gray-500 text-xl leading-none">×</button>
                   )}
                 </div>
 
                 {loadingCountries ? (
-                  <div className="flex flex-col items-center py-10 gap-2">
-                    <Loader2 className="w-6 h-6 animate-spin text-orange-500" />
-                    <p className="text-gray-400 text-sm">Chargement des pays SMSPool…</p>
+                  <div className="flex flex-col items-center py-12 gap-3">
+                    <Loader2 className="w-7 h-7 animate-spin text-orange-500" />
+                    <p className="text-gray-400 text-sm">Chargement en direct depuis SMSPool…</p>
                   </div>
                 ) : filteredCountries.length === 0 ? (
-                  <div className="flex flex-col items-center py-8 gap-3">
-                    <p className="text-gray-400 text-sm">Aucun pays trouvé pour « {countrySearch} »</p>
-                    <button
-                      onClick={() => setCountrySearch("")}
-                      className="text-orange-500 text-sm font-semibold hover:text-orange-600"
-                    >
-                      Effacer la recherche
-                    </button>
+                  <div className="flex flex-col items-center py-8 gap-2">
+                    <p className="text-gray-400 text-sm">Aucun résultat pour «&nbsp;{countrySearch}&nbsp;»</p>
+                    <button onClick={() => setCountrySearch("")} className="text-orange-500 text-sm font-semibold">Effacer</button>
                   </div>
                 ) : (
-                  <div className="space-y-1 max-h-[45vh] overflow-y-auto pr-1">
+                  <div className="space-y-0.5 max-h-[50vh] overflow-y-auto -mx-1 px-1">
                     {filteredCountries.map((country) => (
                       <button
                         key={country.id}
                         onClick={() => handleCountrySelect(country)}
-                        className="w-full flex items-center gap-3 p-3 hover:bg-orange-50 active:bg-orange-100 rounded-xl transition-colors group"
+                        className="w-full flex items-center gap-3 px-2 py-2.5 hover:bg-orange-50 active:bg-orange-100 rounded-xl transition-colors group"
                       >
-                        <span className="text-2xl shrink-0">{getCountryFlag(country.short_name)}</span>
+                        {/* Drapeau en temps réel */}
+                        <div className="shrink-0 w-10 flex items-center justify-center">
+                          <CountryFlag short_name={country.short_name} name={country.name} size="md" />
+                        </div>
                         <div className="flex-1 text-left min-w-0">
-                          <span className="text-sm font-semibold text-gray-800 block truncate">{country.name}</span>
-                          {country.region && (
-                            <span className="text-xs text-gray-400">{country.region}</span>
-                          )}
+                          <span className="text-gray-900 font-semibold text-sm block truncate">{country.name}</span>
+                          {country.region && <span className="text-gray-400 text-xs">{country.region}</span>}
                         </div>
                         <ChevronRight className="w-4 h-4 text-gray-300 group-hover:text-orange-400 shrink-0 transition-colors" />
                       </button>
@@ -504,81 +591,73 @@ export default function Boutique() {
               </motion.div>
             )}
 
-            {/* STEP 3 — Confirmation */}
+            {/* ── STEP 3 — Confirmation ─────────────────────────────────── */}
             {step === 3 && (
-              <motion.div
-                key="step3"
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -20 }}
-                transition={{ duration: 0.2 }}
-                className="space-y-4"
-              >
-                <div className="bg-gray-50 rounded-2xl p-4 space-y-3">
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-gray-500">Service</span>
-                    <span className="font-bold text-gray-800">
-                      {getServiceEmoji(selectedService?.name ?? "")} {selectedService?.name}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-gray-500">Pays</span>
-                    <span className="font-bold text-gray-800">
-                      {getCountryFlag(selectedCountry?.short_name ?? "")} {selectedCountry?.name}
-                    </span>
+              <motion.div key="step3" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} transition={{ duration: 0.18 }} className="space-y-4">
+                <div className="bg-gray-50 rounded-2xl p-4 space-y-4">
+
+                  {/* Service */}
+                  <div className="flex items-center gap-3">
+                    <ServiceLogo name={selectedService?.name ?? ""} />
+                    <div>
+                      <p className="text-xs text-gray-400 font-medium">Service</p>
+                      <p className="text-gray-900 font-bold text-sm">{selectedService?.name}</p>
+                    </div>
                   </div>
 
-                  <div className="border-t border-gray-200 pt-3">
+                  {/* Pays */}
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 flex items-center justify-center">
+                      <CountryFlag short_name={selectedCountry?.short_name ?? ""} name={selectedCountry?.name ?? ""} size="lg" />
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-400 font-medium">Pays</p>
+                      <p className="text-gray-900 font-bold text-sm">{selectedCountry?.name}</p>
+                    </div>
+                  </div>
+
+                  <div className="border-t border-gray-200 pt-3 space-y-2">
                     {loadingPrice ? (
-                      <div className="flex items-center justify-between">
-                        <span className="text-gray-500 text-sm font-medium">Prix réel</span>
-                        <div className="flex items-center gap-2">
-                          <Loader2 className="w-4 h-4 animate-spin text-orange-400" />
-                          <span className="text-gray-400 text-sm">Chargement…</span>
-                        </div>
+                      <div className="flex items-center gap-2 text-gray-400 text-sm">
+                        <Loader2 className="w-4 h-4 animate-spin text-orange-400" />
+                        Récupération du prix en direct…
                       </div>
                     ) : priceInfo ? (
                       <>
                         <div className="flex items-center justify-between">
-                          <span className="text-gray-500 text-sm font-medium">Prix réel</span>
-                          <div className="text-right">
-                            {priceFCFA ? (
-                              <span className="font-bold text-orange-500 text-base">{priceFCFA} FCFA</span>
-                            ) : (
-                              <span className="text-gray-400 text-sm">Prix non disponible</span>
-                            )}
-                          </div>
+                          <span className="text-gray-500 text-sm font-medium flex items-center gap-1">
+                            <Wifi className="w-3 h-3 text-green-400" /> Prix en direct
+                          </span>
+                          <span className="font-black text-orange-500 text-lg">
+                            {priceFCFA ? `${priceFCFA} FCFA` : "—"}
+                          </span>
                         </div>
-                        <div className="flex items-center justify-between mt-2">
+                        <div className="flex items-center justify-between">
                           <span className="text-gray-400 text-xs">Stock disponible</span>
-                          <span className={`text-xs font-semibold ${priceInfo.instock > 0 ? "text-green-500" : "text-red-400"}`}>
-                            {priceInfo.instock > 0 ? `${priceInfo.instock} numéro${priceInfo.instock > 1 ? "s" : ""}` : "Rupture de stock"}
+                          <span className={`text-xs font-bold ${priceInfo.instock > 0 ? "text-green-500" : "text-red-400"}`}>
+                            {priceInfo.instock > 0 ? `${priceInfo.instock} numéro${priceInfo.instock > 1 ? "s" : ""}` : "Rupture"}
                           </span>
                         </div>
                       </>
                     ) : (
-                      <div className="flex items-center justify-between">
-                        <span className="text-gray-500 text-sm font-medium">Prix</span>
-                        <span className="text-gray-400 text-sm">Non disponible pour ce pays</span>
-                      </div>
+                      <p className="text-gray-400 text-sm">Prix non disponible pour ce pays</p>
                     )}
-                  </div>
-
-                  <div className="flex items-center justify-between text-xs text-gray-400 pt-1">
-                    <span>Solde wallet</span>
-                    <span className="font-medium">{(profile?.fcfa_balance ?? 0).toLocaleString("fr-FR")} FCFA</span>
+                    <div className="flex items-center justify-between pt-1">
+                      <span className="text-gray-400 text-xs">Solde wallet</span>
+                      <span className="text-xs font-semibold text-gray-600">{(profile?.fcfa_balance ?? 0).toLocaleString("fr-FR")} FCFA</span>
+                    </div>
                   </div>
                 </div>
 
-                {priceInfo && priceInfo.instock === 0 && (
-                  <div className="bg-red-50 border border-red-100 rounded-xl p-3 text-sm text-red-600">
-                    ⚠️ Aucun numéro disponible pour ce pays actuellement. Essayez un autre pays.
+                {priceInfo?.instock === 0 && (
+                  <div className="bg-red-50 border border-red-100 rounded-xl p-3 text-sm text-red-600 font-medium">
+                    ⚠️ Aucun numéro disponible pour ce pays. Choisissez un autre pays.
                   </div>
                 )}
 
                 <button
                   onClick={handleOrder}
-                  disabled={ordering || loadingPrice || (priceInfo !== null && priceInfo.instock === 0)}
+                  disabled={ordering || loadingPrice || priceInfo?.instock === 0}
                   className="w-full bg-orange-500 hover:bg-orange-600 active:bg-orange-700 text-white font-bold py-4 rounded-2xl flex items-center justify-center gap-2 transition-colors disabled:opacity-60 shadow-lg shadow-orange-200"
                 >
                   {ordering && <Loader2 className="w-5 h-5 animate-spin" />}
@@ -586,6 +665,7 @@ export default function Boutique() {
                 </button>
               </motion.div>
             )}
+
           </AnimatePresence>
         </motion.div>
       </div>
