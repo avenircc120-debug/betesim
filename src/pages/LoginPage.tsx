@@ -121,6 +121,7 @@ import { useState } from "react";
     const [showPwd,  setShowPwd]  = useState(false);
     const [showPwd2, setShowPwd2] = useState(false);
     const [showCountryList, setShowCountryList] = useState(false);
+    const [registeredEmail, setRegisteredEmail] = useState<string | null>(null);
 
     if (user) { navigate(from, { replace: true }); return null; }
 
