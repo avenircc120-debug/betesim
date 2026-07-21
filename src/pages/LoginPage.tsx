@@ -169,9 +169,11 @@ const LoginPage = () => {
       if (error) { toast.error(error.message); return; }
       // Email déjà enregistré (anti-énumération Supabase : identities vide)
       if (data?.user && (data.user.identities?.length ?? 0) === 0) {
-        toast.error("Un compte existe déjà avec cet email. Connectez-vous à la place.");
-        return;
-      }
+          toast.error("Un compte existe déjà avec cet email. Connectez-vous à la place.");
+          setTab("connexion");
+          setLoginEmail(regEmail);
+          return;
+        }
       // Auto-confirm activé → session immédiate, rediriger directement
       if (data?.session) {
         toast.success("Compte créé avec succès ! Bienvenue 🎉");
