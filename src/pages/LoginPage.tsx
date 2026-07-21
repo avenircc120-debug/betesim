@@ -136,21 +136,32 @@ const LoginPage = () => {
     if (regPwd !== regPwd2) { toast.error("Les mots de passe ne correspondent pas"); return; }
     if (regPwd.length < 8) { toast.error("Mot de passe trop court (min 8 caractères)"); return; }
     setLoading(true);
-    const { error } = await supabase.auth.signUp({
-      email: regEmail,
-      password: regPwd,
-      options: {
-        data: {
-          first_name: prenom,
-          last_name: nom,
-          phone: `${country.dial}${phone}`,
-          country: country.name,
+    try {
+      const { data, error } = await supabase.auth.signUp({
+        email: regEmail,
+        password: regPwd,
+        options: {
+          data: {
+            first_name: prenom,
+            last_name: nom,
+            phone: `${country.dial}${phone}`,
+            country: country.name,
+          },
         },
-      },
-    });
-    setLoading(false);
-    if (error) { toast.error(error.message); return; }
-    setRegisteredEmail(regEmail);
+      });
+      if (error) { toast.error(error.message); return; }
+      // Supabase retourne succès même si l'email existe déjà (anti-énumération)
+      // mais identities[] sera vide — on affiche quand même l'écran de vérification
+      if (data?.user && (data.user.identities?.length ?? 0) === 0) {
+        toast.error("Un compte existe déjà avec cet email. Connectez-vous à la place.");
+        return;
+      }
+      setRegisteredEmail(regEmail);
+    } catch (err: any) {
+      toast.error(err?.message ?? "Erreur réseau, veuillez réessayer.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   /* ── Écran vérification après inscription ── */
@@ -351,3 +362,4 @@ const LoginPage = () => {
 };
 
 export default LoginPage;
+
