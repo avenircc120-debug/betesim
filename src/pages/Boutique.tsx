@@ -297,7 +297,7 @@ export default function Boutique() {
     return json.data as any[];
   };
 
-  // Étape 1 — charger tous les services SMSPool en temps réel
+  // Étape 1 — charger tous les services en temps réel
   const loadServices = useCallback(async () => {
     setLoadingServices(true);
     try {
@@ -307,7 +307,7 @@ export default function Boutique() {
         name: String(s.name ?? ""),
         favourite: Number(s.favourite ?? 0),
       }));
-      // Populaires en tête, puis favoris SMSPool, puis alphabétique
+      // Populaires en tête, puis favoris, puis alphabétique
       mapped.sort((a, b) => {
         const aP = POPULAR_NAMES.has(a.name.toLowerCase()) ? 1 : 0;
         const bP = POPULAR_NAMES.has(b.name.toLowerCase()) ? 1 : 0;
