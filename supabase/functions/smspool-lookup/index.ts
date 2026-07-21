@@ -15,26 +15,24 @@ serve(async (req) => {
     const apiKey = Deno.env.get("SMSPOOL_API_KEY");
     if (!apiKey) throw new Error("SMSPOOL_API_KEY non configurée");
 
-    // Lire les paramètres depuis le body JSON (POST) ou query string (GET)
+    const url = new URL(req.url);
     let action = "countries";
     let country = "";
     let service = "";
 
-    const url = new URL(req.url);
-
     if (req.method === "POST") {
       try {
         const body = await req.json();
-        action = body.action ?? url.searchParams.get("action") ?? "countries";
+        action  = body.action  ?? url.searchParams.get("action")  ?? "countries";
         country = body.country ?? url.searchParams.get("country") ?? "";
         service = body.service ?? url.searchParams.get("service") ?? "";
       } catch {
-        action = url.searchParams.get("action") ?? "countries";
+        action  = url.searchParams.get("action")  ?? "countries";
         country = url.searchParams.get("country") ?? "";
         service = url.searchParams.get("service") ?? "";
       }
     } else {
-      action = url.searchParams.get("action") ?? "countries";
+      action  = url.searchParams.get("action")  ?? "countries";
       country = url.searchParams.get("country") ?? "";
       service = url.searchParams.get("service") ?? "";
     }
@@ -42,7 +40,7 @@ serve(async (req) => {
     let result: any[] = [];
 
     if (action === "countries") {
-      // Tous les pays SMSPool (151 pays)
+      // Tous les pays SMSPool
       const res = await fetch("https://api.smspool.net/country/retrieve_all", {
         headers: { Authorization: `Bearer ${apiKey}` },
       });
@@ -58,20 +56,20 @@ serve(async (req) => {
         }))
         .filter((c: any) => c.id && c.name);
 
-      // Épinglés en tête, puis tri alphabétique
-      const pinned = mapped
-        .filter((c: any) => PINNED_IDS.has(c.id))
+      const pinned = mapped.filter((c: any) => PINNED_IDS.has(c.id))
         .sort((a: any, b: any) => a.name.localeCompare(b.name));
-      const rest = mapped
-        .filter((c: any) => !PINNED_IDS.has(c.id))
+      const rest = mapped.filter((c: any) => !PINNED_IDS.has(c.id))
         .sort((a: any, b: any) => a.name.localeCompare(b.name));
 
       result = [...pinned, ...rest];
 
     } else if (action === "all_services") {
-      // Tous les services SMSPool (~1364 services, sans filtre pays)
+      // ── FIX : POST + clé dans le body (Bearer ne fonctionne pas pour cet endpoint) ──
+      const params = new URLSearchParams({ key: apiKey });
       const res = await fetch("https://api.smspool.net/service/retrieve_all", {
-        headers: { Authorization: `Bearer ${apiKey}` },
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: params.toString(),
       });
       const raw = await res.json();
       const arr = Array.isArray(raw) ? raw : Object.values(raw);
@@ -84,13 +82,11 @@ serve(async (req) => {
         }))
         .filter((s: any) => s.id && s.name)
         .sort((a: any, b: any) => {
-          // Favoris en premier, puis alphabétique
           if (a.favourite !== b.favourite) return b.favourite - a.favourite;
           return a.name.localeCompare(b.name);
         });
 
     } else if (action === "services") {
-      // Services + prix + stock pour un pays donné
       if (!country) throw new Error("country requis");
       const params = new URLSearchParams({ key: apiKey, country });
       const res = await fetch("https://api.smspool.net/service/retrieve_all_country", {
@@ -112,7 +108,6 @@ serve(async (req) => {
         .sort((a: any, b: any) => a.name.localeCompare(b.name));
 
     } else if (action === "price_lookup") {
-      // Prix + stock d'un service précis dans un pays donné
       if (!country || !service) throw new Error("country et service requis");
       const params = new URLSearchParams({ key: apiKey, country });
       const res = await fetch("https://api.smspool.net/service/retrieve_all_country", {
@@ -124,12 +119,7 @@ serve(async (req) => {
       const arr = Array.isArray(raw) ? raw : Object.values(raw);
       const found = arr.find((s: any) => String(s.ID ?? s.id) === service);
       result = found
-        ? [{
-            id: String(found.ID ?? found.id),
-            name: found.name ?? "",
-            instock: Number(found.instock ?? 0),
-            price: Number(found.price ?? 0),
-          }]
+        ? [{ id: String(found.ID ?? found.id), name: found.name ?? "", instock: Number(found.instock ?? 0), price: Number(found.price ?? 0) }]
         : [];
     }
 
