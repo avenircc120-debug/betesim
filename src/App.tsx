@@ -47,19 +47,19 @@ const AppLayout = ({ showSplash, onSplashComplete }: {
   showSplash: boolean;
   onSplashComplete: () => void;
 }) => (
-  <AuthProvider>
+  <>
     {showSplash && <SplashScreen onComplete={onSplashComplete} />}
     <InAppNotificationBanner />
     <Routes>
       <Route path="/" element={<Navigate to="/accueil" replace />} />
-      <Route path="/accueil"   element={<Boutique />} />
-      <Route path="/numeros"   element={<Historique />} />
-      <Route path="/recharger" element={<WalletPage />} />
-      <Route path="/profil"    element={<Profil />} />
+      <Route path="/accueil"       element={<Boutique />} />
+      <Route path="/numeros"       element={<Historique />} />
+      <Route path="/recharger"     element={<WalletPage />} />
+      <Route path="/profil"        element={<Profil />} />
       <Route path="/auth/callback" element={<AuthCallback />} />
-      <Route path="*" element={<NotFound />} />
+      <Route path="*"              element={<NotFound />} />
     </Routes>
-  </AuthProvider>
+  </>
 );
 
 function App() {
@@ -69,20 +69,23 @@ function App() {
       <QueryClientProvider client={queryClient}>
         <TooltipProvider>
           <BrowserRouter>
-            {/* Toasters au niveau global — visibles sur TOUTES les routes */}
-            <Toaster />
-            <Sonner />
-            <Routes>
-              <Route path="/login"          element={<LoginPage />} />
-              <Route path="/reset-password" element={<ResetPassword />} />
-              <Route path="/onboarding"     element={<Onboarding />} />
-              <Route path="*" element={
-                <AppLayout
-                  showSplash={showSplash}
-                  onSplashComplete={() => setShowSplash(false)}
-                />
-              } />
-            </Routes>
+            {/* AuthProvider au niveau global : LoginPage + toutes les pages ont accès à auth */}
+            <AuthProvider>
+              {/* Toasters globaux : visibles sur TOUTES les routes */}
+              <Toaster />
+              <Sonner />
+              <Routes>
+                <Route path="/login"          element={<LoginPage />} />
+                <Route path="/reset-password" element={<ResetPassword />} />
+                <Route path="/onboarding"     element={<Onboarding />} />
+                <Route path="*" element={
+                  <AppLayout
+                    showSplash={showSplash}
+                    onSplashComplete={() => setShowSplash(false)}
+                  />
+                } />
+              </Routes>
+            </AuthProvider>
           </BrowserRouter>
         </TooltipProvider>
       </QueryClientProvider>
