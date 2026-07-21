@@ -8,7 +8,6 @@ import { useAuth } from "@/hooks/useAuth";
 import { useProfile } from "@/hooks/useProfile";
 
 type Pack = {
-  coins: number;
   fcfa: number;
   badge?: string;
   badgeColor?: string;
@@ -16,17 +15,20 @@ type Pack = {
 };
 
 const PACKS: Pack[] = [
-  { coins: 10,   fcfa: 1_000,   badge: "Découverte",    badgeColor: "bg-gray-200 text-gray-600" },
-  { coins: 20,   fcfa: 2_000 },
-  { coins: 35,   fcfa: 3_000,   discount: 14 },
-  { coins: 46,   fcfa: 4_000,   discount: 14 },
-  { coins: 58,   fcfa: 5_000,   discount: 14, badge: "POPULAIRE",    badgeColor: "bg-orange-500 text-white" },
-  { coins: 118,  fcfa: 10_000,  discount: 15, badge: "Top",          badgeColor: "bg-orange-100 text-orange-600" },
-  { coins: 180,  fcfa: 15_000,  discount: 17 },
-  { coins: 250,  fcfa: 20_000,  discount: 20 },
-  { coins: 650,  fcfa: 50_000,  discount: 23 },
-  { coins: 1450, fcfa: 100_000, discount: 31, badge: "Meilleur prix", badgeColor: "bg-green-100 text-green-700" },
+  { fcfa: 1_000,   badge: "Découverte", badgeColor: "bg-gray-200 text-gray-600" },
+  { fcfa: 2_000 },
+  { fcfa: 3_000,   discount: 14 },
+  { fcfa: 4_000,   discount: 14 },
+  { fcfa: 5_000,   discount: 14, badge: "POPULAIRE",     badgeColor: "bg-orange-500 text-white" },
+  { fcfa: 10_000,  discount: 15, badge: "Top",            badgeColor: "bg-orange-100 text-orange-600" },
+  { fcfa: 15_000,  discount: 17 },
+  { fcfa: 20_000,  discount: 20 },
+  { fcfa: 50_000,  discount: 23 },
+  { fcfa: 100_000, discount: 31, badge: "Meilleur prix", badgeColor: "bg-green-100 text-green-700" },
 ];
+
+const fmt = (n: number) =>
+  n >= 1_000 ? `${(n / 1_000).toLocaleString("fr-FR")}k` : String(n);
 
 const WalletPage = () => {
   const navigate = useNavigate();
@@ -43,9 +45,6 @@ const WalletPage = () => {
     alert("Paiement à venir !");
   };
 
-  const fmt = (n: number) =>
-    n >= 1_000 ? `${(n / 1_000).toLocaleString("fr-FR")}k` : String(n);
-
   return (
     <div className="min-h-screen bg-gray-50 pb-24">
       {/* Header */}
@@ -59,9 +58,8 @@ const WalletPage = () => {
         <div className="flex items-center gap-3">
           {loading ? null : user ? (
             <button className="flex items-center gap-1 rounded-full bg-orange-50 px-3 py-1.5">
-              <span className="text-base">🪙</span>
               <span className="text-sm font-semibold text-orange-500">
-                {profile?.fcfa_balance?.toLocaleString("fr-FR") ?? "0"}
+                {profile?.fcfa_balance?.toLocaleString("fr-FR") ?? "0"} FCFA
               </span>
             </button>
           ) : (
@@ -81,17 +79,17 @@ const WalletPage = () => {
 
       <div className="px-4 pt-4 pb-4 flex flex-col gap-3">
         <p className="text-xs font-bold tracking-widest text-gray-400 text-center">
-          CHOISIR UN MONTANT
+          CHOISIR UN MONTANT EN FCFA
         </p>
 
         {/* Grille compacte 3 colonnes */}
         <div className="grid grid-cols-3 gap-2">
           {PACKS.map((pack) => {
-            const isSelected = selected.coins === pack.coins;
+            const isSelected = selected.fcfa === pack.fcfa;
             const isLast = pack.fcfa === 100_000;
             return (
               <motion.button
-                key={pack.coins}
+                key={pack.fcfa}
                 whileTap={{ scale: 0.94 }}
                 onClick={() => setSelected(pack)}
                 className={`relative rounded-xl border-2 bg-white p-2.5 text-left transition-all ${
@@ -112,13 +110,10 @@ const WalletPage = () => {
                 )}
                 <div className="flex items-baseline gap-0.5 mt-1">
                   <span className={`font-bold text-gray-900 leading-none ${isLast ? "text-2xl" : "text-xl"}`}>
-                    {pack.coins}
+                    {isLast ? pack.fcfa.toLocaleString("fr-FR") : fmt(pack.fcfa)}
                   </span>
-                  <span className="text-sm leading-none">🪙</span>
+                  <span className="text-[10px] text-gray-500 leading-none ml-0.5">F</span>
                 </div>
-                <p className="text-[11px] font-semibold text-gray-500 mt-1 leading-tight">
-                  {isLast ? pack.fcfa.toLocaleString("fr-FR") + " F" : fmt(pack.fcfa) + " F"}
-                </p>
                 {pack.discount && (
                   <p className="text-[10px] font-bold text-green-600 mt-0.5">-{pack.discount}%</p>
                 )}
@@ -127,7 +122,7 @@ const WalletPage = () => {
           })}
         </div>
 
-        {/* Bouton juste sous la grille */}
+        {/* Bouton de recharge */}
         <motion.button
           whileTap={{ scale: 0.97 }}
           onClick={handleBuy}
