@@ -202,6 +202,8 @@ function getBgColor(name: string): string {
 // Cache module-level pour éviter le scintillement entre re-renders
 const _logoSourceCache = new Map<string, number>();
 
+const _logoCache = new Map<string, number>();
+
 function ServiceLogo({ name }: { name: string }) {
   const domain = getServiceDomain(name);
   const sources = [
@@ -209,12 +211,11 @@ function ServiceLogo({ name }: { name: string }) {
     `https://t2.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=https://${domain}&size=128`,
     `https://icons.duckduckgo.com/ip3/${domain}.ico`,
   ];
-  const cached = _logoSourceCache.get(name) ?? 0;
-  const [srcIndex, setSrcIndex] = useState(cached);
+  const [srcIndex, setSrcIndex] = useState(() => _logoCache.get(name) ?? 0);
 
   const handleError = () => {
     const next = srcIndex + 1;
-    _logoSourceCache.set(name, next);
+    _logoCache.set(name, next);
     setSrcIndex(next);
   };
 
