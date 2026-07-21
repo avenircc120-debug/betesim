@@ -150,12 +150,18 @@ const LoginPage = () => {
         },
       });
       if (error) { toast.error(error.message); return; }
-      // Supabase retourne succès même si l'email existe déjà (anti-énumération)
-      // mais identities[] sera vide — on affiche quand même l'écran de vérification
+      // Email déjà enregistré (anti-énumération Supabase : identities vide)
       if (data?.user && (data.user.identities?.length ?? 0) === 0) {
         toast.error("Un compte existe déjà avec cet email. Connectez-vous à la place.");
         return;
       }
+      // Auto-confirm activé → session immédiate, rediriger directement
+      if (data?.session) {
+        toast.success("Compte créé avec succès ! Bienvenue 🎉");
+        navigate(from, { replace: true });
+        return;
+      }
+      // Confirmation email requise → afficher l'écran de vérification
       setRegisteredEmail(regEmail);
     } catch (err: any) {
       toast.error(err?.message ?? "Erreur réseau, veuillez réessayer.");
@@ -362,4 +368,5 @@ const LoginPage = () => {
 };
 
 export default LoginPage;
+
 
