@@ -280,70 +280,90 @@ export default function Boutique() {
       .then(({ count }) => setActiveNumbers(count ?? 0));
   }, [user]);
 
-  // Charger TOUS les services SMSPool en temps réel
-  const loadServices = useCallback(() => {
+
+  // ── Helper : appel direct GET vers l'edge function (évite le bug de parsing POST) ─
+  const callSmsPool = async (params: Record<string, string>) => {
+    const base = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/smspool-lookup`;
+    const qs = new URLSearchParams(params).toString();
+    const res = await fetch(`${base}?${qs}`, {
+      headers: {
+        Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+        apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
+      },
+    });
+    if (!res.ok) throw new Error(`Erreur réseau (${res.status})`);
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error ?? "Erreur SMSPool");
+    return json.data as any[];
+  };
+
+  // Étape 1 — charger tous les services SMSPool en temps réel
+  const loadServices = useCallback(async () => {
     setLoadingServices(true);
-    supabase.functions
-      .invoke("smspool-lookup", { body: { action: "all_services" } })
-      .then(({ data, error }) => {
-        if (error || !data?.success) {
-          toast.error("Impossible de charger les services SMSPool");
-          setServices([]);
-          return;
-        }
-        const mapped: Service[] = (data.data as any[]).map((s: any) => ({
-          id: String(s.id),
-          name: s.name ?? "",
-          favourite: Number(s.favourite ?? 0),
-        }));
-        // Populaires en tête, puis favoris SMSPool, puis alphabétique
-        mapped.sort((a, b) => {
-          const aP = POPULAR_NAMES.has(a.name.toLowerCase()) ? 1 : 0;
-          const bP = POPULAR_NAMES.has(b.name.toLowerCase()) ? 1 : 0;
-          if (aP !== bP) return bP - aP;
-          if ((b.favourite ?? 0) !== (a.favourite ?? 0)) return (b.favourite ?? 0) - (a.favourite ?? 0);
-          return a.name.localeCompare(b.name);
-        });
-        setServices(mapped);
-        setLastUpdated(new Date());
-      })
-      .finally(() => setLoadingServices(false));
+    try {
+      const raw = await callSmsPool({ action: "all_services" });
+      const mapped: Service[] = raw.map((s: any) => ({
+        id: String(s.id ?? s.ID ?? ""),
+        name: String(s.name ?? ""),
+        favourite: Number(s.favourite ?? 0),
+      }));
+      // Populaires en tête, puis favoris SMSPool, puis alphabétique
+      mapped.sort((a, b) => {
+        const aP = POPULAR_NAMES.has(a.name.toLowerCase()) ? 1 : 0;
+        const bP = POPULAR_NAMES.has(b.name.toLowerCase()) ? 1 : 0;
+        if (aP !== bP) return bP - aP;
+        if ((b.favourite ?? 0) !== (a.favourite ?? 0)) return (b.favourite ?? 0) - (a.favourite ?? 0);
+        return a.name.localeCompare(b.name);
+      });
+      setServices(mapped);
+      setLastUpdated(new Date());
+    } catch {
+      toast.error("Impossible de charger les services SMSPool");
+      setServices([]);
+    } finally {
+      setLoadingServices(false);
+    }
   }, []);
 
   useEffect(() => { loadServices(); }, [loadServices]);
 
-  // Sélection service → charger les pays SMSPool en temps réel
+  // Sélection service → étape 2 : charger les pays disponibles
   const handleServiceSelect = async (service: Service) => {
     setSelectedService(service);
     setStep(2);
     setCountrySearch("");
     setLoadingCountries(true);
     try {
-      const { data, error } = await supabase.functions.invoke("smspool-lookup", {
-        body: { action: "countries" },
-      });
-      if (error || !data?.success) throw new Error("Impossible de charger les pays");
-      setCountries(data.data);
+      const raw = await callSmsPool({ action: "countries" });
+      const mapped: Country[] = raw.map((c: any) => ({
+        id: String(c.id ?? c.ID ?? ""),
+        name: String(c.name ?? ""),
+        short_name: String(c.short_name ?? c.cc ?? ""),
+        region: c.region ?? "",
+      }));
+      setCountries(mapped);
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(e.message ?? "Impossible de charger les pays");
       setStep(1);
     } finally {
       setLoadingCountries(false);
     }
   };
 
-  // Sélection pays → prix en temps réel pour ce service+pays
+  // Sélection pays → étape 3 : prix en temps réel pour ce service + pays
   const handleCountrySelect = async (country: Country) => {
     setSelectedCountry(country);
     setStep(3);
     setPriceInfo(null);
     setLoadingPrice(true);
     try {
-      const { data, error } = await supabase.functions.invoke("smspool-lookup", {
-        body: { action: "price_lookup", service: selectedService!.id, country: country.id },
+      const raw = await callSmsPool({
+        action: "price_lookup",
+        service: selectedService!.id,
+        country: country.id,
       });
-      if (!error && data?.success && data.data?.length > 0) {
-        const info = data.data[0];
+      if (raw.length > 0) {
+        const info = raw[0];
         setPriceInfo({ instock: Number(info.instock ?? 0), price: Number(info.price ?? 0) });
       } else {
         setPriceInfo(null);
