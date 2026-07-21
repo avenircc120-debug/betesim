@@ -228,4 +228,21 @@ router.get("/numbers/subscriptions", async (req: Request, res: Response) => {
   res.json({ subscriptions: data ?? [] });
 });
 
+// GET /api/numbers/price?service=X&country=Y
+router.get("/numbers/price", async (req: Request, res: Response) => {
+  const { service, country } = req.query as { service?: string; country?: string };
+  if (!service || !country) {
+    res.status(400).json({ error: "service et country sont requis." });
+    return;
+  }
+  try {
+    const { getPriceForServiceAndCountry } = await import("../lib/smspool.js");
+    const priceInfo = await getPriceForServiceAndCountry(service, country);
+    res.json({ priceInfo });
+  } catch (err: any) {
+    req.log.error({ err: err.message }, "Failed to fetch price");
+    res.status(500).json({ error: "Impossible de récupérer le prix." });
+  }
+});
+
 export default router;
