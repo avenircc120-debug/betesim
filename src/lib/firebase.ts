@@ -1,22 +1,44 @@
 import { initializeApp } from "firebase/app";
-import { getAuth, GoogleAuthProvider, signInWithPopup } from "firebase/auth";
+    import {
+    getAuth,
+    GoogleAuthProvider,
+    signInWithPopup,
+    signInWithEmailAndPassword,
+    createUserWithEmailAndPassword,
+    } from "firebase/auth";
 
-const firebaseConfig = {
-  apiKey:            import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain:        import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId:         import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  appId:             import.meta.env.VITE_FIREBASE_APP_ID,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-};
+    const firebaseConfig = {
+    apiKey:            "AIzaSyAwZz4Uh-58zkZaCngm5gbhFbFDoTBq9Xc",
+    authDomain:        "numcha-ace43.firebaseapp.com",
+    projectId:         "numcha-ace43",
+    storageBucket:     "numcha-ace43.firebasestorage.app",
+    messagingSenderId: "1049771982197",
+    appId:             "1:1049771982197:web:ff1132faefe7b4dc80273c",
+    };
 
-export const firebaseApp  = initializeApp(firebaseConfig);
-export const firebaseAuth = getAuth(firebaseApp);
-export const googleProvider = new GoogleAuthProvider();
-googleProvider.setCustomParameters({ prompt: "select_account" });
+    export const firebaseApp  = initializeApp(firebaseConfig);
+    export const firebaseAuth = getAuth(firebaseApp);
+    export const googleProvider = new GoogleAuthProvider();
+    googleProvider.setCustomParameters({ prompt: "select_account" });
 
-/** Ouvre le popup Google et retourne l'ID token Google */
-export async function signInWithGoogle(): Promise<string> {
-  const result  = await signInWithPopup(firebaseAuth, googleProvider);
-  const idToken = await result.user.getIdToken();
-  return idToken;
-}
+    /** Connexion Google — retourne l'ID token Firebase */
+    export async function signInWithGoogle(): Promise<string> {
+    const result  = await signInWithPopup(firebaseAuth, googleProvider);
+    const idToken = await result.user.getIdToken();
+    return idToken;
+    }
+
+    /** Connexion email/mot de passe Firebase */
+    export async function signInWithEmail(email: string, password: string): Promise<string> {
+    const result  = await signInWithEmailAndPassword(firebaseAuth, email, password);
+    const idToken = await result.user.getIdToken();
+    return idToken;
+    }
+
+    /** Inscription email/mot de passe Firebase */
+    export async function registerWithEmail(email: string, password: string): Promise<string> {
+    const result  = await createUserWithEmailAndPassword(firebaseAuth, email, password);
+    const idToken = await result.user.getIdToken();
+    return idToken;
+    }
+    
