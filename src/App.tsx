@@ -16,6 +16,7 @@ import AuthCallback from "./pages/AuthCallback";
 import LoginPage from "./pages/LoginPage";
 import Onboarding from "./pages/Onboarding";
 import ResetPassword from "./pages/ResetPassword";
+import SetupPassword from "./pages/SetupPassword";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
@@ -69,15 +70,14 @@ function App() {
       <QueryClientProvider client={queryClient}>
         <TooltipProvider>
           <BrowserRouter>
-            {/* AuthProvider au niveau global : LoginPage + toutes les pages ont accès à auth */}
             <AuthProvider>
-              {/* Toasters globaux : visibles sur TOUTES les routes */}
               <Toaster />
               <Sonner />
               <Routes>
                 <Route path="/login"          element={<LoginPage />} />
                 <Route path="/reset-password" element={<ResetPassword />} />
                 <Route path="/onboarding"     element={<Onboarding />} />
+                <Route path="/setup-password" element={<SetupPassword />} />
                 <Route path="*" element={
                   <AppLayout
                     showSplash={showSplash}
