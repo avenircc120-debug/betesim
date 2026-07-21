@@ -118,3 +118,20 @@ export async function getBalance(): Promise<number> {
   const data = await smspoolGet("/request/balance");
   return Number(data.balance ?? 0);
 }
+
+export async function getPriceForServiceAndCountry(
+  serviceId: string,
+  countryId: string
+): Promise<{ instock: number; price: number } | null> {
+  try {
+    const data = await smspoolPost("/service/retrieve_all_country", { country: countryId });
+    const services = Array.isArray(data) ? data : Object.values(data);
+    const match = (services as any[]).find(
+      (s: any) => String(s.ID) === serviceId || String(s.id) === serviceId
+    );
+    if (!match) return null;
+    return { instock: Number(match.instock ?? 0), price: Number(match.price ?? 0) };
+  } catch {
+    return null;
+  }
+}
