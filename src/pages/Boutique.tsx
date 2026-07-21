@@ -200,11 +200,15 @@ function getBgColor(name: string): string {
 
 // ─── Composant logo service ─────────────────────────────────────────────────
 function ServiceLogo({ name }: { name: string }) {
-  const [failed, setFailed] = useState(false);
+  const [srcIndex, setSrcIndex] = useState(0);
   const domain = getServiceDomain(name);
-  const src = `https://logo.clearbit.com/${domain}`;
+  const sources = [
+    `https://logo.clearbit.com/${domain}`,
+    `https://t2.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=https://${domain}&size=128`,
+    `https://icons.duckduckgo.com/ip3/${domain}.ico`,
+  ];
 
-  if (failed) {
+  if (srcIndex >= sources.length) {
     return (
       <span className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold ${getBgColor(name)}`}>
         {name.charAt(0).toUpperCase()}
@@ -213,10 +217,10 @@ function ServiceLogo({ name }: { name: string }) {
   }
   return (
     <img
-      src={src}
+      src={sources[srcIndex]}
       alt={name}
-      className="w-10 h-10 rounded-full object-contain bg-white border border-gray-100"
-      onError={() => setFailed(true)}
+      className="w-10 h-10 rounded-full object-contain bg-white border border-gray-100 p-0.5"
+      onError={() => setSrcIndex((i) => i + 1)}
       loading="lazy"
     />
   );
