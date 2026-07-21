@@ -15,40 +15,82 @@ serve(async (req) => {
     const apiKey = Deno.env.get("SMSPOOL_API_KEY");
     if (!apiKey) throw new Error("SMSPOOL_API_KEY non configurée");
 
+    // Lire les paramètres depuis le body JSON (POST) ou query string (GET)
+    let action = "countries";
+    let country = "";
+    let service = "";
+
     const url = new URL(req.url);
-    const action = url.searchParams.get("action") ?? "countries";
-    const country = url.searchParams.get("country") ?? "";
+
+    if (req.method === "POST") {
+      try {
+        const body = await req.json();
+        action = body.action ?? url.searchParams.get("action") ?? "countries";
+        country = body.country ?? url.searchParams.get("country") ?? "";
+        service = body.service ?? url.searchParams.get("service") ?? "";
+      } catch {
+        action = url.searchParams.get("action") ?? "countries";
+        country = url.searchParams.get("country") ?? "";
+        service = url.searchParams.get("service") ?? "";
+      }
+    } else {
+      action = url.searchParams.get("action") ?? "countries";
+      country = url.searchParams.get("country") ?? "";
+      service = url.searchParams.get("service") ?? "";
+    }
 
     let result: any[] = [];
 
     if (action === "countries") {
+      // Tous les pays SMSPool (151 pays)
       const res = await fetch("https://api.smspool.net/country/retrieve_all", {
         headers: { Authorization: `Bearer ${apiKey}` },
       });
       const raw = await res.json();
       const arr = Array.isArray(raw) ? raw : Object.values(raw);
 
-      // Mapper TOUS les pays sans filtrage autre que id+name obligatoires
       const mapped = arr
         .map((c: any) => ({
           id: String(c.ID ?? c.id ?? ""),
           name: c.name ?? c.long_name ?? "",
           short_name: c.short_name ?? c.cc ?? "",
+          region: c.region ?? "",
         }))
         .filter((c: any) => c.id && c.name);
 
-      // Séparer épinglés et reste
+      // Épinglés en tête, puis tri alphabétique
       const pinned = mapped
         .filter((c: any) => PINNED_IDS.has(c.id))
         .sort((a: any, b: any) => a.name.localeCompare(b.name));
-
       const rest = mapped
         .filter((c: any) => !PINNED_IDS.has(c.id))
         .sort((a: any, b: any) => a.name.localeCompare(b.name));
 
       result = [...pinned, ...rest];
 
+    } else if (action === "all_services") {
+      // Tous les services SMSPool (~1364 services, sans filtre pays)
+      const res = await fetch("https://api.smspool.net/service/retrieve_all", {
+        headers: { Authorization: `Bearer ${apiKey}` },
+      });
+      const raw = await res.json();
+      const arr = Array.isArray(raw) ? raw : Object.values(raw);
+
+      result = arr
+        .map((s: any) => ({
+          id: String(s.ID ?? s.id ?? ""),
+          name: s.name ?? "",
+          favourite: Number(s.favourite ?? 0),
+        }))
+        .filter((s: any) => s.id && s.name)
+        .sort((a: any, b: any) => {
+          // Favoris en premier, puis alphabétique
+          if (a.favourite !== b.favourite) return b.favourite - a.favourite;
+          return a.name.localeCompare(b.name);
+        });
+
     } else if (action === "services") {
+      // Services + prix + stock pour un pays donné
       if (!country) throw new Error("country requis");
       const params = new URLSearchParams({ key: apiKey, country });
       const res = await fetch("https://api.smspool.net/service/retrieve_all_country", {
@@ -58,7 +100,7 @@ serve(async (req) => {
       });
       const raw = await res.json();
       const arr = Array.isArray(raw) ? raw : Object.values(raw);
-      // Retourner TOUS les services — aucun filtrage par instock
+
       result = arr
         .map((s: any) => ({
           id: String(s.ID ?? s.id ?? ""),
@@ -68,6 +110,27 @@ serve(async (req) => {
         }))
         .filter((s: any) => s.id && s.name)
         .sort((a: any, b: any) => a.name.localeCompare(b.name));
+
+    } else if (action === "price_lookup") {
+      // Prix + stock d'un service précis dans un pays donné
+      if (!country || !service) throw new Error("country et service requis");
+      const params = new URLSearchParams({ key: apiKey, country });
+      const res = await fetch("https://api.smspool.net/service/retrieve_all_country", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: params.toString(),
+      });
+      const raw = await res.json();
+      const arr = Array.isArray(raw) ? raw : Object.values(raw);
+      const found = arr.find((s: any) => String(s.ID ?? s.id) === service);
+      result = found
+        ? [{
+            id: String(found.ID ?? found.id),
+            name: found.name ?? "",
+            instock: Number(found.instock ?? 0),
+            price: Number(found.price ?? 0),
+          }]
+        : [];
     }
 
     return new Response(JSON.stringify({ success: true, data: result }), {
