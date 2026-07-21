@@ -204,6 +204,8 @@ const _logoSourceCache = new Map<string, number>();
 
 const _logoCache = new Map<string, number>();
 
+const _logoCache = new Map<string, number>();
+
 function ServiceLogo({ name }: { name: string }) {
   const domain = getServiceDomain(name);
   const sources = [
