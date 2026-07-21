@@ -16,15 +16,20 @@ import { initializeApp } from "firebase/app";
     appId:             "1:1049771982197:web:ff1132faefe7b4dc80273c",
     };
 
-    export const firebaseApp  = initializeApp(firebaseConfig);
-    export const firebaseAuth = getAuth(firebaseApp);
+    export const firebaseApp   = initializeApp(firebaseConfig);
+    export const firebaseAuth  = getAuth(firebaseApp);
     export const googleProvider = new GoogleAuthProvider();
     googleProvider.setCustomParameters({ prompt: "select_account" });
 
-    /** Connexion Google — retourne l'ID token Firebase */
+    /**
+    * Connexion Google — retourne le token OAuth Google (pas le token Firebase)
+    * C'est ce token que Supabase attend dans signInWithIdToken
+    */
     export async function signInWithGoogle(): Promise<string> {
-    const result  = await signInWithPopup(firebaseAuth, googleProvider);
-    const idToken = await result.user.getIdToken();
+    const result     = await signInWithPopup(firebaseAuth, googleProvider);
+    const credential = GoogleAuthProvider.credentialFromResult(result);
+    const idToken    = credential?.idToken;
+    if (!idToken) throw new Error("Impossible d'obtenir le token Google OAuth");
     return idToken;
     }
 
