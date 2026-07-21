@@ -293,7 +293,7 @@ export default function Boutique() {
     });
     if (!res.ok) throw new Error(`Erreur réseau (${res.status})`);
     const json = await res.json();
-    if (!json.success) throw new Error(json.error ?? "Erreur SMSPool");
+    if (!json.success) throw new Error(json.error ?? "Erreur de chargement");
     return json.data as any[];
   };
 
@@ -318,7 +318,7 @@ export default function Boutique() {
       setServices(mapped);
       setLastUpdated(new Date());
     } catch {
-      toast.error("Impossible de charger les services SMSPool");
+      toast.error("Impossible de charger les services");
       setServices([]);
     } finally {
       setLoadingServices(false);
@@ -457,17 +457,17 @@ export default function Boutique() {
                 {step === 1 && !loadingServices && (
                   <>
                     <Wifi className="w-3 h-3 text-green-400" />
-                    <span className="text-green-500 font-medium">{services.length} services en direct depuis SMSPool</span>
+                    <span className="text-green-500 font-medium">{services.length} services disponibles</span>
                   </>
                 )}
-                {step === 1 && loadingServices && "Chargement depuis SMSPool…"}
+                {step === 1 && loadingServices && "Chargement…"}
                 {step === 2 && !loadingCountries && (
                   <>
                     <Wifi className="w-3 h-3 text-green-400" />
-                    <span className="text-green-500 font-medium">{countries.length} pays en direct depuis SMSPool</span>
+                    <span className="text-green-500 font-medium">{countries.length} pays disponibles</span>
                   </>
                 )}
-                {step === 2 && loadingCountries && "Chargement depuis SMSPool…"}
+                {step === 2 && loadingCountries && "Chargement…"}
                 {step === 3 && `${selectedService?.name} · ${selectedCountry?.name}`}
               </p>
             </div>
@@ -509,7 +509,7 @@ export default function Boutique() {
                 {loadingServices ? (
                   <div className="flex flex-col items-center py-12 gap-3">
                     <Loader2 className="w-7 h-7 animate-spin text-orange-500" />
-                    <p className="text-gray-400 text-sm">Chargement en direct depuis SMSPool…</p>
+                    <p className="text-gray-400 text-sm">Chargement des services…</p>
                   </div>
                 ) : filteredServices.length === 0 ? (
                   <div className="flex flex-col items-center py-8 gap-2">
@@ -580,7 +580,7 @@ export default function Boutique() {
                 {loadingCountries ? (
                   <div className="flex flex-col items-center py-12 gap-3">
                     <Loader2 className="w-7 h-7 animate-spin text-orange-500" />
-                    <p className="text-gray-400 text-sm">Chargement en direct depuis SMSPool…</p>
+                    <p className="text-gray-400 text-sm">Chargement des services…</p>
                   </div>
                 ) : filteredCountries.length === 0 ? (
                   <div className="flex flex-col items-center py-8 gap-2">
