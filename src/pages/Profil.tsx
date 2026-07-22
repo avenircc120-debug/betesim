@@ -96,10 +96,10 @@ const Profil = () => {
           transition={{ delay: 0.05 }}
           className="rounded-2xl bg-orange-500 p-5 shadow-md shadow-orange-200"
         >
-          <p className="text-xs font-semibold text-orange-100 mb-1">Solde Wallet</p>
+          <p className="text-xs font-semibold text-orange-100 mb-1">Solde Coins</p>
           <p className="text-3xl font-bold text-white">
-            {(profile?.fcfa_balance ?? 0).toLocaleString("fr-FR")}
-            <span className="text-base font-medium ml-1">FCFA</span>
+            {(profile?.coin_balance ?? 0).toLocaleString("fr-FR")}
+            <span className="text-base font-medium ml-1">Coins</span>
           </p>
           <button
             onClick={() => navigate("/recharger")}
