@@ -167,15 +167,7 @@ Deno.serve(async (req) => {
       attempts: delivery.attempts,
     });
 
-    await supabase.from("transactions").insert({
-      user_id,
-      type: "number_purchase_wallet",
-      status: "validated",
-      amount_fcfa: PRICE * 100,
-      description: `Numéro ${service} (${delivery.country}) — ${delivery.number} — ${PRICE} Coins déduits`,
-      virtual_number: delivery.number,
-      fedapay_transaction_id: walletTxId,
-    });
+    // Note: wallet purchase logged in subscriptions table above
 
     await supabase.from("notifications").insert({
       user_id,
