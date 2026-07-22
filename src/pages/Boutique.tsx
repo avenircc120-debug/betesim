@@ -421,8 +421,9 @@ export default function Boutique() {
     c.name.toLowerCase().includes(countrySearch.toLowerCase())
   );
 
-  const priceFCFA = priceInfo && priceInfo.price > 0
-    ? Math.round(priceInfo.price * 600).toLocaleString("fr-FR")
+  // 1 Coin = 100 FCFA, 1 USD ≈ 600 FCFA → 1 USD ≈ 6 Coins
+  const priceCoins = priceInfo && priceInfo.price > 0
+    ? Math.ceil(priceInfo.price * 6)
     : null;
 
   return (
@@ -453,9 +454,9 @@ export default function Boutique() {
           initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
           className="bg-gradient-to-r from-orange-500 to-orange-400 rounded-2xl p-4 shadow-sm shadow-orange-200"
         >
-          <p className="text-orange-100 text-sm font-medium mb-1">Solde wallet</p>
+          <p className="text-orange-100 text-sm font-medium mb-1">Solde Coins</p>
           <p className="text-white text-2xl font-black">
-            {(profile?.fcfa_balance ?? 0).toLocaleString("fr-FR")} <span className="text-lg font-semibold">FCFA</span>
+            🪙 {(profile?.coin_balance ?? 0).toLocaleString("fr-FR")} <span className="text-lg font-semibold">Coins</span>
           </p>
         </motion.div>
 
@@ -666,7 +667,7 @@ export default function Boutique() {
                             <Wifi className="w-3 h-3 text-green-400" /> Prix en direct
                           </span>
                           <span className="font-black text-orange-500 text-lg">
-                            {priceFCFA ? `${priceFCFA} FCFA` : "—"}
+                            {priceCoins ? `${priceCoins} 🪙` : "—"}
                           </span>
                         </div>
                         <div className="flex items-center justify-between">
@@ -680,8 +681,8 @@ export default function Boutique() {
                       <p className="text-gray-400 text-sm">Prix non disponible pour ce pays</p>
                     )}
                     <div className="flex items-center justify-between pt-1">
-                      <span className="text-gray-400 text-xs">Solde wallet</span>
-                      <span className="text-xs font-semibold text-gray-600">{(profile?.fcfa_balance ?? 0).toLocaleString("fr-FR")} FCFA</span>
+                      <span className="text-gray-400 text-xs">Votre solde</span>
+                      <span className="text-xs font-semibold text-gray-600">🪙 {(profile?.coin_balance ?? 0).toLocaleString("fr-FR")} Coins</span>
                     </div>
                   </div>
                 </div>
