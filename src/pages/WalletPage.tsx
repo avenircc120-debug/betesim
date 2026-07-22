@@ -61,7 +61,7 @@ const WalletPage = () => {
             <button className="flex items-center gap-1 rounded-full bg-orange-50 px-3 py-1.5">
               <span className="text-base">🪙</span>
               <span className="text-sm font-semibold text-orange-500">
-                {profile?.fcfa_balance?.toLocaleString("fr-FR") ?? "0"}
+                {profile?.coin_balance?.toLocaleString("fr-FR") ?? "0"} Coins
               </span>
             </button>
           ) : (
@@ -137,8 +137,8 @@ const WalletPage = () => {
           {loading
             ? "Chargement…"
             : user
-              ? `Recharger · ${selected.fcfa.toLocaleString("fr-FR")} FCFA`
-              : `Se connecter · ${selected.fcfa.toLocaleString("fr-FR")} FCFA`}
+              ? `Acheter · ${selected.coins} Coins`
+              : `Se connecter · ${selected.coins} Coins`}
         </motion.button>
       </div>
 
