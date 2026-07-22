@@ -94,23 +94,23 @@ Deno.serve(async (req) => {
     if (!user_id) throw new Error("user_id requis");
     if (!service) throw new Error("service requis");
 
-    const PRICE = 2000; // wallet n'achète que la SIM Simple
+    const PRICE = 20; // 20 Coins = 2 000 FCFA équivalent
     const orderCountry = country || "0";
     const smspoolService = SERVICE_MAP[String(service).toLowerCase()] ?? service;
 
     // Vérifier le solde wallet
     const { data: profile, error: profErr } = await supabase
       .from("profiles")
-      .select("fcfa_balance, fcfa_locked_balance")
+      .select("coin_balance, fcfa_locked_balance")
       .eq("id", user_id)
       .maybeSingle();
     if (profErr) throw new Error(profErr.message);
     if (!profile) throw new Error("Profil introuvable");
 
-    const balance = (profile as any).fcfa_balance ?? 0;
+    const balance = (profile as any).coin_balance ?? 0;
     const locked = (profile as any).fcfa_locked_balance ?? 0;
     if (balance < PRICE) {
-      throw new Error(`Solde wallet insuffisant. Disponible : ${balance.toLocaleString("fr-FR")} FCFA.`);
+      throw new Error(`Solde insuffisant. Disponible : ${balance.toLocaleString("fr-FR")} Coins (requis : ${PRICE} Coins).`);
     }
 
     // Tenter la livraison
@@ -134,14 +134,14 @@ Deno.serve(async (req) => {
     }
 
     // Succès : débit ATOMIQUE du wallet.
-    // La condition .gte("fcfa_balance", PRICE) garantit qu'on ne débite pas
+    // La condition .gte("coin_balance", PRICE) garantit qu'on ne débite pas
     // si deux requêtes parallèles arrivent en même temps (race condition).
     const releaseLocked = Math.min(PRICE, locked);
     const newBalance = balance - PRICE;
     const newLocked = locked - releaseLocked;
     const { data: updatedRows, error: updErr } = await supabase
       .from("profiles")
-      .update({ fcfa_balance: newBalance, fcfa_locked_balance: newLocked })
+      .update({ coin_balance: newBalance, fcfa_locked_balance: newLocked })
       .eq("id", user_id)
       .gte("fcfa_balance", PRICE)
       .select("id");
@@ -149,7 +149,7 @@ Deno.serve(async (req) => {
     if (!updatedRows || updatedRows.length === 0) {
       // Une opération parallèle a déjà débité — on annule le numéro commandé
       await smspoolPost("/request/cancel/", { order_id: delivery.orderId }, smspoolKey);
-      throw new Error("Solde wallet insuffisant (débité par une autre opération simultanée).");
+      throw new Error("Solde Coins insuffisant (opération simultanée détectée).");
     }
 
     const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
@@ -171,8 +171,8 @@ Deno.serve(async (req) => {
       user_id,
       type: "number_purchase_wallet",
       status: "validated",
-      amount_fcfa: PRICE,
-      description: `Numéro ${service} (${delivery.country}) — ${delivery.number} — payé via wallet`,
+      amount_fcfa: PRICE * 100,
+      description: `Numéro ${service} (${delivery.country}) — ${delivery.number} — ${PRICE} Coins déduits`,
       virtual_number: delivery.number,
       fedapay_transaction_id: walletTxId,
     });
