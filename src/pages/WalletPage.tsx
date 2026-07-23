@@ -385,8 +385,8 @@ const WalletPage = () => {
       </div>
 
       {paymentOpen && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center">
-          <div className="w-full max-w-md rounded-t-3xl bg-white p-5 shadow-2xl sm:rounded-3xl">
+        <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 sm:items-center">
+          <div className="w-full max-w-md rounded-t-3xl bg-white p-5 shadow-2xl sm:rounded-3xl max-h-[90vh] overflow-y-auto">
             <div className="mb-5 flex items-center justify-between">
               <div>
                 <p className="text-xs font-bold uppercase tracking-widest text-orange-500">
