@@ -5,6 +5,7 @@ import { useState } from "react";
     import BottomNav from "@/components/BottomNav";
     import DrawerMenu from "@/components/DrawerMenu";
     import { useAuth } from "@/hooks/useAuth";
+    import { useProfile } from "@/hooks/useProfile";
     import { useQuery } from "@tanstack/react-query";
     import { supabase } from "@/integrations/supabase/client";
 
@@ -17,6 +18,7 @@ import { useState } from "react";
     const Historique = () => {
     const navigate = useNavigate();
     const { user, loading } = useAuth();
+    const { data: profile } = useProfile();
     const [filter, setFilter] = useState<FilterType>("Tous");
     const [search, setSearch] = useState("");
     const [drawerOpen, setDrawerOpen] = useState(false);
@@ -58,7 +60,7 @@ import { useState } from "react";
             {loading ? null : user ? (
               <button className="flex items-center gap-1 rounded-full bg-orange-50 px-3 py-1.5">
                 <span className="text-base">🪙</span>
-                <span className="text-sm font-semibold text-orange-500">0</span>
+                <span className="text-sm font-semibold text-orange-500">{(profile?.coin_balance ?? 0).toLocaleString("fr-FR")}</span>
               </button>
             ) : (
               <button
