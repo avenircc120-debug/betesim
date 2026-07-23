@@ -3,14 +3,16 @@
     "target": "ES2020",
     "module": "CommonJS",
     "lib": [
-      "ES2020"
+      "ES2020",
+      "DOM"
     ],
     "strict": false,
     "esModuleInterop": true,
     "resolveJsonModule": true,
     "moduleResolution": "node",
     "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true
+    "forceConsistentCasingInFileNames": true,
+    "noImplicitAny": false
   },
   "include": [
     "**/*.ts"
