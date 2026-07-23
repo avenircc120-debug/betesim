@@ -266,7 +266,7 @@ const POPULAR_NAMES = new Set([
 
 export default function Boutique() {
   const { user } = useAuth();
-  const { profile } = useProfile();
+  const { data: profile } = useProfile();
   const navigate = useNavigate();
 
   const [drawerOpen, setDrawerOpen] = useState(false);
