@@ -41,7 +41,8 @@ export function getSupabase(): SupabaseClient {
 export async function requireUser(req: any) {
   const header = String(req.headers?.authorization ?? "");
   if (!header.startsWith("Bearer ")) throw new Error("UNAUTHORIZED");
-  const { data, error } = await getSupabase().auth.getUser(header.slice(7));
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (getSupabase().auth as any).getUser(header.slice(7)) as { data: { user: any }; error: any };
   if (error || !data.user) throw new Error("UNAUTHORIZED");
   return data.user;
 }
