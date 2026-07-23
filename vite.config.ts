@@ -19,14 +19,21 @@ import { defineConfig } from "vite";
         registerType: "autoUpdate",
         includeAssets: ["favicon.ico", "robots.txt", "logo.svg"],
         workbox: {
-          // Exclut /api/ du fallback navigate ET force NetworkOnly sur toutes
-          // les routes API — sans ça le service worker retourne le HTML mis en
-          // cache (index.html) à la place de la vraie réponse JSON du serveur.
+          // Nouveau cacheId pour forcer l'invalidation du cache HTML corrompu
+          // (les fonctions API retournaient du HTML avant le fix TypeScript).
+          cacheId: "betesim-v2",
+          skipWaiting: true,
+          clientsClaim: true,
+          // Exclut /api/ du navigateFallback (requêtes de navigation)
           navigateFallbackDenylist: [/^\/~oauth/, /^\/api\//],
           globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
           runtimeCaching: [
             {
-              urlPattern: /^\/api\//,
+              // On utilise une fonction car urlPattern reçoit l'URL ABSOLUE
+              // ex: https://betesim.vercel.app/api/chap-money/checkout
+              // Le pattern /^\/api\// ne matchait jamais → pas de NetworkOnly.
+              urlPattern: ({ url }: { url: URL }) =>
+                url.pathname.startsWith("/api/"),
               handler: "NetworkOnly",
             },
           ],
