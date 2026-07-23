@@ -20,6 +20,15 @@ export const COIN_PACKS: Record<number, number> = {
   1450: 100_000,
 };
 
+const OPERATORS_BY_COUNTRY: Record<string, Set<string>> = {
+  bj: new Set(["mtn_open", "moov", "sbin", "momo_test"]),
+  tg: new Set(["moov_tg", "togocel", "momo_test"]),
+  ci: new Set(["mtn_ci", "momo_test"]),
+  ne: new Set(["airtel_ne", "momo_test"]),
+  sn: new Set(["free_sn", "momo_test"]),
+  gn: new Set(["mtn_open_gn", "momo_test"]),
+};
+
 export function getSupabase(): SupabaseClient {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -59,22 +68,28 @@ export function normalizeCountry(value: unknown): string {
 export function normalizeOperator(value: unknown): string {
   const operator = String(value ?? "").toLowerCase();
   const allowed = new Set([
-    "mtn",
+    "mtn_open",
     "moov",
     "sbin",
-    "mtn_ci",
-    "moov_ci",
-    "orange_ci",
-    "free_sn",
-    "orange_sn",
+    "momo_test",
     "moov_tg",
     "togocel",
-    "moov_bf",
     "airtel_ne",
     "mtn_open_gn",
+    "mtn_ci",
+    "free_sn",
   ]);
   if (!allowed.has(operator)) throw new Error("Opérateur mobile invalide");
   return operator;
+}
+
+export function validateCountryOperator(
+  country: string,
+  operator: string,
+): void {
+  if (!OPERATORS_BY_COUNTRY[country]?.has(operator)) {
+    throw new Error("Cette opération n’est pas disponible dans le pays choisi");
+  }
 }
 
 export async function chapRequest(path: string, init: RequestInit = {}) {

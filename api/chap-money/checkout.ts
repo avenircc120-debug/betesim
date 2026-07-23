@@ -9,6 +9,7 @@ import {
   normalizeOperator,
   normalizePhone,
   requireUser,
+  validateCountryOperator,
 } from "./_shared.js";
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -24,6 +25,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const country = normalizeCountry(body.country);
     const operator = normalizeOperator(body.operator);
+    validateCountryOperator(country, operator);
     const phoneNumber = normalizePhone(body.phoneNumber);
     const supabase = getSupabase();
     const orderId = randomUUID();

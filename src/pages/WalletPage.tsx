@@ -1,5 +1,14 @@
 import { useEffect, useState } from "react";
-import { Bell, Menu, Check, LogIn, Zap, Loader2, X } from "lucide-react";
+import {
+  Bell,
+  Menu,
+  Check,
+  LogIn,
+  Zap,
+  Loader2,
+  X,
+  FlaskConical,
+} from "lucide-react";
 import { motion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import BottomNav from "@/components/BottomNav";
@@ -16,6 +25,94 @@ type Pack = {
   badgeColor?: string;
   discount?: number;
 };
+
+type PaymentOperator = {
+  label: string;
+  mode: string;
+  color: string;
+  isTest?: boolean;
+};
+
+type PaymentCountry = {
+  code: string;
+  flag: string;
+  dialCode: string;
+  name: string;
+  phonePlaceholder: string;
+  operators: PaymentOperator[];
+};
+
+const PAYMENT_COUNTRIES: PaymentCountry[] = [
+  {
+    code: "bj",
+    flag: "🇧🇯",
+    dialCode: "229",
+    name: "Bénin",
+    phonePlaceholder: "01XXXXXXXX",
+    operators: [
+      { label: "MTN", mode: "mtn_open", color: "#FFD700" },
+      { label: "MOOV", mode: "moov", color: "#FF6B1A" },
+      { label: "CELTIIS", mode: "sbin", color: "#4A90D9" },
+      { label: "Momo Test", mode: "momo_test", color: "#6366F1", isTest: true },
+    ],
+  },
+  {
+    code: "tg",
+    flag: "🇹🇬",
+    dialCode: "228",
+    name: "Togo",
+    phonePlaceholder: "90123456",
+    operators: [
+      { label: "MOOV", mode: "moov_tg", color: "#FF6B1A" },
+      { label: "Togocom", mode: "togocel", color: "#0070C0" },
+      { label: "Momo Test", mode: "momo_test", color: "#6366F1", isTest: true },
+    ],
+  },
+  {
+    code: "ci",
+    flag: "🇨🇮",
+    dialCode: "225",
+    name: "Côte d’Ivoire",
+    phonePlaceholder: "0712345678",
+    operators: [
+      { label: "MTN", mode: "mtn_ci", color: "#FFD700" },
+      { label: "Momo Test", mode: "momo_test", color: "#6366F1", isTest: true },
+    ],
+  },
+  {
+    code: "ne",
+    flag: "🇳🇪",
+    dialCode: "227",
+    name: "Niger",
+    phonePlaceholder: "96123456",
+    operators: [
+      { label: "Airtel", mode: "airtel_ne", color: "#E53935" },
+      { label: "Momo Test", mode: "momo_test", color: "#6366F1", isTest: true },
+    ],
+  },
+  {
+    code: "sn",
+    flag: "🇸🇳",
+    dialCode: "221",
+    name: "Sénégal",
+    phonePlaceholder: "771234567",
+    operators: [
+      { label: "Free", mode: "free_sn", color: "#E53935" },
+      { label: "Momo Test", mode: "momo_test", color: "#6366F1", isTest: true },
+    ],
+  },
+  {
+    code: "gn",
+    flag: "🇬🇳",
+    dialCode: "224",
+    name: "Guinée",
+    phonePlaceholder: "621234567",
+    operators: [
+      { label: "MTN", mode: "mtn_open_gn", color: "#FFD700" },
+      { label: "Momo Test", mode: "momo_test", color: "#6366F1", isTest: true },
+    ],
+  },
+];
 
 const PACKS: Pack[] = [
   {
@@ -60,7 +157,7 @@ const WalletPage = () => {
   const queryClient = useQueryClient();
   const [selected, setSelected] = useState<Pack>(PACKS[4]);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [operator, setOperator] = useState("mtn");
+  const [operator, setOperator] = useState("momo_test");
   const [country, setCountry] = useState("bj");
   const [phoneNumber, setPhoneNumber] = useState(user?.phoneNumber ?? "");
   const [paymentOpen, setPaymentOpen] = useState(false);
@@ -69,6 +166,9 @@ const WalletPage = () => {
   >("form");
   const [orderId, setOrderId] = useState<string | null>(null);
   const [paymentError, setPaymentError] = useState("");
+  const selectedCountry =
+    PAYMENT_COUNTRIES.find((item) => item.code === country) ??
+    PAYMENT_COUNTRIES[0];
 
   useEffect(() => {
     if (user?.phoneNumber && !phoneNumber) setPhoneNumber(user.phoneNumber);
@@ -109,7 +209,9 @@ const WalletPage = () => {
           coins: selected.coins,
           country,
           operator,
-          phoneNumber,
+          phoneNumber: phoneNumber
+            .replace(/\D/g, "")
+            .replace(new RegExp(`^${selectedCountry.dialCode}`), ""),
         }),
       });
       const result = await response.json();
@@ -307,46 +409,86 @@ const WalletPage = () => {
 
             {paymentState === "form" && (
               <form onSubmit={startPayment} className="space-y-4">
+                <div>
+                  <p className="mb-2 text-sm font-semibold text-gray-700">
+                    1. Choisissez votre pays
+                  </p>
+                  <div className="grid grid-cols-3 gap-2">
+                    {PAYMENT_COUNTRIES.map((item) => (
+                      <button
+                        key={item.code}
+                        type="button"
+                        onClick={() => {
+                          setCountry(item.code);
+                          setOperator("momo_test");
+                          setPhoneNumber("");
+                        }}
+                        className={`flex flex-col items-center justify-center rounded-xl border p-2 transition ${
+                          country === item.code
+                            ? "border-orange-500 bg-orange-50 ring-1 ring-orange-500"
+                            : "border-gray-200 bg-white hover:border-gray-300"
+                        }`}
+                      >
+                        <span className="text-xl">{item.flag}</span>
+                        <span className="text-[10px] font-bold uppercase text-gray-700">
+                          {item.code}
+                        </span>
+                        <span className="text-[9px] text-gray-400">
+                          +{item.dialCode}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <p className="mb-2 text-sm font-semibold text-gray-700">
+                    2. Sélectionnez l’opération
+                  </p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {selectedCountry.operators.map((item) => (
+                      <button
+                        key={item.mode}
+                        type="button"
+                        onClick={() => setOperator(item.mode)}
+                        style={{
+                          borderColor:
+                            operator === item.mode ? item.color : undefined,
+                          backgroundColor:
+                            operator === item.mode
+                              ? `${item.color}18`
+                              : undefined,
+                        }}
+                        className={`flex min-h-14 items-center justify-center gap-1.5 rounded-xl border px-2 text-center text-sm font-bold transition ${
+                          operator === item.mode
+                            ? "ring-2 ring-orange-200"
+                            : item.isTest
+                              ? "border-indigo-200 bg-indigo-50 text-indigo-600"
+                              : "border-gray-200 bg-white text-gray-600 hover:border-gray-300"
+                        }`}
+                      >
+                        {item.isTest && <FlaskConical className="h-4 w-4" />}
+                        <span>{item.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
                 <label className="block text-sm font-semibold text-gray-700">
-                  Pays
-                  <select
-                    value={country}
-                    onChange={(e) => setCountry(e.target.value)}
-                    className="mt-1.5 w-full rounded-xl border border-gray-200 bg-white px-3 py-3 font-normal outline-none focus:border-orange-500"
-                  >
-                    <option value="bj">Bénin</option>
-                    <option value="ci">Côte d’Ivoire</option>
-                    <option value="tg">Togo</option>
-                    <option value="bf">Burkina Faso</option>
-                    <option value="sn">Sénégal</option>
-                    <option value="ne">Niger</option>
-                    <option value="gn">Guinée</option>
-                  </select>
-                </label>
-                <label className="block text-sm font-semibold text-gray-700">
-                  Opérateur
-                  <select
-                    value={operator}
-                    onChange={(e) => setOperator(e.target.value)}
-                    className="mt-1.5 w-full rounded-xl border border-gray-200 bg-white px-3 py-3 font-normal outline-none focus:border-orange-500"
-                  >
-                    <option value="mtn">MTN</option>
-                    <option value="moov">Moov</option>
-                    <option value="sbin">Moov Africa / SBIN</option>
-                    <option value="orange_ci">Orange Côte d’Ivoire</option>
-                    <option value="free_sn">Free Sénégal</option>
-                  </select>
-                </label>
-                <label className="block text-sm font-semibold text-gray-700">
-                  Numéro Mobile Money
-                  <input
-                    value={phoneNumber}
-                    onChange={(e) => setPhoneNumber(e.target.value)}
-                    inputMode="tel"
-                    placeholder="97000000"
-                    required
-                    className="mt-1.5 w-full rounded-xl border border-gray-200 px-3 py-3 font-normal outline-none focus:border-orange-500"
-                  />
+                  3. Numéro Mobile Money
+                  <div className="mt-1.5 flex overflow-hidden rounded-xl border border-gray-200 focus-within:border-orange-500">
+                    <span className="flex items-center border-r border-gray-200 bg-gray-100 px-3 text-sm font-semibold text-gray-700">
+                      {selectedCountry.flag} +{selectedCountry.dialCode}
+                    </span>
+                    <input
+                      value={phoneNumber}
+                      onChange={(e) =>
+                        setPhoneNumber(e.target.value.replace(/[^\d\s]/g, ""))
+                      }
+                      inputMode="tel"
+                      placeholder={selectedCountry.phonePlaceholder}
+                      required
+                      className="min-w-0 flex-1 px-3 py-3 font-normal outline-none"
+                    />
+                  </div>
                 </label>
                 {paymentError && (
                   <p className="rounded-xl bg-red-50 p-3 text-sm text-red-700">
