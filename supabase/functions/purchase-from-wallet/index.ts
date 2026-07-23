@@ -143,7 +143,7 @@ Deno.serve(async (req) => {
       .from("profiles")
       .update({ coin_balance: newBalance, fcfa_locked_balance: newLocked })
       .eq("id", user_id)
-      .gte("fcfa_balance", PRICE)
+      .gte("coin_balance", PRICE)
       .select("id");
     if (updErr) throw new Error(updErr.message);
     if (!updatedRows || updatedRows.length === 0) {
