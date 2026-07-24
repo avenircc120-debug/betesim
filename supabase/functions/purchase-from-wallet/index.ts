@@ -135,11 +135,16 @@ async function deliverValidNumber(service: string, apiKey: string, country: stri
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    const { user_id, service, country } = await req.json();
+    const { user_id, service, country, service_name, country_name, country_short } = await req.json();
     if (!user_id) throw new Error("user_id requis");
     if (!service) throw new Error("service requis");
 
-    const PRICE = 20; // 20 Coins = 2 000 FCFA équivalent
+    // Prix dynamique selon les règles tarifaires betesim
+    const saleFcfa = computeSalePriceFcfa_PW(
+      service_name || service,
+      country_name || country || ""
+    );
+    const PRICE = Math.ceil(saleFcfa / 100); // 1 Coin = 100 FCFA
     const orderCountry = country || "0";
     const smspoolService = SERVICE_MAP[String(service).toLowerCase()] ?? service;
 
