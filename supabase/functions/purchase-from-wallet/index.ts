@@ -135,14 +135,17 @@ async function deliverValidNumber(service: string, apiKey: string, country: stri
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    const { user_id, service, country, service_name, country_name, country_short } = await req.json();
+    const body = await req.json();
+    const { user_id, service_id, country_id, service_name, country_name, country_short } = body;
+    const service = body.service ?? service_name?.toLowerCase() ?? "";
+    const country = body.country ?? country_id ?? "0";
     if (!user_id) throw new Error("user_id requis");
     if (!service) throw new Error("service requis");
 
     // Prix dynamique selon les règles tarifaires betesim
     const saleFcfa = computeSalePriceFcfa_PW(
       service_name || service,
-      country_name || country || ""
+      country_name || country
     );
     const PRICE = Math.ceil(saleFcfa / 100); // 1 Coin = 100 FCFA
     const orderCountry = country || "0";
@@ -172,7 +175,7 @@ async function deliverValidNumber(service: string, apiKey: string, country: stri
       await supabase.from("notifications").insert({
         user_id,
         title: "Livraison impossible — réessayez sur un autre pays",
-        message: `Aucun numéro ${service} disponible pour ce pays. Aucun débit sur votre wallet. Sélectionnez un autre pays et relancez l'achat.`,
+        message: `Aucun numéro ${service_name || service} disponible pour ce pays. Aucun débit sur votre wallet. Sélectionnez un autre pays et relancez l'achat.`,
         type: "payment_failed",
       });
       return new Response(JSON.stringify({
