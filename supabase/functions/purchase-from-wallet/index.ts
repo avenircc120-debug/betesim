@@ -79,7 +79,52 @@ async function deliverValidNumber(service: string, apiKey: string, country: stri
   throw new Error(`Aucun numéro valide après ${MAX_ATTEMPTS} tentatives`);
 }
 
-Deno.serve(async (req) => {
+
+    // ── Règles tarifaires betesim ─────────────────────────────────────────────────
+    // 1 Coin = 100 FCFA
+    const AFRICAN_NAMES_PW = new Set([
+    "benin","bj","egypt","eg","ethiopia","et","uganda","ug","mali","ml",
+    "mauritania","mr","mauritius","mu","rwanda","rw","eritrea","er",
+    "nigeria","ng","ghana","gh","senegal","sn","ivory coast","côte d'ivoire","ci",
+    "cameroon","cm","kenya","ke","tanzania","tz","mozambique","mz","zambia","zm",
+    "zimbabwe","zw","south africa","za","morocco","ma","algeria","dz","tunisia","tn",
+    "libya","ly","sudan","sd","somalia","so","djibouti","dj","comoros","km",
+    "madagascar","mg","seychelles","sc","democratic republic of the congo","cd",
+    "republic of the congo","congo","cg","gabon","ga","equatorial guinea","gq",
+    "central african republic","cf","chad","td","niger","ne","burkina faso","bf",
+    "guinea","gn","guinea-bissau","gw","sierra leone","sl","liberia","lr",
+    "togo","tg","gambia","gm","cape verde","cv","sao tome and principe","st",
+    "angola","ao","namibia","na","botswana","bw","lesotho","ls","eswatini",
+    "swaziland","malawi","mw","south sudan","ss","burundi","bi",
+    ]);
+    const TELEGRAM_SPECIAL_PW = new Set(["benin","bj","egypt","eg","ethiopia","et","uganda","ug"]);
+
+    function computeSalePriceFcfa_PW(serviceName: string, countryName: string): number {
+    const svc = serviceName.toLowerCase().trim();
+    const cty = countryName.toLowerCase().trim();
+    const isAfrican = AFRICAN_NAMES_PW.has(cty);
+    const isWA = svc === "whatsapp";
+    const isTG = svc === "telegram";
+    if (isAfrican) {
+      if (isTG && TELEGRAM_SPECIAL_PW.has(cty)) return 1500;
+      return 1000;
+    }
+    if (isWA) {
+      if (cty === "italy") return 10000;
+      if (cty === "france") return 7000;
+      if (cty === "belgium") return 8486;
+      if (cty === "israel") return 8348;
+      if (["germany","spain","ireland","ukraine"].includes(cty)) return 5000;
+    }
+    if (isTG) {
+      if (cty === "ukraine") return 9350;
+      if (cty === "belgium") return 5606;
+      if (["germany","spain","ireland","italy","france","israel"].includes(cty)) return 5000;
+    }
+    return 2500;
+    }
+
+    Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   try {
