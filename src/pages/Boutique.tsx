@@ -27,6 +27,7 @@ interface Country {
 interface PriceInfo {
   instock: number;
   price: number;
+  sale_price_coins: number;
 }
 
 // ─── Mapping service name → domaine pour le logo ───────────────────────────
@@ -376,10 +377,13 @@ export default function Boutique() {
         action: "price_lookup",
         service: selectedService!.id,
         country: country.id,
+        service_name: selectedService!.name,
+        country_name: country.name,
+        country_short: country.short_name,
       });
       if (raw.length > 0) {
         const info = raw[0];
-        setPriceInfo({ instock: Number(info.instock ?? 0), price: Number(info.price ?? 0) });
+        setPriceInfo({ instock: Number(info.instock ?? 0), price: Number(info.price ?? 0), sale_price_coins: Number(info.sale_price_coins ?? 0) });
       } else {
         setPriceInfo(null);
       }
@@ -400,7 +404,14 @@ export default function Boutique() {
     setOrdering(true);
     try {
       const { data, error } = await supabase.functions.invoke("purchase-from-wallet", {
-        body: { service_id: selectedService.id, country_id: selectedCountry.id },
+        body: {
+          service_id: selectedService.id,
+          country_id: selectedCountry.id,
+          service_name: selectedService.name,
+          country_name: selectedCountry.name,
+          country_short: selectedCountry.short_name,
+          expected_price_coins: priceInfo?.sale_price_coins ?? 0,
+        },
       });
       if (error || !data?.success) throw new Error(data?.error ?? "Commande échouée");
       toast.success(`Numéro obtenu : ${data.number}`);
@@ -419,9 +430,9 @@ export default function Boutique() {
     c.name.toLowerCase().includes(countrySearch.toLowerCase())
   );
 
-  // 1 Coin = 100 FCFA, 1 USD ≈ 600 FCFA → 1 USD ≈ 6 Coins
-  const priceCoins = priceInfo && priceInfo.price > 0
-    ? Math.ceil(priceInfo.price * 6)
+  // Utilise le prix betesim calculé par le serveur (FCFA/Coins selon le pays)
+  const priceCoins = priceInfo && priceInfo.sale_price_coins > 0
+    ? priceInfo.sale_price_coins
     : null;
 
   return (
