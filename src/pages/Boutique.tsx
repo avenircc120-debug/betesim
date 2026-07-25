@@ -344,7 +344,7 @@ export default function Boutique() {
 
   useEffect(() => { loadServices(); }, [loadServices]);
 
-  // Sélection service → étape 2 : charger les pays, puis stock en temps réel progressivement
+  // Sélection service → étape 2 : UN seul appel qui charge pays + stock en même temps
   const handleServiceSelect = async (service: Service) => {
     setSelectedService(service);
     setStep(2);
@@ -352,12 +352,17 @@ export default function Boutique() {
     setStockMap({});
     setLoadingCountries(true);
     try {
-      const raw = await callSmsPool({ action: "countries" });
+      const raw = await callSmsPool({
+        action: "countries_with_stock",
+        service: service.id,
+        service_name: service.name,
+      });
       const mapped: Country[] = raw.map((c: any) => ({
-        id: String(c.id ?? c.ID ?? ""),
-        name: String(c.name ?? ""),
+        id:         String(c.id ?? c.ID ?? ""),
+        name:       String(c.name ?? ""),
         short_name: String(c.short_name ?? c.cc ?? ""),
-        region: c.region ?? "",
+        region:     c.region ?? "",
+        instock:    Number(c.instock ?? -1),
       }));
       setCountries(mapped);
     } catch (e: any) {
@@ -367,48 +372,6 @@ export default function Boutique() {
       setLoadingCountries(false);
     }
   };
-
-  // Chargement progressif du stock par pays dès que la liste est prête
-  useEffect(() => {
-    if (!selectedService || countries.length === 0 || step !== 2) return;
-    let cancelled = false;
-
-    const loadStock = async () => {
-      const BATCH = 8;
-      for (let i = 0; i < countries.length; i += BATCH) {
-        if (cancelled) break;
-        const batch = countries.slice(i, i + BATCH);
-        const results = await Promise.allSettled(
-          batch.map(async (country) => {
-            try {
-              const raw = await callSmsPool({
-                action: "price_lookup",
-                service: selectedService.id,
-                country: country.id,
-                service_name: selectedService.name,
-                country_name: country.name,
-                country_short: country.short_name,
-              });
-              return { id: country.id, instock: Number(raw[0]?.instock ?? 0) };
-            } catch {
-              return { id: country.id, instock: 0 };
-            }
-          })
-        );
-        if (cancelled) break;
-        const updates: Record<string, number> = {};
-        for (const r of results) {
-          if (r.status === "fulfilled") updates[r.value.id] = r.value.instock;
-        }
-        setStockMap((prev) => ({ ...prev, ...updates }));
-        // Petite pause pour ne pas saturer SMSpool
-        if (i + BATCH < countries.length) await new Promise((r) => setTimeout(r, 300));
-      }
-    };
-
-    loadStock();
-    return () => { cancelled = true; };
-  }, [countries, selectedService, step]);
 
   // Sélection pays → étape 3 : prix en temps réel pour ce service + pays
   const handleCountrySelect = async (country: Country) => {
@@ -675,19 +638,17 @@ export default function Boutique() {
                           <span className="text-gray-900 font-semibold text-sm block truncate">{country.name}</span>
                           {country.region && <span className="text-gray-400 text-xs">{country.region}</span>}
                         </div>
-                        {/* Stock en temps réel par pays (chargement progressif) */}
-                        {stockMap[country.id] !== undefined ? (
-                          stockMap[country.id] > 0 ? (
+                        {/* Stock en temps réel — chargé en 1 appel avec les pays */}
+                        {country.instock !== undefined && country.instock >= 0 && (
+                          country.instock > 0 ? (
                             <span className="shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full bg-green-100 text-green-600">
-                              {stockMap[country.id]} dispo
+                              {country.instock} dispo
                             </span>
                           ) : (
                             <span className="shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-400">
                               Rupture
                             </span>
                           )
-                        ) : (
-                          <span className="shrink-0 w-12 h-4 bg-gray-100 rounded-full animate-pulse" />
                         )}
                         <ChevronRight className="w-4 h-4 text-gray-300 group-hover:text-orange-400 shrink-0 transition-colors" />
                       </button>
