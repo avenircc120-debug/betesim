@@ -134,7 +134,7 @@
         const sale_price_fcfa = computeSalePriceFcfa(nameToUse, country_name, country_short);
         const sale_price_coins = Math.ceil(sale_price_fcfa / 100);
         // Stock SMSpool récupéré séparément — une erreur ici ne bloque plus le prix
-        let instock = 1;
+        let instock = 0;
         let smspoolPriceUsd = 0;
         try {
           const params = new URLSearchParams({ key: apiKey, country });
