@@ -404,6 +404,7 @@ export default function Boutique() {
     try {
       const { data, error } = await supabase.functions.invoke("purchase-from-wallet", {
         body: {
+          user_id: user?.id,
           service_id: selectedService.id,
           country_id: selectedCountry.id,
           service_name: selectedService.name,
