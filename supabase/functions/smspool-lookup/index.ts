@@ -134,7 +134,7 @@
         const sale_price_fcfa = computeSalePriceFcfa(nameToUse, country_name, country_short);
         const sale_price_coins = Math.ceil(sale_price_fcfa / 100);
         // Stock SMSpool récupéré séparément — une erreur ici ne bloque plus le prix
-        let instock = 0;
+        let instock = 1; // défaut : API injoignable, on laisse passer
         let smspoolPriceUsd = 0;
         try {
           const params = new URLSearchParams({ key: apiKey, country });
@@ -146,10 +146,11 @@
           });
           const svcsRaw = await svcsRes.json();
           const svcs = Array.isArray(svcsRaw) ? svcsRaw : Object.values(svcsRaw);
-          const match = svcs.find((s) => String(s.ID ?? s.id) === service);
-          if (match) {
-            instock = Number(match.instock ?? 0);
-            smspoolPriceUsd = Number(match.price ?? 0);
+          if (svcs.length > 0) {
+            // API a répondu — on vérifie si le service existe pour ce pays
+            const match = svcs.find((s) => String(s.ID ?? s.id) === service);
+            instock = match ? Number(match.instock ?? 0) : 0;
+            smspoolPriceUsd = match ? Number(match.price ?? 0) : 0;
           }
         } catch {
           // API SMSpool indisponible ou timeout — on renvoie quand même le prix betesim
