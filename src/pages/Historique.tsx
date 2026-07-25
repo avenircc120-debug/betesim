@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Search, Bell, Inbox, Menu, LogIn, Copy, CheckCheck, Loader2, ShieldCheck, X, RefreshCw } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
@@ -6,7 +6,7 @@ import BottomNav from "@/components/BottomNav";
 import DrawerMenu from "@/components/DrawerMenu";
 import { useAuth } from "@/hooks/useAuth";
 import { useProfile } from "@/hooks/useProfile";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
@@ -41,71 +41,123 @@ interface VerifyModalProps {
 
 function VerifyModal({ orderId, number, service, onClose }: VerifyModalProps) {
   const { user } = useAuth();
-  const [state, setState] = useState<"polling" | "received" | "banned" | "error">("polling");
+  const [state, setState] = useState<"polling" | "received" | "expired" | "error">("polling");
   const [code, setCode] = useState<string | null>(null);
   const [fullSms, setFullSms] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [attempts, setAttempts] = useState(0);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const MAX_ATTEMPTS = 36; // 3 minutes max (5s × 36)
+  const [seconds, setSeconds] = useState(0);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const doneRef = useRef(false);
+  const MAX_WAIT_S = 180; // 3 minutes
 
-  const checkSms = async () => {
+  const handleReceived = useCallback((smsCode: string, smsFull: string) => {
+    if (doneRef.current) return;
+    doneRef.current = true;
+    setCode(smsCode);
+    setFullSms(smsFull);
+    setState("received");
+    if (pollRef.current) clearInterval(pollRef.current);
+    if (timerRef.current) clearInterval(timerRef.current);
+  }, []);
+
+  const handleExpired = useCallback(() => {
+    if (doneRef.current) return;
+    doneRef.current = true;
+    setState("expired");
+    if (pollRef.current) clearInterval(pollRef.current);
+    if (timerRef.current) clearInterval(timerRef.current);
+  }, []);
+
+  // ── Supabase Realtime: listen for webhook updates ─────────────────────────
+  useEffect(() => {
     if (!user) return;
+    const channel = supabase
+      .channel(`sms-${orderId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "subscriptions",
+          filter: `smspool_order_id=eq.${orderId}`,
+        },
+        (payload: any) => {
+          const row = payload.new;
+          if (row?.last_sms_code) {
+            handleReceived(row.last_sms_code, row.last_sms_full ?? row.last_sms_code);
+          }
+        }
+      )
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [orderId, user, handleReceived]);
 
+  // ── Fallback: poll check-sms Edge Function every 7s ──────────────────────
+  const pollOnce = useCallback(async () => {
+    if (doneRef.current || !user) return;
     try {
-      const session = await supabase.auth.getSession();
-      const token = session.data.session?.access_token;
-      if (!token) return;
-
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) return;
       const res = await fetch(
-        `${supabaseUrl}/functions/v1/check-sms?order_id=${encodeURIComponent(orderId)}`,
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/check-sms?order_id=${encodeURIComponent(orderId)}`,
         {
           headers: {
-            Authorization: `Bearer ${token}`,
-            apikey: anonKey,
+            Authorization: `Bearer ${session.access_token}`,
+            apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
           },
         }
       );
-
+      if (!res.ok) return; // edge fn error — keep polling silently
       const data = await res.json();
-
       if (data.status === "received" && data.code) {
-        setCode(data.code);
-        setFullSms(data.full_sms ?? data.code);
-        setState("received");
-        if (intervalRef.current) clearInterval(intervalRef.current);
-        return;
+        handleReceived(data.code, data.full_sms ?? data.code);
+      } else if (data.status === "expired") {
+        handleExpired();
       }
+    } catch { /* network error — keep polling */ }
+  }, [orderId, user, handleReceived, handleExpired]);
 
-      if (data.status === "banned") {
-        setState("banned");
-        if (intervalRef.current) clearInterval(intervalRef.current);
-        return;
-      }
-
-      setAttempts((a) => {
-        const next = a + 1;
-        if (next >= MAX_ATTEMPTS) {
+  useEffect(() => {
+    pollOnce();
+    pollRef.current = setInterval(pollOnce, 7000);
+    timerRef.current = setInterval(() => {
+      setSeconds((s) => {
+        const next = s + 1;
+        if (next >= MAX_WAIT_S && !doneRef.current) {
           setState("error");
-          if (intervalRef.current) clearInterval(intervalRef.current);
+          doneRef.current = true;
+          if (pollRef.current) clearInterval(pollRef.current);
+          if (timerRef.current) clearInterval(timerRef.current);
         }
         return next;
       });
-    } catch {
-      // keep polling
-    }
-  };
-
-  useEffect(() => {
-    checkSms();
-    intervalRef.current = setInterval(checkSms, 5000);
+    }, 1000);
     return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
+      if (pollRef.current) clearInterval(pollRef.current);
+      if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [orderId]);
+  }, [pollOnce]);
+
+  const restart = () => {
+    doneRef.current = false;
+    setSeconds(0);
+    setState("polling");
+    pollOnce();
+    pollRef.current = setInterval(pollOnce, 7000);
+    timerRef.current = setInterval(() => {
+      setSeconds((s) => {
+        const next = s + 1;
+        if (next >= MAX_WAIT_S && !doneRef.current) {
+          setState("error");
+          doneRef.current = true;
+          if (pollRef.current) clearInterval(pollRef.current);
+          if (timerRef.current) clearInterval(timerRef.current);
+        }
+        return next;
+      });
+    }, 1000);
+  };
 
   const copyCode = () => {
     if (!code) return;
@@ -183,7 +235,7 @@ function VerifyModal({ orderId, number, service, onClose }: VerifyModalProps) {
               <div className="relative">
                 <div className="w-16 h-16 rounded-full border-4 border-orange-100 border-t-orange-500 animate-spin" />
                 <div className="absolute inset-0 flex items-center justify-center">
-                  <span className="text-orange-500 text-xs font-bold">{attempts > 0 ? `${attempts * 5}s` : ""}</span>
+                  <span className="text-orange-500 text-xs font-bold">{seconds > 0 ? `${seconds}s` : ""}</span>
                 </div>
               </div>
               <p className="text-gray-600 font-medium text-sm text-center">
@@ -192,13 +244,13 @@ function VerifyModal({ orderId, number, service, onClose }: VerifyModalProps) {
               <p className="text-gray-400 text-xs text-center max-w-xs">
                 Le code apparaît automatiquement dès que {serviceName} envoie le SMS. Patientez sans fermer cette fenêtre.
               </p>
-              {attempts > 0 && (
-                <div className="flex gap-1">
-                  {[...Array(Math.min(attempts, 6))].map((_, i) => (
-                    <span key={i} className="w-1.5 h-1.5 rounded-full bg-orange-300" />
-                  ))}
-                </div>
-              )}
+              {/* Progress bar */}
+              <div className="w-full max-w-xs h-1 bg-gray-100 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-orange-400 rounded-full transition-all duration-1000"
+                  style={{ width: `${Math.min((seconds / MAX_WAIT_S) * 100, 100)}%` }}
+                />
+              </div>
             </motion.div>
           )}
 
@@ -247,23 +299,30 @@ function VerifyModal({ orderId, number, service, onClose }: VerifyModalProps) {
             </motion.div>
           )}
 
-          {/* Banni */}
-          {state === "banned" && (
+          {/* Expiré */}
+          {state === "expired" && (
             <motion.div
-              key="banned"
+              key="expired"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               className="flex flex-col items-center gap-3 py-4"
             >
-              <span className="text-4xl">⚠️</span>
-              <p className="font-semibold text-gray-800 text-center">Numéro bloqué par {serviceName}</p>
+              <span className="text-4xl">⏳</span>
+              <p className="font-semibold text-gray-800 text-center">Fenêtre expirée</p>
               <p className="text-sm text-gray-500 text-center">
-                Ce numéro a été détecté comme invalide. Contactez le support pour un remplacement gratuit.
+                L'ordre SMSPool est fermé. Entrez le numéro dans {serviceName} puis appuyez sur Réessayer — un nouveau code peut encore arriver via webhook.
               </p>
+              <button
+                onClick={restart}
+                className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-orange-500 text-white font-semibold text-sm active:scale-95 transition-transform"
+              >
+                <RefreshCw className="w-4 h-4" />
+                Réessayer
+              </button>
             </motion.div>
           )}
 
-          {/* Timeout */}
+          {/* Timeout 3min */}
           {state === "error" && (
             <motion.div
               key="error"
@@ -272,17 +331,12 @@ function VerifyModal({ orderId, number, service, onClose }: VerifyModalProps) {
               className="flex flex-col items-center gap-3 py-4"
             >
               <span className="text-4xl">⏱️</span>
-              <p className="font-semibold text-gray-800 text-center">Délai dépassé</p>
+              <p className="font-semibold text-gray-800 text-center">3 minutes écoulées</p>
               <p className="text-sm text-gray-500 text-center">
-                Aucun SMS reçu en 3 minutes. Assurez-vous que vous avez bien entré le numéro dans {serviceName}, puis réessayez.
+                Assurez-vous d'avoir entré le numéro dans {serviceName}, puis réessayez. Le code arrive parfois quelques secondes après.
               </p>
               <button
-                onClick={() => {
-                  setAttempts(0);
-                  setState("polling");
-                  intervalRef.current = setInterval(checkSms, 5000);
-                  checkSms();
-                }}
+                onClick={restart}
                 className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-orange-500 text-white font-semibold text-sm active:scale-95 transition-transform"
               >
                 <RefreshCw className="w-4 h-4" />
