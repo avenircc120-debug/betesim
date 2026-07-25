@@ -51,7 +51,7 @@
     return 2500;
     }
 
-    serve(async (req) => {
+    Deno.serve(async (req) => {
     if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
     try {
       const apiKey = Deno.env.get("SMSPOOL_API_KEY");
