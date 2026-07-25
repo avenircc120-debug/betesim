@@ -129,21 +129,31 @@
 
       } else if (action === "price_lookup") {
         if (!country || !service) throw new Error("country et service requis");
-        const params = new URLSearchParams({ key: apiKey, country });
-        const svcsRes = await fetch("https://api.smspool.net/service/retrieve_all_country", {
-          method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: params.toString(),
-          signal: AbortSignal.timeout(12000),
-        });
-        const svcsRaw = await svcsRes.json();
-        const svcs = Array.isArray(svcsRaw) ? svcsRaw : Object.values(svcsRaw);
-        const match = svcs.find((s) => String(s.ID ?? s.id) === service);
-        const instock = match ? Number(match.instock ?? 0) : 0;
-        const smspoolPriceUsd = match ? Number(match.price ?? 0) : 0;
+        // Prix betesim calculé en premier — ne dépend PAS de SMSpool
         const nameToUse = service_name || service;
         const sale_price_fcfa = computeSalePriceFcfa(nameToUse, country_name, country_short);
         const sale_price_coins = Math.ceil(sale_price_fcfa / 100);
+        // Stock SMSpool récupéré séparément — une erreur ici ne bloque plus le prix
+        let instock = 1;
+        let smspoolPriceUsd = 0;
+        try {
+          const params = new URLSearchParams({ key: apiKey, country });
+          const svcsRes = await fetch("https://api.smspool.net/service/retrieve_all_country", {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: params.toString(),
+            signal: AbortSignal.timeout(8000),
+          });
+          const svcsRaw = await svcsRes.json();
+          const svcs = Array.isArray(svcsRaw) ? svcsRaw : Object.values(svcsRaw);
+          const match = svcs.find((s) => String(s.ID ?? s.id) === service);
+          if (match) {
+            instock = Number(match.instock ?? 0);
+            smspoolPriceUsd = Number(match.price ?? 0);
+          }
+        } catch {
+          // API SMSpool indisponible ou timeout — on renvoie quand même le prix betesim
+        }
         result = [{ price: smspoolPriceUsd, instock, sale_price_fcfa, sale_price_coins }];
 
       } else if (action === "get_price") {
