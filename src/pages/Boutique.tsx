@@ -22,6 +22,7 @@ interface Country {
   name: string;
   short_name: string;
   region?: string;
+  instock?: number;
 }
 
 interface PriceInfo {
@@ -342,19 +343,20 @@ export default function Boutique() {
 
   useEffect(() => { loadServices(); }, [loadServices]);
 
-  // Sélection service → étape 2 : charger les pays disponibles
+  // Sélection service → étape 2 : charger les pays avec leur stock en temps réel
   const handleServiceSelect = async (service: Service) => {
     setSelectedService(service);
     setStep(2);
     setCountrySearch("");
     setLoadingCountries(true);
     try {
-      const raw = await callSmsPool({ action: "countries" });
+      const raw = await callSmsPool({ action: "countries_with_stock", service: service.id, service_name: service.name });
       const mapped: Country[] = raw.map((c: any) => ({
         id: String(c.id ?? c.ID ?? ""),
         name: String(c.name ?? ""),
         short_name: String(c.short_name ?? c.cc ?? ""),
         region: c.region ?? "",
+        instock: Number(c.instock ?? 0),
       }));
       setCountries(mapped);
     } catch (e: any) {
@@ -630,6 +632,18 @@ export default function Boutique() {
                           <span className="text-gray-900 font-semibold text-sm block truncate">{country.name}</span>
                           {country.region && <span className="text-gray-400 text-xs">{country.region}</span>}
                         </div>
+                        {/* Stock en temps réel par pays */}
+                        {country.instock !== undefined && (
+                          country.instock > 0 ? (
+                            <span className="shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full bg-green-100 text-green-600">
+                              {country.instock} dispo
+                            </span>
+                          ) : (
+                            <span className="shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-400">
+                              Rupture
+                            </span>
+                          )
+                        )}
                         <ChevronRight className="w-4 h-4 text-gray-300 group-hover:text-orange-400 shrink-0 transition-colors" />
                       </button>
                     ))}

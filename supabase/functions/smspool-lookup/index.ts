@@ -187,6 +187,54 @@
         }
         result = results;
 
+      } else if (action === "countries_with_stock") {
+        // Lit directement depuis la table cache DB — instantané
+        if (!service) throw new Error("service requis");
+
+        const supaUrl = Deno.env.get("SUPABASE_URL");
+        const supaKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+        if (!supaUrl || !supaKey) throw new Error("Variables Supabase manquantes");
+
+        const dbRes = await fetch(
+          `${supaUrl}/rest/v1/smspool_stock_cache?service_id=eq.${encodeURIComponent(service)}&select=country_id,country_name,country_short,region,instock&order=instock.desc`,
+          {
+            headers: {
+              "Authorization": "Bearer " + supaKey,
+              "apikey": supaKey,
+            },
+            signal: AbortSignal.timeout(8000),
+          }
+        );
+        if (!dbRes.ok) throw new Error("Erreur lecture DB: " + await dbRes.text());
+        const rows = await dbRes.json();
+
+        if (!rows.length) {
+          // Cache vide : fallback live SMSpool pour ce service
+          const countriesRes = await fetch("https://api.smspool.net/country/retrieve_all", {
+            headers: { Authorization: "Bearer " + apiKey },
+            signal: AbortSignal.timeout(10000),
+          });
+          const countriesRaw = await countriesRes.json();
+          const allCountries = (Array.isArray(countriesRaw) ? countriesRaw : Object.values(countriesRaw))
+            .map((c: any) => ({ id: String(c.ID ?? c.id ?? ""), name: c.name ?? "", short_name: c.short_name ?? c.cc ?? "", region: c.region ?? "", instock: 0 }))
+            .filter((c) => c.id && c.name);
+          const pinned = allCountries.filter((c) => PINNED_IDS.has(c.id)).sort((a, b) => a.name.localeCompare(b.name));
+          const rest   = allCountries.filter((c) => !PINNED_IDS.has(c.id)).sort((a, b) => a.name.localeCompare(b.name));
+          result = [...pinned, ...rest];
+        } else {
+          // Données depuis le cache DB
+          const mapped = rows.map((r: any) => ({
+            id:         r.country_id,
+            name:       r.country_name,
+            short_name: r.country_short,
+            region:     r.region,
+            instock:    Number(r.instock ?? 0),
+          }));
+          const pinned = mapped.filter((c: any) => PINNED_IDS.has(c.id)).sort((a: any, b: any) => b.instock - a.instock || a.name.localeCompare(b.name));
+          const rest   = mapped.filter((c: any) => !PINNED_IDS.has(c.id)).sort((a: any, b: any) => b.instock - a.instock || a.name.localeCompare(b.name));
+          result = [...pinned, ...rest];
+        }
+
       } else {
         throw new Error("Action inconnue: " + action);
       }
