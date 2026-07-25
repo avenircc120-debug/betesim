@@ -26,7 +26,6 @@ interface Country {
 
 interface PriceInfo {
   instock: number;
-  price: number;
   sale_price_coins: number;
 }
 
@@ -383,7 +382,7 @@ export default function Boutique() {
       });
       if (raw.length > 0) {
         const info = raw[0];
-        setPriceInfo({ instock: Number(info.instock ?? 0), price: Number(info.price ?? 0), sale_price_coins: Number(info.sale_price_coins ?? 0) });
+        setPriceInfo({ instock: Number(info.instock ?? 0), sale_price_coins: Number(info.sale_price_coins ?? 0) });
       } else {
         setPriceInfo(null);
       }
