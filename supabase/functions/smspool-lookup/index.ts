@@ -154,7 +154,7 @@
         } catch {
           // API SMSpool indisponible ou timeout — on renvoie quand même le prix betesim
         }
-        result = [{ price: smspoolPriceUsd, instock, sale_price_fcfa, sale_price_coins }];
+        result = [{ instock, sale_price_coins }];
 
       } else if (action === "get_price") {
         if (!country || !service) throw new Error("country et service requis");
@@ -162,7 +162,7 @@
           "https://api.smspool.net/request/price?key=" + apiKey + "&country=" + country + "&service=" + service
         );
         const raw = await res.json();
-        result = { price: Number(raw.price ?? 0), high_price: Number(raw.high_price ?? 0), success_rate: Number(raw.success_rate ?? 0) };
+        result = { available: Number(raw.price ?? 0) > 0 };
 
       } else if (action === "bulk_prices") {
         if (!pairs.length) throw new Error("pairs requis");
@@ -178,7 +178,7 @@
               );
               const raw = await res.json();
               if (raw.price == null) return null;
-              return { country_id: p.country, service_id: p.service, price: Number(raw.price), high_price: Number(raw.high_price ?? raw.price), success_rate: Number(raw.success_rate ?? 0) };
+              return { country_id: p.country, service_id: p.service, available: Number(raw.price ?? 0) > 0 };
             } catch { return null; }
           }));
           results.push(...fetched.filter(Boolean));
