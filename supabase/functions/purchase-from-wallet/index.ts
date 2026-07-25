@@ -63,7 +63,15 @@ async function deliverValidNumber(service: string, apiKey: string, country: stri
   let attempts = 0;
   while (attempts < MAX_ATTEMPTS) {
     attempts++;
-    const data = await smspoolPost("/purchase/sms/", { country, service }, apiKey);
+    let data: any;
+    try {
+      data = await smspoolPost("/purchase/sms/", { country, service }, apiKey);
+    } catch (err: any) {
+      console.error(`Attempt ${attempts} SMSPool error:`, err.message);
+      if (attempts >= MAX_ATTEMPTS) throw new Error(`${service} non disponible pour ce pays. Choisissez un autre pays.`);
+      await new Promise((r) => setTimeout(r, 2000));
+      continue;
+    }
     if (!data.success || !data.number) {
       if (attempts >= MAX_ATTEMPTS) throw new Error(data.message ?? "Aucun numéro disponible");
       await new Promise((r) => setTimeout(r, 2000));
