@@ -344,7 +344,37 @@ export default function Boutique() {
 
   useEffect(() => { loadServices(); }, [loadServices]);
 
-  // Sélection service → étape 2 : charger les pays (rapide), stock vient ensuite
+  // Refresh automatique du stock toutes les 30s quand on est à l'étape 2
+  useEffect(() => {
+    if (step !== 2 || !selectedService) return;
+
+    const refreshStock = async () => {
+      try {
+        const raw = await callSmsPool({
+          action: "countries_with_stock",
+          service: selectedService.id,
+        });
+        setCountries((prev) => {
+          // Construire un map id → instock depuis la réponse fraîche
+          const freshMap: Record<string, number> = {};
+          for (const c of raw as any[]) {
+            freshMap[String(c.id ?? c.ID ?? "")] = Number(c.instock ?? -1);
+          }
+          // Mettre à jour uniquement instock sans changer l'ordre ni les autres champs
+          return prev.map((c) =>
+            freshMap[c.id] !== undefined
+              ? { ...c, instock: freshMap[c.id] }
+              : c
+          );
+        });
+      } catch { /* silencieux — on garde les valeurs existantes */ }
+    };
+
+    const interval = setInterval(refreshStock, 30_000);
+    return () => clearInterval(interval);
+  }, [step, selectedService]);
+
+  // Sélection service → étape 2 : pays + stock réel en 2 appels parallèles (1 seul appel edge)
   const handleServiceSelect = async (service: Service) => {
     setSelectedService(service);
     setStep(2);
@@ -352,12 +382,16 @@ export default function Boutique() {
     setStockMap({});
     setLoadingCountries(true);
     try {
-      const raw = await callSmsPool({ action: "countries" });
+      const raw = await callSmsPool({
+        action: "countries_with_stock",
+        service: service.id,
+      });
       const mapped: Country[] = raw.map((c: any) => ({
         id:         String(c.id ?? c.ID ?? ""),
         name:       String(c.name ?? ""),
         short_name: String(c.short_name ?? c.cc ?? ""),
         region:     c.region ?? "",
+        instock:    Number(c.instock ?? -1),
       }));
       setCountries(mapped);
     } catch (e: any) {
@@ -367,41 +401,6 @@ export default function Boutique() {
       setLoadingCountries(false);
     }
   };
-
-  // Chargement du stock en arrière-plan : batches de 8 pays, 1 appel edge par batch
-  useEffect(() => {
-    if (!selectedService || countries.length === 0 || step !== 2) return;
-    let cancelled = false;
-
-    const loadStock = async () => {
-      const BATCH = 8;
-      for (let i = 0; i < countries.length; i += BATCH) {
-        if (cancelled) break;
-        const batch = countries.slice(i, i + BATCH);
-        const ids = batch.map((c) => c.id).join(",");
-        try {
-          const raw = await callSmsPool({
-            action: "stock_batch",
-            service: selectedService.id,
-            country_ids: ids,
-          });
-          if (cancelled) break;
-          const updates: Record<string, number> = {};
-          for (const r of raw as any[]) {
-            updates[String(r.country_id)] = Number(r.instock ?? 0);
-          }
-          setStockMap((prev) => ({ ...prev, ...updates }));
-        } catch { /* batch silencieux */ }
-        // Pause entre batches pour ne pas saturer SMSpool
-        if (!cancelled && i + BATCH < countries.length) {
-          await new Promise((r) => setTimeout(r, 400));
-        }
-      }
-    };
-
-    loadStock();
-    return () => { cancelled = true; };
-  }, [countries, selectedService, step]);
 
   // Sélection pays → étape 3 : prix en temps réel pour ce service + pays
   const handleCountrySelect = async (country: Country) => {
@@ -668,19 +667,15 @@ export default function Boutique() {
                           <span className="text-gray-900 font-semibold text-sm block truncate">{country.name}</span>
                           {country.region && <span className="text-gray-400 text-xs">{country.region}</span>}
                         </div>
-                        {/* Stock en temps réel — chargé progressivement par stock_batch */}
-                        {stockMap[country.id] !== undefined ? (
-                          stockMap[country.id] > 0 ? (
-                            <span className="shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full bg-green-100 text-green-600">
-                              {stockMap[country.id]} dispo
-                            </span>
-                          ) : (
-                            <span className="shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-400">
-                              Rupture
-                            </span>
-                          )
+                        {/* Stock temps réel — mis à jour toutes les 30s */}
+                        {country.instock === -1 ? null : country.instock > 0 ? (
+                          <span className="shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full bg-green-100 text-green-600">
+                            {country.instock} dispo
+                          </span>
                         ) : (
-                          <span className="shrink-0 w-14 h-4 bg-gray-100 rounded-full animate-pulse" />
+                          <span className="shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-400">
+                            Rupture
+                          </span>
                         )}
                         <ChevronRight className="w-4 h-4 text-gray-300 group-hover:text-orange-400 shrink-0 transition-colors" />
                       </button>
