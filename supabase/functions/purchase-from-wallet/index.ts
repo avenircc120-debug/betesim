@@ -55,36 +55,53 @@ async function smspoolPost(endpoint: string, body: Record<string, string>, apiKe
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: params.toString(),
   });
-  if (!res.ok) throw new Error(`SMSPool error ${res.status}`);
-  return res.json();
+  const text = await res.text();
+  let json: any;
+  try { json = JSON.parse(text); } catch { throw new Error(`SMSPool réponse non-JSON (${res.status}): ${text.slice(0, 200)}`); }
+  if (!res.ok) throw new Error(`SMSPool HTTP ${res.status}: ${json?.message ?? text.slice(0, 200)}`);
+  return json;
 }
 
 async function deliverValidNumber(service: string, apiKey: string, country: string) {
+  let lastError = "";
   let attempts = 0;
+
+  // SMSPool accepte le nom en minuscules (ex: "netflix") OU en PascalCase ("Netflix")
+  // On essaie d'abord en minuscules qui est le format attendu par leur API
+  const serviceSlug = service.toLowerCase();
+
   while (attempts < MAX_ATTEMPTS) {
     attempts++;
     let data: any;
     try {
-      data = await smspoolPost("/purchase/sms/", { country, service }, apiKey);
+      data = await smspoolPost("/purchase/sms/", { country, service: serviceSlug }, apiKey);
     } catch (err: any) {
-      console.error(`Attempt ${attempts} SMSPool error:`, err.message);
-      if (attempts >= MAX_ATTEMPTS) throw new Error(`${service} non disponible pour ce pays. Choisissez un autre pays.`);
+      lastError = err.message;
+      console.error(`Attempt ${attempts} network error:`, lastError);
+      if (attempts >= MAX_ATTEMPTS) throw new Error(`Erreur réseau SMSPool (${lastError})`);
       await new Promise((r) => setTimeout(r, 2000));
       continue;
     }
+
+    // SMSPool renvoie success=1 en cas de succès
     if (!data.success || !data.number) {
-      if (attempts >= MAX_ATTEMPTS) throw new Error(data.message ?? "Aucun numéro disponible");
+      lastError = data.message ?? `success=${data.success}`;
+      console.error(`Attempt ${attempts} SMSPool rejected:`, lastError, JSON.stringify(data));
+      if (attempts >= MAX_ATTEMPTS) throw new Error(`SMSPool: ${lastError}`);
       await new Promise((r) => setTimeout(r, 2000));
       continue;
     }
+
+    // Vérification anti-ban immédiate
     const check = await smspoolPost("/sms/check/", { order_id: data.order_id }, apiKey);
     if (check.status === 6 || check.status === 3) {
       await smspoolPost("/request/cancel/", { order_id: data.order_id }, apiKey);
       continue;
     }
+
     return { orderId: data.order_id, number: data.number, country: data.country, attempts };
   }
-  throw new Error(`Aucun numéro valide après ${MAX_ATTEMPTS} tentatives`);
+  throw new Error(`Aucun numéro valide après ${MAX_ATTEMPTS} tentatives. Dernière erreur: ${lastError}`);
 }
 
 
