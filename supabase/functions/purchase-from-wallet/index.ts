@@ -145,21 +145,32 @@ async function deliverValidNumber(service: string, apiKey: string, country: stri
 
     const body = await req.json();
     const { user_id, service_id, country_id, service_name, country_name, country_short } = body;
-    const service = body.service ?? service_name?.toLowerCase() ?? "";
-    const country = body.country ?? country_id ?? "0";
     if (!user_id) throw new Error("user_id requis");
-    if (!service) throw new Error("service requis");
+    if (!service_name && !body.service) throw new Error("service_name requis");
+
+    // Résoudre le nom SMSPool du service :
+    // 1. Chercher dans SERVICE_MAP avec le nom reçu (priorité absolue)
+    // 2. Sinon utiliser le nom tel quel (jamais tomber sur un ID numérique)
+    const rawServiceName = service_name ?? body.service ?? "";
+    const smspoolService = SERVICE_MAP[rawServiceName.toLowerCase()] ?? rawServiceName;
+
+    // Identifiant interne betesim (pour les tables DB)
+    const service = rawServiceName.toLowerCase();
+
+    // Pays : préférer le code ISO court (ex: "fr") → plus fiable que l'ID numérique chez SMSPool
+    // country_short = "fr", country_id = ID numérique SMSPool, country = legacy
+    const orderCountry = country_short || body.country || country_id || "0";
+
+    if (!smspoolService || /^\d+$/.test(smspoolService)) {
+      throw new Error(`Impossible de résoudre le service SMSPool pour "${rawServiceName}". Réessayez.`);
+    }
 
     // Prix dynamique selon les règles tarifaires betesim
     const saleFcfa = computeSalePriceFcfa_PW(
-      service_name || service,
-      country_name || country
+      rawServiceName,
+      country_name || orderCountry
     );
     const PRICE = Math.ceil(saleFcfa / 100); // 1 Coin = 100 FCFA
-    const orderCountry = country_id || country || "0";
-    // SMSPool /purchase/sms/ attend le NOM du service (ex: "Netflix"), PAS l'ID numérique
-    // service_id est l'ID numérique SMSPool (ex: "303") → inutilisable ici
-    const smspoolService = SERVICE_MAP[String(service_name ?? service).toLowerCase()] ?? String(service_name ?? service);
 
     // Vérifier le solde wallet
     const { data: profile, error: profErr } = await supabase
