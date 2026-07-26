@@ -64,6 +64,7 @@
       let service_name = "";
       let country_name = "";
       let country_short = "";
+      let country_ids = "";
       let pairs = [];
 
       if (req.method === "POST") {
@@ -75,6 +76,7 @@
           service_name  = body.service_name  ?? url.searchParams.get("service_name")  ?? "";
           country_name  = body.country_name  ?? url.searchParams.get("country_name")  ?? "";
           country_short = body.country_short ?? url.searchParams.get("country_short") ?? "";
+          country_ids   = body.country_ids   ?? url.searchParams.get("country_ids")   ?? "";
           pairs         = body.pairs         ?? [];
         } catch {
           action        = url.searchParams.get("action")        ?? "countries";
@@ -83,6 +85,7 @@
           service_name  = url.searchParams.get("service_name")  ?? "";
           country_name  = url.searchParams.get("country_name")  ?? "";
           country_short = url.searchParams.get("country_short") ?? "";
+          country_ids   = url.searchParams.get("country_ids")   ?? "";
         }
       } else {
         action        = url.searchParams.get("action")        ?? "countries";
@@ -91,6 +94,7 @@
         service_name  = url.searchParams.get("service_name")  ?? "";
         country_name  = url.searchParams.get("country_name")  ?? "";
         country_short = url.searchParams.get("country_short") ?? "";
+        country_ids   = url.searchParams.get("country_ids")   ?? "";
       }
 
       let result = [];
@@ -189,64 +193,32 @@
         }
         result = results;
 
-      } else if (action === "countries_with_stock") {
-        // UN SEUL appel SMSpool → tous les pays + stocks pour ce service
+      } else if (action === "stock_batch") {
+        // Retourne le stock réel pour un lot de pays + un service donné
+        // country_ids = IDs séparés par virgule, ex: "1,2,23,68"
         if (!service) throw new Error("service requis");
+        if (!country_ids) throw new Error("country_ids requis");
 
-        // Appel 1 : liste de tous les pays (pour avoir noms, drapeaux, régions)
-        // Appel 2 : tous les pays disponibles pour ce service avec leur stock
-        const [countriesRes, serviceCountriesRes] = await Promise.all([
-          fetch("https://api.smspool.net/country/retrieve_all", {
-            headers: { Authorization: "Bearer " + apiKey },
-            signal: AbortSignal.timeout(12000),
-          }),
-          fetch("https://api.smspool.net/service/retrieve_all_country", {
-            method: "POST",
-            headers: { "Content-Type": "application/x-www-form-urlencoded" },
-            body: new URLSearchParams({ key: apiKey, country: "0", service }).toString(),
-            signal: AbortSignal.timeout(12000),
-          }).catch(() => null),
-        ]);
-
-        const countriesRaw = await countriesRes.json();
-        const allCountries: Array<{ id: string; name: string; short_name: string; region: string }> =
-          (Array.isArray(countriesRaw) ? countriesRaw : Object.values(countriesRaw))
-            .map((c: any) => ({
-              id:         String(c.ID ?? c.id ?? ""),
-              name:       String(c.name ?? ""),
-              short_name: String(c.short_name ?? c.cc ?? ""),
-              region:     String(c.region ?? ""),
-            }))
-            .filter((c) => c.id && c.name);
-
-        // Essayer l'endpoint dédié country/retrieve_all_service (1 appel → tous les pays du service)
-        let stockMap: Record<string, number> = {};
-        try {
-          const svcCountriesRes = await fetch("https://api.smspool.net/country/retrieve_all_service", {
-            method: "POST",
-            headers: { "Content-Type": "application/x-www-form-urlencoded" },
-            body: new URLSearchParams({ key: apiKey, service }).toString(),
-            signal: AbortSignal.timeout(12000),
-          });
-          if (svcCountriesRes.ok) {
-            const raw = await svcCountriesRes.json();
-            const arr = Array.isArray(raw) ? raw : Object.values(raw);
-            for (const entry of arr) {
-              const cid = String(entry.ID ?? entry.id ?? entry.country_id ?? "");
-              if (cid) stockMap[cid] = Number(entry.instock ?? entry.amount ?? 0);
-            }
-          }
-        } catch { /* ignoré */ }
-
-        // Si l'endpoint dédié n'a rien retourné, on ignore le stock (on n'affiche rien plutôt que faux)
-        const withStock = allCountries.map((c) => ({
-          ...c,
-          instock: stockMap[c.id] ?? -1, // -1 = non chargé
-        }));
-
-        const pinned = withStock.filter((c) => PINNED_IDS.has(c.id)).sort((a, b) => b.instock - a.instock || a.name.localeCompare(b.name));
-        const rest   = withStock.filter((c) => !PINNED_IDS.has(c.id)).sort((a, b) => b.instock - a.instock || a.name.localeCompare(b.name));
-        result = [...pinned, ...rest];
+        const ids = country_ids.split(",").map((s) => s.trim()).filter(Boolean);
+        const settled = await Promise.allSettled(
+          ids.map(async (cid) => {
+            const params = new URLSearchParams({ key: apiKey, country: cid });
+            const res = await fetch("https://api.smspool.net/service/retrieve_all_country", {
+              method: "POST",
+              headers: { "Content-Type": "application/x-www-form-urlencoded" },
+              body: params.toString(),
+              signal: AbortSignal.timeout(12000),
+            });
+            if (!res.ok) return { country_id: cid, instock: 0 };
+            const raw = await res.json();
+            const svcs = Array.isArray(raw) ? raw : Object.values(raw);
+            const match = svcs.find((s: any) => String(s.ID ?? s.id ?? "") === String(service));
+            return { country_id: cid, instock: match ? Number(match.instock ?? 0) : 0 };
+          })
+        );
+        result = settled
+          .filter((r) => r.status === "fulfilled")
+          .map((r: any) => r.value);
 
       } else {
         throw new Error("Action inconnue: " + action);

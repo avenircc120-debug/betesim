@@ -344,7 +344,7 @@ export default function Boutique() {
 
   useEffect(() => { loadServices(); }, [loadServices]);
 
-  // Sélection service → étape 2 : UN seul appel qui charge pays + stock en même temps
+  // Sélection service → étape 2 : charger les pays (rapide), stock vient ensuite
   const handleServiceSelect = async (service: Service) => {
     setSelectedService(service);
     setStep(2);
@@ -352,17 +352,12 @@ export default function Boutique() {
     setStockMap({});
     setLoadingCountries(true);
     try {
-      const raw = await callSmsPool({
-        action: "countries_with_stock",
-        service: service.id,
-        service_name: service.name,
-      });
+      const raw = await callSmsPool({ action: "countries" });
       const mapped: Country[] = raw.map((c: any) => ({
         id:         String(c.id ?? c.ID ?? ""),
         name:       String(c.name ?? ""),
         short_name: String(c.short_name ?? c.cc ?? ""),
         region:     c.region ?? "",
-        instock:    Number(c.instock ?? -1),
       }));
       setCountries(mapped);
     } catch (e: any) {
@@ -372,6 +367,41 @@ export default function Boutique() {
       setLoadingCountries(false);
     }
   };
+
+  // Chargement du stock en arrière-plan : batches de 8 pays, 1 appel edge par batch
+  useEffect(() => {
+    if (!selectedService || countries.length === 0 || step !== 2) return;
+    let cancelled = false;
+
+    const loadStock = async () => {
+      const BATCH = 8;
+      for (let i = 0; i < countries.length; i += BATCH) {
+        if (cancelled) break;
+        const batch = countries.slice(i, i + BATCH);
+        const ids = batch.map((c) => c.id).join(",");
+        try {
+          const raw = await callSmsPool({
+            action: "stock_batch",
+            service: selectedService.id,
+            country_ids: ids,
+          });
+          if (cancelled) break;
+          const updates: Record<string, number> = {};
+          for (const r of raw as any[]) {
+            updates[String(r.country_id)] = Number(r.instock ?? 0);
+          }
+          setStockMap((prev) => ({ ...prev, ...updates }));
+        } catch { /* batch silencieux */ }
+        // Pause entre batches pour ne pas saturer SMSpool
+        if (!cancelled && i + BATCH < countries.length) {
+          await new Promise((r) => setTimeout(r, 400));
+        }
+      }
+    };
+
+    loadStock();
+    return () => { cancelled = true; };
+  }, [countries, selectedService, step]);
 
   // Sélection pays → étape 3 : prix en temps réel pour ce service + pays
   const handleCountrySelect = async (country: Country) => {
@@ -638,17 +668,19 @@ export default function Boutique() {
                           <span className="text-gray-900 font-semibold text-sm block truncate">{country.name}</span>
                           {country.region && <span className="text-gray-400 text-xs">{country.region}</span>}
                         </div>
-                        {/* Stock en temps réel — chargé en 1 appel avec les pays */}
-                        {country.instock !== undefined && country.instock >= 0 && (
-                          country.instock > 0 ? (
+                        {/* Stock en temps réel — chargé progressivement par stock_batch */}
+                        {stockMap[country.id] !== undefined ? (
+                          stockMap[country.id] > 0 ? (
                             <span className="shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full bg-green-100 text-green-600">
-                              {country.instock} dispo
+                              {stockMap[country.id]} dispo
                             </span>
                           ) : (
                             <span className="shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-400">
                               Rupture
                             </span>
                           )
+                        ) : (
+                          <span className="shrink-0 w-14 h-4 bg-gray-100 rounded-full animate-pulse" />
                         )}
                         <ChevronRight className="w-4 h-4 text-gray-300 group-hover:text-orange-400 shrink-0 transition-colors" />
                       </button>
