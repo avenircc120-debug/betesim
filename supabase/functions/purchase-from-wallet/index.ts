@@ -157,8 +157,9 @@ async function deliverValidNumber(service: string, apiKey: string, country: stri
     );
     const PRICE = Math.ceil(saleFcfa / 100); // 1 Coin = 100 FCFA
     const orderCountry = country_id || country || "0";
-    // Priorité : service_id numérique SMSPool (fiable) > nom mappé > nom brut
-    const smspoolService = service_id || (SERVICE_MAP[String(service).toLowerCase()] ?? service);
+    // SMSPool /purchase/sms/ attend le NOM du service (ex: "Netflix"), PAS l'ID numérique
+    // service_id est l'ID numérique SMSPool (ex: "303") → inutilisable ici
+    const smspoolService = SERVICE_MAP[String(service_name ?? service).toLowerCase()] ?? String(service_name ?? service);
 
     // Vérifier le solde wallet
     const { data: profile, error: profErr } = await supabase
