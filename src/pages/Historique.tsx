@@ -69,7 +69,6 @@ function VerifyModal({ orderId, number, service, onClose }: VerifyModalProps) {
     if (timerRef.current) clearInterval(timerRef.current);
   }, []);
 
-  // ── Supabase Realtime: listen for webhook updates ─────────────────────────
   useEffect(() => {
     if (!user) return;
     const channel = supabase
@@ -93,7 +92,6 @@ function VerifyModal({ orderId, number, service, onClose }: VerifyModalProps) {
     return () => { supabase.removeChannel(channel); };
   }, [orderId, user, handleReceived]);
 
-  // ── Fallback: poll check-sms Edge Function every 7s ──────────────────────
   const pollOnce = useCallback(async () => {
     if (doneRef.current || !user) return;
     try {
@@ -108,7 +106,7 @@ function VerifyModal({ orderId, number, service, onClose }: VerifyModalProps) {
           },
         }
       );
-      if (!res.ok) return; // edge fn error — keep polling silently
+      if (!res.ok) return;
       const data = await res.json();
       if (data.status === "received" && data.code) {
         handleReceived(data.code, data.full_sms ?? data.code);
@@ -185,7 +183,6 @@ function VerifyModal({ orderId, number, service, onClose }: VerifyModalProps) {
         transition={{ type: "spring", damping: 25, stiffness: 300 }}
         className="w-full max-w-md bg-white rounded-t-3xl p-6 pb-10 shadow-2xl"
       >
-        {/* Header */}
         <div className="flex items-center justify-between mb-5">
           <div>
             <p className="text-xs text-gray-400 uppercase tracking-wider font-semibold">Vérification</p>
@@ -199,7 +196,6 @@ function VerifyModal({ orderId, number, service, onClose }: VerifyModalProps) {
           </button>
         </div>
 
-        {/* Numéro */}
         <div className="bg-gray-50 rounded-2xl p-4 mb-5 flex items-center justify-between">
           <div>
             <p className="text-xs text-gray-400 mb-0.5">Votre numéro</p>
@@ -216,14 +212,11 @@ function VerifyModal({ orderId, number, service, onClose }: VerifyModalProps) {
           </button>
         </div>
 
-        {/* Instructions */}
         <p className="text-sm text-gray-500 mb-5 text-center">
           Entrez ce numéro dans <span className="font-semibold text-gray-700">{serviceName}</span>, puis revenez ici pour recevoir votre code de vérification.
         </p>
 
-        {/* État */}
         <AnimatePresence mode="wait">
-          {/* Polling */}
           {state === "polling" && (
             <motion.div
               key="polling"
@@ -244,7 +237,6 @@ function VerifyModal({ orderId, number, service, onClose }: VerifyModalProps) {
               <p className="text-gray-400 text-xs text-center max-w-xs">
                 Le code apparaît automatiquement dès que {serviceName} envoie le SMS. Patientez sans fermer cette fenêtre.
               </p>
-              {/* Progress bar */}
               <div className="w-full max-w-xs h-1 bg-gray-100 rounded-full overflow-hidden">
                 <div
                   className="h-full bg-orange-400 rounded-full transition-all duration-1000"
@@ -254,7 +246,6 @@ function VerifyModal({ orderId, number, service, onClose }: VerifyModalProps) {
             </motion.div>
           )}
 
-          {/* Code reçu */}
           {state === "received" && code && (
             <motion.div
               key="received"
@@ -299,7 +290,6 @@ function VerifyModal({ orderId, number, service, onClose }: VerifyModalProps) {
             </motion.div>
           )}
 
-          {/* Expiré */}
           {state === "expired" && (
             <motion.div
               key="expired"
@@ -322,7 +312,6 @@ function VerifyModal({ orderId, number, service, onClose }: VerifyModalProps) {
             </motion.div>
           )}
 
-          {/* Timeout 3min */}
           {state === "error" && (
             <motion.div
               key="error"
@@ -366,6 +355,24 @@ const Historique = () => {
   } | null>(null);
   const [refundingId, setRefundingId] = useState<string | null>(null);
 
+  const { data: numbers = [], isLoading, refetch } = useQuery({
+    queryKey: ["subscriptions", user?.id, filter],
+    queryFn: async () => {
+      if (!user) return [];
+      let q = supabase
+        .from("subscriptions")
+        .select("id, number, country, service, smspool_order_id, status, last_sms_code, sms_received_at, expires_at, created_at")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false });
+      const st = statusMap[filter];
+      if (st) q = q.eq("status", st);
+      const { data } = await q;
+      return data ?? [];
+    },
+    enabled: !!user,
+    refetchInterval: 30_000,
+  });
+
   const handleRefund = async (subscriptionId: string) => {
     if (!user) return;
     setRefundingId(subscriptionId);
@@ -381,9 +388,8 @@ const Historique = () => {
       toast.error(err.message ?? "Impossible de rembourser ce numéro");
     } finally {
       setRefundingId(null);
-    }    enabled: !!user,
-    refetchInterval: 30_000,
-  });
+    }
+  };
 
   const filtered = numbers.filter((n: any) => {
     if (!search.trim()) return true;
@@ -424,7 +430,6 @@ const Historique = () => {
 
   return (
     <div className="min-h-screen bg-gray-50 pb-24">
-      {/* Header */}
       <div className="bg-white px-4 pt-12 pb-4 flex items-center justify-between shadow-sm">
         <div className="flex items-center gap-3">
           <button onClick={() => setDrawerOpen(true)} className="text-gray-700">
@@ -455,7 +460,6 @@ const Historique = () => {
         </div>
       </div>
 
-      {/* Non connecté */}
       {loading ? null : !user ? (
         <motion.div
           initial={{ opacity: 0, scale: 0.97 }}
@@ -478,15 +482,14 @@ const Historique = () => {
         </motion.div>
       ) : (
         <div className="px-4 pt-4 space-y-4">
-          {/* Filters */}
           <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
             {FILTERS.map((f) => (
               <button
                 key={f}
                 onClick={() => setFilter(f)}
-                className={`flex-shrink-0 px-4 py-1.5 rounded-full text-sm font-semibold transition-all ${
+                className={`shrink-0 rounded-full px-4 py-2 text-sm font-semibold transition-colors ${
                   filter === f
-                    ? "bg-orange-500 text-white shadow-sm shadow-orange-200"
+                    ? "bg-orange-500 text-white"
                     : "bg-white text-gray-500 border border-gray-200"
                 }`}
               >
@@ -495,189 +498,173 @@ const Historique = () => {
             ))}
           </div>
 
-          {/* Search */}
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
             <input
-              type="text"
-              placeholder="Rechercher…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full pl-9 pr-4 py-2.5 rounded-xl bg-white border border-gray-200 text-sm text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-orange-300"
+              placeholder="Rechercher..."
+              className="w-full rounded-xl bg-white border border-gray-200 py-3 pl-10 pr-4 text-sm outline-none focus:border-orange-300"
             />
           </div>
 
-          {/* Loading */}
-          {isLoading && (
-            <div className="flex justify-center pt-12">
-              <Loader2 className="w-7 h-7 text-orange-400 animate-spin" />
+          {isLoading ? (
+            <div className="flex justify-center py-16">
+              <Loader2 className="w-6 h-6 text-orange-400 animate-spin" />
             </div>
-          )}
-
-          {/* Empty */}
-          {!isLoading && filtered.length === 0 && (
+          ) : filtered.length === 0 ? (
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
-              className="flex flex-col items-center gap-4 pt-16 text-center"
+              className="flex flex-col items-center gap-4 pt-16 px-6 text-center"
             >
-              <div className="w-16 h-16 rounded-2xl bg-orange-50 flex items-center justify-center">
-                <Inbox className="w-8 h-8 text-orange-300" />
+              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-orange-50">
+                <Inbox className="h-8 w-8 text-orange-300" />
               </div>
-              <p className="text-base font-medium text-gray-500">Aucun numéro trouvé</p>
+              <p className="text-gray-500 text-sm">Aucun numéro pour l'instant</p>
               <button
-                onClick={() => navigate("/accueil")}
-                className="rounded-full bg-orange-500 px-8 py-3 text-sm font-bold text-white shadow-md active:scale-95 transition-transform"
+                onClick={() => navigate("/")}
+                className="rounded-full bg-orange-500 px-6 py-2.5 text-sm font-bold text-white active:scale-95 transition-transform"
               >
                 Obtenir un numéro
               </button>
             </motion.div>
-          )}
+          ) : (
+            <AnimatePresence>
+              {filtered.map((num: any, i: number) => {
+                const serviceName =
+                  num.service
+                    ? num.service.charAt(0).toUpperCase() + num.service.slice(1).toLowerCase()
+                    : "Service";
+                const isActive = num.status === "active";
+                const hasCode = !!num.last_sms_code;
 
-          {/* Liste */}
-          <AnimatePresence>
-            {filtered.map((num: any, i: number) => {
-              const serviceName =
-                num.service
-                  ? num.service.charAt(0).toUpperCase() + num.service.slice(1).toLowerCase()
-                  : "Service";
-              const isActive = num.status === "active";
-              const hasCode = !!num.last_sms_code;
-
-              return (
-                <motion.div
-                  key={num.id}
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: i * 0.04 }}
-                  className="rounded-2xl bg-white p-4 shadow-sm border border-gray-100"
-                >
-                  {/* Row 1: icon + info + badge */}
-                  <div className="flex items-start gap-3">
-                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-orange-50">
-                      {getServiceIcon(num.service ?? "")}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-semibold text-gray-900">{serviceName}</p>
-                      <p className="text-sm font-mono text-orange-500 mt-0.5 tracking-wide">{num.number}</p>
-                      <p className="text-xs text-gray-400 mt-0.5">{num.country}</p>
-                    </div>
-                    <span
-                      className={`shrink-0 rounded-full px-3 py-1 text-xs font-bold ${
-                        isActive
-                          ? "bg-green-100 text-green-600"
-                          : num.status === "pending"
-                          ? "bg-yellow-100 text-yellow-600"
-                          : "bg-gray-100 text-gray-500"
-                      }`}
-                    >
-                      {isActive ? "Actif" : num.status === "pending" ? "En attente" : "Expiré"}
-                    </span>
-                  </div>
-
-                  {/* Row 2: expiry + code received badge */}
-                  {isActive && (
-                    <div className="flex items-center justify-between mt-3 px-0.5">
-                      <p className="text-xs text-gray-400">
-                        {num.expires_at ? formatExpiry(num.expires_at) : ""}
-                      </p>
-                      {hasCode && (
-                        <span className="text-xs text-green-600 font-semibold flex items-center gap-1">
-                          <CheckCheck className="w-3.5 h-3.5" /> Code reçu
-                        </span>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Code affiché si déjà reçu */}
-                  {hasCode && num.last_sms_code && (
-                    <motion.div
-                      initial={{ opacity: 0, height: 0 }}
-                      animate={{ opacity: 1, height: "auto" }}
-                      className="mt-3 bg-gradient-to-r from-orange-50 to-amber-50 border border-orange-200 rounded-xl p-3 flex items-center justify-between"
-                    >
-                      <div>
-                        <p className="text-xs text-gray-400 mb-0.5">Code de vérification</p>
-                        <p className="font-mono text-2xl font-black text-orange-600 tracking-widest">
-                          {num.last_sms_code}
-                        </p>
+                return (
+                  <motion.div
+                    key={num.id}
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: i * 0.04 }}
+                    className="rounded-2xl bg-white p-4 shadow-sm border border-gray-100"
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-orange-50">
+                        {getServiceIcon(num.service ?? "")}
                       </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-semibold text-gray-900">{serviceName}</p>
+                        <p className="text-sm font-mono text-orange-500 mt-0.5 tracking-wide">{num.number}</p>
+                        <p className="text-xs text-gray-400 mt-0.5">{num.country}</p>
+                      </div>
+                      <span
+                        className={`shrink-0 rounded-full px-3 py-1 text-xs font-bold ${
+                          isActive
+                            ? "bg-green-100 text-green-600"
+                            : num.status === "pending"
+                            ? "bg-yellow-100 text-yellow-600"
+                            : "bg-gray-100 text-gray-500"
+                        }`}
+                      >
+                        {isActive ? "Actif" : num.status === "pending" ? "En attente" : "Expiré"}
+                      </span>
+                    </div>
+
+                    {isActive && (
+                      <div className="flex items-center justify-between mt-3 px-0.5">
+                        <p className="text-xs text-gray-400">
+                          {num.expires_at ? formatExpiry(num.expires_at) : ""}
+                        </p>
+                        {hasCode && (
+                          <span className="text-xs text-green-600 font-semibold flex items-center gap-1">
+                            <CheckCheck className="w-3.5 h-3.5" /> Code reçu
+                          </span>
+                        )}
+                      </div>
+                    )}
+
+                    {hasCode && num.last_sms_code && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: "auto" }}
+                        className="mt-3 bg-gradient-to-r from-orange-50 to-amber-50 border border-orange-200 rounded-xl p-3 flex items-center justify-between"
+                      >
+                        <div>
+                          <p className="text-xs text-gray-400 mb-0.5">Code de vérification</p>
+                          <p className="font-mono text-2xl font-black text-orange-600 tracking-widest">
+                            {num.last_sms_code}
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => {
+                            navigator.clipboard.writeText(num.last_sms_code);
+                            toast.success("Code copié !");
+                          }}
+                          className="w-9 h-9 flex items-center justify-center rounded-full bg-white border border-orange-200 text-orange-500 active:scale-95 transition-transform shadow-sm"
+                        >
+                          <Copy className="w-4 h-4" />
+                        </button>
+                      </motion.div>
+                    )}
+
+                    {isActive && num.smspool_order_id && !hasCode && (
+                      <div className="mt-3 flex items-center gap-2">
+                        <button
+                          onClick={() =>
+                            setVerifyingOrder({
+                              orderId: num.smspool_order_id,
+                              number: num.number,
+                              service: num.service ?? "service",
+                            })
+                          }
+                          className="flex-1 flex items-center justify-center gap-2 bg-orange-500 hover:bg-orange-600 active:bg-orange-700 text-white font-bold py-3 rounded-xl transition-colors shadow-sm shadow-orange-200 text-sm"
+                        >
+                          <ShieldCheck className="w-4 h-4" />
+                          Vérifier — recevoir le code SMS
+                        </button>
+                        <button
+                          onClick={() => handleRefund(num.id)}
+                          disabled={refundingId === num.id}
+                          className="shrink-0 flex items-center justify-center gap-1.5 bg-white border border-red-200 text-red-500 hover:bg-red-50 active:bg-red-100 font-bold py-3 px-3 rounded-xl transition-colors text-sm disabled:opacity-50"
+                        >
+                          {refundingId === num.id ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            "Rembourser"
+                          )}
+                        </button>
+                      </div>
+                    )}
+
+                    {isActive && num.smspool_order_id && hasCode && (
                       <button
                         onClick={() => {
-                          navigator.clipboard.writeText(num.last_sms_code);
-                          toast.success("Code copié !");
-                        }}
-                        className="w-9 h-9 flex items-center justify-center rounded-full bg-white border border-orange-200 text-orange-500 active:scale-95 transition-transform shadow-sm"
-                      >
-                        <Copy className="w-4 h-4" />
-                      </button>
-                    </motion.div>
-                  )}
-
-                  {/* Bouton Vérifier + Rembourser (actif + order id disponible) */}
-                  {isActive && num.smspool_order_id && !hasCode && (
-                    <div className="mt-3 flex items-center gap-2">
-                      <button
-                        onClick={() =>
                           setVerifyingOrder({
                             orderId: num.smspool_order_id,
                             number: num.number,
                             service: num.service ?? "service",
-                          })
-                        }
-                        className="flex-1 flex items-center justify-center gap-2 bg-orange-500 hover:bg-orange-600 active:bg-orange-700 text-white font-bold py-3 rounded-xl transition-colors shadow-sm shadow-orange-200 text-sm"
+                          });
+                        }}
+                        className="mt-2 w-full flex items-center justify-center gap-1.5 text-gray-400 text-xs font-medium py-1.5 active:scale-95 transition-transform"
                       >
-                        <ShieldCheck className="w-4 h-4" />
-                        Vérifier — recevoir le code SMS
+                        <RefreshCw className="w-3 h-3" />
+                        Attendre un nouveau code
                       </button>
-                      <button
-                        onClick={() => handleRefund(num.id)}
-                        disabled={refundingId === num.id}
-                        className="shrink-0 flex items-center justify-center gap-1.5 bg-white border border-red-200 text-red-500 hover:bg-red-50 active:bg-red-100 font-bold py-3 px-3 rounded-xl transition-colors text-sm disabled:opacity-50"
-                      >
-                        {refundingId === num.id ? (
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                        ) : (
-                          "Rembourser"
-                        )}
-                      </button>
-                    </div>
-                  )}
-
-                  {/* Revérifier si code déjà reçu */}
-                  {isActive && num.smspool_order_id && hasCode && (
-                    <button
-                      onClick={() => {
-                        setVerifyingOrder({
-                          orderId: num.smspool_order_id,
-                          number: num.number,
-                          service: num.service ?? "service",
-                        });
-                      }}
-                      className="mt-2 w-full flex items-center justify-center gap-1.5 text-gray-400 text-xs font-medium py-1.5 active:scale-95 transition-transform"
-                    >
-                      <RefreshCw className="w-3 h-3" />
-                      Attendre un nouveau code
-                    </button>
-                  )}
-                </motion.div>
-              );
-            })}
-          </AnimatePresence>
+                    )}
+                  </motion.div>
+                );
+              })}
+            </AnimatePresence>
+          )}
         </div>
       )}
 
-      {/* Verify Modal */}
       <AnimatePresence>
         {verifyingOrder && (
           <VerifyModal
             orderId={verifyingOrder.orderId}
             number={verifyingOrder.number}
             service={verifyingOrder.service}
-            onClose={() => {
-              setVerifyingOrder(null);
-              refetch();
-            }}
+            onClose={() => setVerifyingOrder(null)}
           />
         )}
       </AnimatePresence>
@@ -689,19 +676,3 @@ const Historique = () => {
 };
 
 export default Historique;
-  };
-
-  const { data: numbers = [], isLoading, refetch } = useQuery({
-    queryKey: ["subscriptions", user?.id, filter],
-    queryFn: async () => {
-      if (!user) return [];
-      let q = supabase
-        .from("subscriptions")
-        .select("id, number, country, service, smspool_order_id, status, last_sms_code, sms_received_at, expires_at, created_at")
-        .eq("user_id", user.id)
-        .order("created_at", { ascending: false });
-      const st = statusMap[filter];
-      if (st) q = q.eq("status", st);
-      const { data } = await q;
-      return data ?? [];
-    },
